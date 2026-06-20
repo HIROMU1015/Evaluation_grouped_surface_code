@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+artifacts/surface_code_cache/
+artifacts/implementation_visual_overview/
+Quration_QS18*.pdf

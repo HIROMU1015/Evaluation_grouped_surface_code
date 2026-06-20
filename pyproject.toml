@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "evaluation-grouped-surface-code"
+version = "0.1.0"
+requires-python = ">=3.11"
+
+# 依存は当面 requirements.txt のまま運用するなら、ここは空でもOK
+# dependencies = ["numpy", "scipy", ...]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+
+[tool.black]
+line-length = 88
+
+[tool.isort]
+profile = "black"
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_ignores = true
+warn_return_any = true
+disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = [
+  "openfermion.*",
+  "openfermionpyscf.*",
+  "qiskit_time_evolution.*",
+  "scipy",
+  "scipy.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_functions = "test_*"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::UserWarning",
+]
