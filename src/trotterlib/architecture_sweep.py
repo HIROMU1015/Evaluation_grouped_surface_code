@@ -538,6 +538,99 @@ def _format_report_delta(value: Any, baseline: Any) -> str:
     return f"{delta_text} ({sign}{percent:.2f}%)"
 
 
+def _pf_sort_key(row: Mapping[str, Any]) -> tuple[float, str]:
+    order = row.get("pf_order")
+    try:
+        order_value = float(order)
+    except (TypeError, ValueError):
+        order_value = float("inf")
+    return order_value, str(row.get("pf_label"))
+
+
+def _baseline_pf_row(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    for row in rows:
+        if row.get("pf_label") == "2nd":
+            return row
+    return rows[0] if rows else {}
+
+
+def _append_pf_comparison_report(lines: list[str], rows: list[dict[str, Any]]) -> None:
+    molecule_groups: dict[Any, list[dict[str, Any]]] = {}
+    for row in rows:
+        molecule_groups.setdefault(row.get("molecule"), []).append(row)
+
+    lines.extend(["## QPE-Scaled PF Comparison", ""])
+    for molecule, molecule_rows in molecule_groups.items():
+        case_groups: dict[Any, list[dict[str, Any]]] = {}
+        for row in molecule_rows:
+            case_groups.setdefault(row.get("case_name"), []).append(row)
+
+        table_rows: list[list[Any]] = []
+        for case_name, case_rows in case_groups.items():
+            sorted_rows = sorted(case_rows, key=_pf_sort_key)
+            baseline = _baseline_pf_row(sorted_rows)
+            for row in sorted_rows:
+                table_rows.append(
+                    [
+                        case_name,
+                        row.get("pf_label"),
+                        row.get("status"),
+                        row.get("qpe_action_count"),
+                        row.get("total_magic_state_count"),
+                        _format_report_delta(
+                            row.get("total_magic_state_count"),
+                            baseline.get("total_magic_state_count"),
+                        ),
+                        row.get("total_magic_state_depth"),
+                        _format_report_delta(
+                            row.get("total_magic_state_depth"),
+                            baseline.get("total_magic_state_depth"),
+                        ),
+                        _format_report_cell(
+                            row.get("total_runtime_with_topology"),
+                            row.get("total_runtime_with_topology_unavailable_reason"),
+                        ),
+                        _format_report_delta(
+                            row.get("total_runtime_with_topology"),
+                            baseline.get("total_runtime_with_topology"),
+                        ),
+                        _format_report_cell(
+                            row.get("total_qubit_volume"),
+                            row.get("total_qubit_volume_unavailable_reason"),
+                        ),
+                        _format_report_delta(
+                            row.get("total_qubit_volume"),
+                            baseline.get("total_qubit_volume"),
+                        ),
+                    ]
+                )
+
+        lines.extend(
+            [
+                f"### {molecule}",
+                "",
+                *_markdown_table(
+                    [
+                        "case",
+                        "PF",
+                        "status",
+                        "actions",
+                        "total magic count",
+                        "vs 2nd",
+                        "total magic depth",
+                        "vs 2nd",
+                        "total runtime topo",
+                        "vs 2nd",
+                        "total qubit volume",
+                        "vs 2nd",
+                    ],
+                    table_rows,
+                ),
+                "",
+            ]
+        )
+
+
 def _write_markdown_report(rows: list[dict[str, Any]], markdown_path: Path) -> None:
     success_count = sum(1 for row in rows if row.get("status") == "success")
     failed_count = sum(1 for row in rows if row.get("status") == "failed")
@@ -553,6 +646,8 @@ def _write_markdown_report(rows: list[dict[str, Any]], markdown_path: Path) -> N
         ),
         "",
     ]
+
+    _append_pf_comparison_report(lines, rows)
 
     groups: dict[tuple[Any, Any], list[dict[str, Any]]] = {}
     for row in rows:
