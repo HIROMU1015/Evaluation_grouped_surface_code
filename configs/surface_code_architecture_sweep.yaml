@@ -1,0 +1,63 @@
+targets:
+  molecules:
+    - H2
+  pf_labels:
+    - 2nd
+    - 4th(new_2)
+
+target_error: 0.00015936001019904
+rotation_precision:
+qret_path:
+
+defaults:
+  compile_mode: ftqc_compile_topology
+  topology: tutorial
+  machine_type: Dim2
+  magic_generation_period: 15
+  maximum_magic_state_stock:
+    policy: fixed
+    value: 10000
+  entanglement_generation_period: 100
+  maximum_entangled_state_stock: 10
+  reaction_time: 1
+  skip_compile_output: true
+
+qec:
+  physical_error_rate: 0.001
+  drop_rate: 0.1
+  code_cycle_time_sec: 0.000001
+  allowed_failure_prob: 0.01
+
+topologies:
+  tutorial:
+    enabled: true
+    path:
+  tutorial_from_quration_root:
+    enabled: false
+    path: ${QURATION_ROOT}/quration-core/examples/data/topology/tutorial.yaml
+
+architecture_cases:
+  - name: baseline
+
+  - name: fast_supply
+    magic_generation_period: 8
+
+  - name: slow_supply
+    magic_generation_period: 30
+
+  - name: no_buffer
+    maximum_magic_state_stock:
+      policy: fixed
+      value: 1
+
+  - name: burst_buffer
+    maximum_magic_state_stock:
+      policy: peak_magic_layer
+
+output:
+  directory: artifacts/surface_code_architecture_sweep
+  jsonl: results.jsonl
+  csv: results.csv
+
+cache:
+  reuse_compile_results: true

@@ -55,6 +55,7 @@ from .io_cache import load_data
 
 @dataclass(frozen=True)
 class SurfaceCodeArchitecture:
+    name: str = "default"
     compile_mode: str = SURFACE_CODE_COMPILE_MODE
     qret_path: Path = field(default_factory=lambda: Path(SURFACE_CODE_QCSF_PATH))
     topology_path: Path = field(default_factory=lambda: Path(SURFACE_CODE_TOPOLOGY_PATH))
@@ -72,6 +73,7 @@ class SurfaceCodeArchitecture:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
+            "name": self.name,
             "compile_mode": self.compile_mode,
             "qret_path": str(Path(self.qret_path).expanduser()),
             "topology_path": str(Path(self.topology_path).expanduser()),
@@ -91,6 +93,72 @@ class SurfaceCodeArchitecture:
     def cache_tag(self) -> str:
         payload = json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
+
+
+SurfaceCodeArchitectureConfig = SurfaceCodeArchitecture
+
+
+@dataclass(frozen=True)
+class SurfaceCodeStepArtifact:
+    ham_name: str
+    molecule: str
+    num_logical_qubits: int
+    pf_label: PFLabel
+    target_error: float
+    step_time: float
+    rotation_precision: float
+    runtime_root: Path
+    qasm_path: Path
+    ir_path: Path
+    optimized_ir_path: Path
+    qasm_hash: str
+    optimized_ir_hash: str
+    qret_path: Path
+    qret_hash: str
+    step_rz_count: int
+    step_rz_layer: int | None
+    step_magic_state_count: int
+    step_magic_state_depth: int
+    peak_magic_layer: int
+    instruction_count: int
+    gate_depth: int
+    rz_call_cache: dict[str, Any]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "ham_name": self.ham_name,
+            "molecule": self.molecule,
+            "num_logical_qubits": int(self.num_logical_qubits),
+            "pf_label": self.pf_label,
+            "target_error": float(self.target_error),
+            "step_time": float(self.step_time),
+            "rotation_precision": float(self.rotation_precision),
+            "runtime_root": str(self.runtime_root),
+            "qasm_path": str(self.qasm_path),
+            "ir_path": str(self.ir_path),
+            "optimized_ir_path": str(self.optimized_ir_path),
+            "qasm_hash": self.qasm_hash,
+            "optimized_ir_hash": self.optimized_ir_hash,
+            "qret_path": str(self.qret_path),
+            "qret_hash": self.qret_hash,
+            "step_rz_count": int(self.step_rz_count),
+            "step_rz_layer": self.step_rz_layer,
+            "step_magic_state_count": int(self.step_magic_state_count),
+            "step_magic_state_depth": int(self.step_magic_state_depth),
+            "peak_magic_layer": int(self.peak_magic_layer),
+            "instruction_count": int(self.instruction_count),
+            "gate_depth": int(self.gate_depth),
+            "rz_call_cache": dict(self.rz_call_cache),
+        }
+
+
+def file_sha256(path: str | Path) -> str:
+    resolved = Path(path).expanduser().resolve()
+    digest = hashlib.sha256()
+    with resolved.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def grouped_hchain_ham_name(chain_length: int) -> str:
@@ -386,6 +454,94 @@ def _qasm2_text(qc: Any) -> str:
         if hasattr(qc, "qasm"):
             return str(qc.qasm())
         raise RuntimeError("Failed to export circuit to OpenQASM2")
+
+
+def _safe_path_component(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value))
+
+
+def _count_qasm_rz(qasm_text: str) -> int:
+    return sum(1 for line in str(qasm_text).splitlines() if _RZ_QASM_LINE_RE.match(line))
+
+
+def _ir_instruction_qubits(inst: Mapping[str, Any]) -> list[int]:
+    opcode = str(inst.get("opcode"))
+    if opcode in _INLINE_ONE_QUBIT_OPS:
+        return [int(inst["q"])]
+    if opcode in _INLINE_TWO_QUBIT_OPS:
+        return [int(inst["q0"]), int(inst["q1"])]
+    if opcode in _INLINE_THREE_QUBIT_OPS:
+        return [int(inst["q0"]), int(inst["q1"]), int(inst["q2"])]
+    if "operate" in inst and isinstance(inst["operate"], list):
+        return [int(q) for q in inst["operate"]]
+    return []
+
+
+def summarize_optimized_ir(ir_path: str | Path, *, function_name: str = "main") -> Dict[str, Any]:
+    path = Path(ir_path).expanduser().resolve()
+    with path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    target: Mapping[str, Any] | None = None
+    for circuit in data.get("circuit_list", []):
+        if isinstance(circuit, Mapping) and circuit.get("name") == function_name:
+            target = circuit
+            break
+    if target is None:
+        raise ValueError(f"Circuit '{function_name}' not found in {path}")
+
+    argument = target.get("argument")
+    if not isinstance(argument, Mapping):
+        raise ValueError(f"Missing argument for '{function_name}' in {path}")
+    num_qubits = int(argument.get("num_qubits", 0))
+    if num_qubits < 0:
+        raise ValueError(f"Invalid num_qubits={num_qubits} in {path}")
+
+    bb_list = target.get("bb_list")
+    if not isinstance(bb_list, list) or len(bb_list) != 1:
+        raise ValueError(f"Expected one basic block for '{function_name}' in {path}")
+    inst_list = bb_list[0].get("inst_list", [])
+    if not isinstance(inst_list, list):
+        raise ValueError(f"Invalid inst_list for '{function_name}' in {path}")
+
+    qubit_depth = [0] * max(num_qubits, 0)
+    magic_layers: dict[int, int] = {}
+    magic_count = 0
+    scheduled_inst_count = 0
+    unsupported_calls = 0
+
+    for inst in inst_list:
+        if not isinstance(inst, Mapping):
+            continue
+        opcode = str(inst.get("opcode"))
+        if opcode in _INLINE_IGNORED_OPS:
+            continue
+        if opcode == "Call":
+            unsupported_calls += 1
+            continue
+
+        qargs = _ir_instruction_qubits(inst)
+        if not qargs:
+            continue
+        if max(qargs) >= len(qubit_depth):
+            qubit_depth.extend([0] * (max(qargs) + 1 - len(qubit_depth)))
+        layer = max(qubit_depth[q] for q in qargs) + 1
+        for q in qargs:
+            qubit_depth[q] = layer
+        scheduled_inst_count += 1
+        if opcode in {"T", "TDag"}:
+            magic_count += 1
+            magic_layers[layer] = magic_layers.get(layer, 0) + 1
+
+    return {
+        "num_logical_qubits": int(len(qubit_depth)),
+        "instruction_count": int(scheduled_inst_count),
+        "gate_depth": int(max(qubit_depth, default=0)),
+        "step_magic_state_count": int(magic_count),
+        "step_magic_state_depth": int(len(magic_layers)),
+        "peak_magic_layer": int(max(magic_layers.values(), default=0)),
+        "unresolved_call_count": int(unsupported_calls),
+    }
 
 
 _RZ_QASM_LINE_RE = re.compile(
@@ -811,6 +967,365 @@ def _runtime_root(
     )
 
 
+def _step_artifact_cache_key(
+    *,
+    ham_name: str,
+    pf_label: PFLabel,
+    target_error: float,
+    step_time: float,
+    rotation_precision: float,
+    qret_hash: str,
+) -> str:
+    payload = {
+        "ham_name": ham_name,
+        "pf_label": pf_label,
+        "target_error": float(target_error),
+        "step_time": float(step_time),
+        "rotation_precision": float(rotation_precision),
+        "qret_hash": qret_hash,
+        "qasm_basis_gates": list(SURFACE_CODE_QASM_BASIS_GATES),
+        "qasm_decompose_reps": int(SURFACE_CODE_QASM_DECOMPOSE_REPS),
+        "rz_call_cache": bool(SURFACE_CODE_RZ_CALL_CACHE),
+        "rz_call_cache_round_digits": SURFACE_CODE_RZ_CALL_CACHE_ROUND_DIGITS,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:16]
+
+
+def _step_artifact_runtime_root(
+    ham_name: str,
+    pf_label: PFLabel,
+    *,
+    target_error: float,
+    step_time: float,
+    rotation_precision: float,
+    qret_hash: str,
+) -> Path:
+    safe_ham = _safe_path_component(ham_name)
+    safe_pf = _safe_path_component(str(pf_label))
+    return (
+        SURFACE_CODE_CACHE_DIR
+        / "gr"
+        / "prepared_step"
+        / f"{safe_ham}__{safe_pf}"
+        / _step_artifact_cache_key(
+            ham_name=ham_name,
+            pf_label=pf_label,
+            target_error=target_error,
+            step_time=step_time,
+            rotation_precision=rotation_precision,
+            qret_hash=qret_hash,
+        )
+    )
+
+
+def prepare_grouped_surface_code_step_artifact(
+    ham_name: str,
+    pf_label: PFLabel,
+    *,
+    target_error: float = TARGET_ERROR,
+    architecture: SurfaceCodeArchitecture | None = None,
+    step_time: float | None = None,
+    rotation_precision: float | None = None,
+    use_original: bool = False,
+) -> SurfaceCodeStepArtifact:
+    architecture = architecture or SurfaceCodeArchitecture()
+    pf_label = normalize_pf_label(pf_label)
+    step_t = (
+        float(step_time)
+        if step_time is not None
+        else surface_code_step_time(
+            ham_name,
+            pf_label,
+            target_error=target_error,
+            use_original=use_original,
+        )
+    )
+    rot_precision = (
+        float(rotation_precision)
+        if rotation_precision is not None
+        else surface_code_rotation_precision(
+            ham_name,
+            pf_label,
+            target_error=target_error,
+            step_time=step_t,
+            use_original=use_original,
+        )
+    )
+    qret_path = Path(architecture.qret_path).expanduser().resolve()
+    if not qret_path.exists():
+        raise FileNotFoundError(f"quration binary not found: {qret_path}")
+    qret_hash = file_sha256(qret_path)
+    runtime_root = _step_artifact_runtime_root(
+        ham_name,
+        pf_label,
+        target_error=target_error,
+        step_time=step_t,
+        rotation_precision=rot_precision,
+        qret_hash=qret_hash,
+    )
+    runtime_root.mkdir(parents=True, exist_ok=True)
+
+    qasm_path = runtime_root / "step.qasm"
+    ir_path = runtime_root / "step_ir.json"
+    opt_path = runtime_root / "step_opt.json"
+
+    qc = build_grouped_surface_code_step_circuit(
+        ham_name,
+        pf_label,
+        step_time=step_t,
+    )
+    qc_basis = _basis_circuit(qc, runtime_root=runtime_root)
+    qasm_text = _qasm2_text(qc_basis)
+    rz_count = _count_qasm_rz(qasm_text)
+    rz_metadata: dict[str, Any] | None = None
+    if bool(SURFACE_CODE_RZ_CALL_CACHE):
+        qasm_text, rz_metadata = _rewrite_qasm_rz_as_calls(qasm_text)
+    if rz_metadata is None:
+        rz_metadata = {
+            "enabled": False,
+            "rz_count": int(rz_count),
+            "unique_rotation_count": None,
+            "round_digits": SURFACE_CODE_RZ_CALL_CACHE_ROUND_DIGITS,
+        }
+    qasm_path.write_text(qasm_text, encoding="utf-8")
+
+    _run_qret(
+        [
+            str(qret_path),
+            "parse",
+            "--input",
+            str(qasm_path),
+            "--output",
+            str(ir_path),
+            "--format",
+            "OpenQASM2",
+            "--verbose",
+        ],
+        runtime_root=runtime_root,
+        rotation_precision=rot_precision,
+    )
+    if rz_metadata.get("enabled"):
+        _run_rz_call_cached_opt(
+            qret_path=qret_path,
+            runtime_root=runtime_root,
+            ir_path=ir_path,
+            opt_path=opt_path,
+            rz_metadata=rz_metadata,
+            rotation_precision=rot_precision,
+        )
+    else:
+        opt_yaml_path = runtime_root / "opt.yaml"
+        opt_yaml_path.write_text(
+            opt_pipeline_yaml(ir_path=ir_path, opt_path=opt_path),
+            encoding="utf-8",
+        )
+        _run_qret(
+            [
+                str(qret_path),
+                "opt",
+                "--pipeline",
+                str(opt_yaml_path),
+                "--verbose",
+            ],
+            runtime_root=runtime_root,
+            rotation_precision=rot_precision,
+        )
+
+    summary = summarize_optimized_ir(opt_path)
+    if int(summary.get("unresolved_call_count", 0)) != 0:
+        raise ValueError(
+            "Optimized IR still contains Call instructions; "
+            "architecture sweep requires a concrete single-step IR."
+        )
+    molecule = f"H{_parse_hchain_length(ham_name)}"
+    artifact = SurfaceCodeStepArtifact(
+        ham_name=ham_name,
+        molecule=molecule,
+        num_logical_qubits=int(summary["num_logical_qubits"]),
+        pf_label=pf_label,
+        target_error=float(target_error),
+        step_time=float(step_t),
+        rotation_precision=float(rot_precision),
+        runtime_root=runtime_root,
+        qasm_path=qasm_path,
+        ir_path=ir_path,
+        optimized_ir_path=opt_path,
+        qasm_hash=file_sha256(qasm_path),
+        optimized_ir_hash=file_sha256(opt_path),
+        qret_path=qret_path,
+        qret_hash=qret_hash,
+        step_rz_count=int(rz_metadata.get("rz_count") or rz_count),
+        step_rz_layer=PF_RZ_LAYER.get(molecule, {}).get(pf_label),
+        step_magic_state_count=int(summary["step_magic_state_count"]),
+        step_magic_state_depth=int(summary["step_magic_state_depth"]),
+        peak_magic_layer=int(summary["peak_magic_layer"]),
+        instruction_count=int(summary["instruction_count"]),
+        gate_depth=int(summary["gate_depth"]),
+        rz_call_cache=dict(rz_metadata),
+    )
+    with (runtime_root / "step_artifact.json").open("w", encoding="utf-8") as f:
+        json.dump(artifact.to_dict(), f, ensure_ascii=True, indent=2)
+    return artifact
+
+
+def surface_code_compile_cache_payload(
+    artifact: SurfaceCodeStepArtifact,
+    architecture: SurfaceCodeArchitecture,
+) -> Dict[str, Any]:
+    qret_path = Path(architecture.qret_path).expanduser().resolve()
+    topology_path = Path(architecture.topology_path).expanduser().resolve()
+    topology_hash = (
+        file_sha256(topology_path) if _compile_uses_topology(architecture.compile_mode) else None
+    )
+    return {
+        "qasm_hash": artifact.qasm_hash,
+        "optimized_ir_hash": artifact.optimized_ir_hash,
+        "topology_path": str(topology_path) if topology_hash is not None else None,
+        "topology_hash": topology_hash,
+        "compile_mode": architecture.compile_mode,
+        "machine_type": architecture.machine_type,
+        "magic_generation_period": int(architecture.magic_generation_period),
+        "maximum_magic_state_stock": int(architecture.maximum_magic_state_stock),
+        "entanglement_generation_period": int(architecture.entanglement_generation_period),
+        "maximum_entangled_state_stock": int(architecture.maximum_entangled_state_stock),
+        "reaction_time": int(architecture.reaction_time),
+        "physical_error_rate": float(architecture.physical_error_rate),
+        "drop_rate": float(architecture.drop_rate),
+        "code_cycle_time_sec": float(architecture.code_cycle_time_sec),
+        "allowed_failure_prob": float(architecture.allowed_failure_prob),
+        "rotation_precision": float(artifact.rotation_precision),
+        "qret_path": str(qret_path),
+        "qret_hash": file_sha256(qret_path),
+        "skip_compile_output": bool(architecture.skip_compile_output),
+    }
+
+
+def surface_code_compile_cache_key(
+    artifact: SurfaceCodeStepArtifact,
+    architecture: SurfaceCodeArchitecture,
+) -> str:
+    payload = surface_code_compile_cache_payload(artifact, architecture)
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:16]
+
+
+def _compile_runtime_root(
+    artifact: SurfaceCodeStepArtifact,
+    architecture: SurfaceCodeArchitecture,
+) -> Path:
+    safe_ham = _safe_path_component(artifact.ham_name)
+    safe_pf = _safe_path_component(str(artifact.pf_label))
+    return (
+        SURFACE_CODE_CACHE_DIR
+        / "gr"
+        / architecture.compile_mode
+        / f"{safe_ham}__{safe_pf}"
+        / surface_code_compile_cache_key(artifact, architecture)
+    )
+
+
+def compile_prepared_surface_code_step_artifact(
+    artifact: SurfaceCodeStepArtifact,
+    architecture: SurfaceCodeArchitecture,
+    *,
+    reuse_cache: bool = True,
+) -> Dict[str, Any]:
+    qret_path = Path(architecture.qret_path).expanduser().resolve()
+    topology_path = Path(architecture.topology_path).expanduser().resolve()
+    if not qret_path.exists():
+        raise FileNotFoundError(f"quration binary not found: {qret_path}")
+    if _compile_uses_topology(architecture.compile_mode) and not topology_path.exists():
+        raise FileNotFoundError(f"quration topology file not found: {topology_path}")
+
+    runtime_root = _compile_runtime_root(artifact, architecture)
+    runtime_root.mkdir(parents=True, exist_ok=True)
+    compile_info_path = runtime_root / "compile_info.json"
+    compile_output_path = runtime_root / "step_sc_ls_fixed_v0.json"
+    if architecture.skip_compile_output:
+        compile_output_path = Path(os.devnull)
+
+    cache_hit = bool(reuse_cache and compile_info_path.exists())
+    started = time.perf_counter()
+    if not cache_hit:
+        compile_yaml_path = runtime_root / "compile.yaml"
+        compile_yaml_path.write_text(
+            compile_pipeline_yaml(
+                opt_path=artifact.optimized_ir_path,
+                compile_output_path=compile_output_path,
+                compile_info_path=compile_info_path,
+                architecture=architecture,
+            ),
+            encoding="utf-8",
+        )
+        _run_qret(
+            [
+                str(qret_path),
+                "compile",
+                "--pipeline",
+                str(compile_yaml_path),
+                "--verbose",
+            ],
+            runtime_root=runtime_root,
+            rotation_precision=artifact.rotation_precision,
+        )
+    elapsed = float(time.perf_counter() - started)
+
+    metrics = surface_code_step_metrics_from_compile_info_json(compile_info_path)
+    cache_key = surface_code_compile_cache_key(artifact, architecture)
+    metrics.update(
+        {
+            "target_error": float(artifact.target_error),
+            "step_time": float(artifact.step_time),
+            "rotation_precision": float(artifact.rotation_precision),
+            "cache_key": cache_key,
+            "generator": "grouped_surface_code_qret",
+            "auto_generated": True,
+            "source": "gr",
+            "compile_mode": architecture.compile_mode,
+            "execution_time_sec": elapsed,
+            "compile_cache_hit": cache_hit,
+            "compile_runtime_config": architecture.to_dict(),
+            "compile_runtime_config_source": "architecture",
+            "qasm_hash": artifact.qasm_hash,
+            "optimized_ir_hash": artifact.optimized_ir_hash,
+            "compiler_executable_path": str(qret_path),
+            "compiler_executable_hash": file_sha256(qret_path),
+            "topology_hash": file_sha256(topology_path)
+            if _compile_uses_topology(architecture.compile_mode)
+            else None,
+            "step_rz_count": int(artifact.step_rz_count),
+            "step_rz_layer": artifact.step_rz_layer,
+            "step_magic_state_count": int(artifact.step_magic_state_count),
+            "step_magic_state_depth": int(artifact.step_magic_state_depth),
+            "peak_magic_layer": int(artifact.peak_magic_layer),
+            "rz_call_cache": dict(artifact.rz_call_cache),
+        }
+    )
+    normalized = normalize_surface_code_step_metrics(
+        metrics,
+        context=f"{artifact.ham_name}_Operator_{artifact.pf_label}",
+    )
+    for key in (
+        "compile_cache_hit",
+        "qasm_hash",
+        "optimized_ir_hash",
+        "compiler_executable_path",
+        "compiler_executable_hash",
+        "topology_hash",
+        "step_rz_count",
+        "step_rz_layer",
+        "step_magic_state_count",
+        "step_magic_state_depth",
+        "peak_magic_layer",
+    ):
+        if key in metrics:
+            normalized[key] = metrics[key]
+    with (runtime_root / "step_metrics.json").open("w", encoding="utf-8") as f:
+        json.dump(normalized, f, ensure_ascii=True, indent=2)
+    return normalized
+
+
 def normalize_surface_code_step_metrics(
     metrics: Mapping[str, Any],
     *,
@@ -890,161 +1405,16 @@ def generate_grouped_surface_code_step_metrics(
     use_original: bool = False,
 ) -> Dict[str, Any]:
     architecture = architecture or SurfaceCodeArchitecture()
-    pf_label = normalize_pf_label(pf_label)
-    step_t = (
-        float(step_time)
-        if step_time is not None
-        else surface_code_step_time(
-            ham_name,
-            pf_label,
-            target_error=target_error,
-            use_original=use_original,
-        )
-    )
-    rot_precision = (
-        float(rotation_precision)
-        if rotation_precision is not None
-        else surface_code_rotation_precision(
-            ham_name,
-            pf_label,
-            target_error=target_error,
-            step_time=step_t,
-            use_original=use_original,
-        )
-    )
-    qret_path = Path(architecture.qret_path).expanduser().resolve()
-    topology_path = Path(architecture.topology_path).expanduser().resolve()
-    if not qret_path.exists():
-        raise FileNotFoundError(f"quration binary not found: {qret_path}")
-    if _compile_uses_topology(architecture.compile_mode) and not topology_path.exists():
-        raise FileNotFoundError(f"quration topology file not found: {topology_path}")
-
-    runtime_root = _runtime_root(
+    artifact = prepare_grouped_surface_code_step_artifact(
         ham_name,
         pf_label,
         target_error=target_error,
-        rotation_precision=rot_precision,
         architecture=architecture,
+        step_time=step_time,
+        rotation_precision=rotation_precision,
+        use_original=use_original,
     )
-    runtime_root.mkdir(parents=True, exist_ok=True)
-
-    qasm_path = runtime_root / "step.qasm"
-    ir_path = runtime_root / "step_ir.json"
-    opt_path = runtime_root / "step_opt.json"
-    compile_info_path = runtime_root / "compile_info.json"
-    compile_output_path = runtime_root / "step_sc_ls_fixed_v0.json"
-    if architecture.skip_compile_output:
-        compile_output_path = Path(os.devnull)
-
-    started = time.perf_counter()
-    qc = build_grouped_surface_code_step_circuit(
-        ham_name,
-        pf_label,
-        step_time=step_t,
-    )
-    qc_basis = _basis_circuit(qc, runtime_root=runtime_root)
-    qasm_text = _qasm2_text(qc_basis)
-    rz_metadata: dict[str, Any] | None = None
-    if bool(SURFACE_CODE_RZ_CALL_CACHE):
-        qasm_text, rz_metadata = _rewrite_qasm_rz_as_calls(qasm_text)
-    qasm_path.write_text(qasm_text, encoding="utf-8")
-
-    _run_qret(
-        [
-            str(qret_path),
-            "parse",
-            "--input",
-            str(qasm_path),
-            "--output",
-            str(ir_path),
-            "--format",
-            "OpenQASM2",
-            "--verbose",
-        ],
-        runtime_root=runtime_root,
-        rotation_precision=rot_precision,
-    )
-    if rz_metadata is not None and rz_metadata.get("enabled"):
-        _run_rz_call_cached_opt(
-            qret_path=qret_path,
-            runtime_root=runtime_root,
-            ir_path=ir_path,
-            opt_path=opt_path,
-            rz_metadata=rz_metadata,
-            rotation_precision=rot_precision,
-        )
-    else:
-        opt_yaml_path = runtime_root / "opt.yaml"
-        opt_yaml_path.write_text(
-            opt_pipeline_yaml(ir_path=ir_path, opt_path=opt_path),
-            encoding="utf-8",
-        )
-        _run_qret(
-            [
-                str(qret_path),
-                "opt",
-                "--pipeline",
-                str(opt_yaml_path),
-                "--verbose",
-            ],
-            runtime_root=runtime_root,
-            rotation_precision=rot_precision,
-        )
-    compile_yaml_path = runtime_root / "compile.yaml"
-    compile_yaml_path.write_text(
-        compile_pipeline_yaml(
-            opt_path=opt_path,
-            compile_output_path=compile_output_path,
-            compile_info_path=compile_info_path,
-            architecture=architecture,
-        ),
-        encoding="utf-8",
-    )
-    _run_qret(
-        [
-            str(qret_path),
-            "compile",
-            "--pipeline",
-            str(compile_yaml_path),
-            "--verbose",
-        ],
-        runtime_root=runtime_root,
-        rotation_precision=rot_precision,
-    )
-
-    metrics = surface_code_step_metrics_from_compile_info_json(compile_info_path)
-    metrics.update(
-        {
-            "target_error": float(target_error),
-            "step_time": float(step_t),
-            "rotation_precision": float(rot_precision),
-            "cache_key": _cache_key(
-                target_error=target_error,
-                rotation_precision=rot_precision,
-                architecture=architecture,
-            ),
-            "generator": "grouped_surface_code_qret",
-            "auto_generated": True,
-            "source": "gr",
-            "compile_mode": architecture.compile_mode,
-            "execution_time_sec": float(time.perf_counter() - started),
-            "compile_runtime_config": architecture.to_dict(),
-            "compile_runtime_config_source": "architecture",
-        }
-    )
-    if rz_metadata is not None and rz_metadata.get("enabled"):
-        metrics["rz_call_cache"] = {
-            "rz_count": int(rz_metadata.get("rz_count", 0)),
-            "unique_rotation_count": int(rz_metadata.get("unique_rotation_count", 0)),
-            "round_digits": rz_metadata.get("round_digits"),
-        }
-    normalized = normalize_surface_code_step_metrics(
-        metrics,
-        context=f"{ham_name}_Operator_{pf_label}",
-    )
-    with (runtime_root / "step_metrics.json").open("w", encoding="utf-8") as f:
-        json.dump(normalized, f, ensure_ascii=True, indent=2)
-    return normalized
+    return compile_prepared_surface_code_step_artifact(artifact, architecture)
 
 
 def compile_grouped_hchain_step(

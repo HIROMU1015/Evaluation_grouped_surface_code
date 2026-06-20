@@ -6,5 +6,6 @@ __pycache__/
 .ruff_cache/
 .ipynb_checkpoints/
 artifacts/surface_code_cache/
+artifacts/surface_code_architecture_sweep/
 artifacts/implementation_visual_overview/
 Quration_QS18*.pdf
