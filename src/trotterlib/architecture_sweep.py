@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import os
 import re
 import traceback
@@ -24,7 +25,9 @@ from .surface_code import (
     compile_prepared_surface_code_step_artifact,
     file_sha256,
     grouped_hchain_ham_name,
+    load_grouped_alpha_and_order,
     prepare_grouped_surface_code_step_artifact,
+    qpe_iteration_factor,
     surface_code_compile_cache_key,
 )
 
@@ -43,6 +46,11 @@ RESULT_FIELDS = [
     "step_rz_depth",
     "step_magic_state_count",
     "step_magic_state_depth",
+    "pf_error_coefficient",
+    "pf_order",
+    "qpe_target_error",
+    "qpe_effective_block_count",
+    "qpe_action_count",
     "case_name",
     "topology_name",
     "topology_path",
@@ -79,6 +87,16 @@ RESULT_FIELDS = [
     "compile_elapsed_time_unavailable_reason",
     "peak_process_memory",
     "peak_process_memory_unavailable_reason",
+    "total_magic_state_count",
+    "total_magic_state_depth",
+    "total_runtime_without_topology",
+    "total_runtime_without_topology_unavailable_reason",
+    "total_runtime_with_topology",
+    "total_runtime_with_topology_unavailable_reason",
+    "total_routing_overhead",
+    "total_routing_overhead_unavailable_reason",
+    "total_qubit_volume",
+    "total_qubit_volume_unavailable_reason",
     "error_type",
     "error_message",
 ]
@@ -235,11 +253,37 @@ def build_architecture_for_case(
     return architecture, stock_policy, resolved_stock, topology_name, topology_path
 
 
-def _artifact_row(artifact: SurfaceCodeStepArtifact | None, *, molecule: str, pf_label: str) -> dict[str, Any]:
+def _qpe_scale_row(
+    ham_name: str,
+    pf_label: str,
+    *,
+    target_error: float,
+) -> dict[str, Any]:
+    alpha, order = load_grouped_alpha_and_order(ham_name, pf_label)
+    effective_block_count = qpe_iteration_factor(alpha, order, target_error)
+    action_count = int(math.ceil(effective_block_count))
+    return {
+        "pf_error_coefficient": float(alpha),
+        "pf_order": float(order),
+        "qpe_target_error": float(target_error),
+        "qpe_effective_block_count": float(effective_block_count),
+        "qpe_action_count": action_count,
+    }
+
+
+def _artifact_row(
+    artifact: SurfaceCodeStepArtifact | None,
+    *,
+    molecule: str,
+    pf_label: str,
+    qpe_scale: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     row = {
         "molecule": molecule,
         "pf_label": pf_label,
     }
+    if qpe_scale is not None:
+        row.update(qpe_scale)
     if artifact is None:
         return row
     row.update(
@@ -257,6 +301,57 @@ def _artifact_row(artifact: SurfaceCodeStepArtifact | None, *, molecule: str, pf
         }
     )
     return row
+
+
+def _scale_resource(value: Any, action_count: Any) -> Any:
+    if value is None or action_count is None:
+        return None
+    return int(value) * int(action_count)
+
+
+def _add_qpe_total_resource_fields(row: dict[str, Any]) -> None:
+    action_count = row.get("qpe_action_count")
+    row["total_magic_state_count"] = _scale_resource(
+        row.get("step_magic_state_count"),
+        action_count,
+    )
+    row["total_magic_state_depth"] = _scale_resource(
+        row.get("step_magic_state_depth"),
+        action_count,
+    )
+
+    scaled_specs = [
+        (
+            "runtime_without_topology",
+            "runtime_without_topology_unavailable_reason",
+            "total_runtime_without_topology",
+            "total_runtime_without_topology_unavailable_reason",
+        ),
+        (
+            "runtime_with_topology",
+            "runtime_with_topology_unavailable_reason",
+            "total_runtime_with_topology",
+            "total_runtime_with_topology_unavailable_reason",
+        ),
+        (
+            "routing_overhead",
+            "routing_overhead_unavailable_reason",
+            "total_routing_overhead",
+            "total_routing_overhead_unavailable_reason",
+        ),
+        (
+            "qubit_volume",
+            "qubit_volume_unavailable_reason",
+            "total_qubit_volume",
+            "total_qubit_volume_unavailable_reason",
+        ),
+    ]
+    for source_key, source_reason_key, total_key, total_reason_key in scaled_specs:
+        row[total_key] = _scale_resource(row.get(source_key), action_count)
+        if row[total_key] is None:
+            row[total_reason_key] = row.get(source_reason_key) or "qpe_action_count_unavailable"
+        else:
+            row[total_reason_key] = None
 
 
 def _metric_value(
@@ -406,6 +501,8 @@ def _format_report_cell(value: Any, reason: Any = None) -> str:
             if reason in (None, "")
             else f"N/A ({_short_unavailable_reason(reason)})"
         )
+    elif isinstance(value, int):
+        text = f"{value:,}"
     elif isinstance(value, float):
         text = f"{value:.6g}"
     else:
@@ -435,7 +532,7 @@ def _format_report_delta(value: Any, baseline: Any) -> str:
     percent = 100.0 * delta / baseline_float
     sign = "+" if delta > 0 else ""
     if float(delta).is_integer():
-        delta_text = f"{sign}{int(delta)}"
+        delta_text = f"{sign}{int(delta):,}"
     else:
         delta_text = f"{sign}{delta:.6g}"
     return f"{delta_text} ({sign}{percent:.2f}%)"
@@ -468,9 +565,95 @@ def _write_markdown_report(rows: list[dict[str, Any]], markdown_path: Path) -> N
         )
         baseline_runtime = baseline.get("runtime_with_topology")
         baseline_qubit_volume = baseline.get("qubit_volume")
+        baseline_total_runtime = baseline.get("total_runtime_with_topology")
+        baseline_total_qubit_volume = baseline.get("total_qubit_volume")
+        qpe_row = group_rows[0] if group_rows else {}
         lines.extend(
             [
                 f"## {molecule} / {pf_label}",
+                "",
+                "### QPE Scale",
+                "",
+                *_markdown_table(
+                    [
+                        "PF coeff",
+                        "PF order",
+                        "target error",
+                        "effective blocks",
+                        "actions",
+                    ],
+                    [
+                        [
+                            qpe_row.get("pf_error_coefficient"),
+                            qpe_row.get("pf_order"),
+                            qpe_row.get("qpe_target_error"),
+                            qpe_row.get("qpe_effective_block_count"),
+                            qpe_row.get("qpe_action_count"),
+                        ]
+                    ],
+                ),
+                "",
+                "### QPE-Scaled Resources",
+                "",
+                *_markdown_table(
+                    [
+                        "case",
+                        "status",
+                        "total runtime topo",
+                        "vs baseline",
+                        "total runtime no topo",
+                        "total qubit volume",
+                        "qv vs baseline",
+                        "total magic count",
+                        "total magic depth",
+                        "cells",
+                        "physical qubits",
+                        "code distance",
+                    ],
+                    [
+                        [
+                            row.get("case_name"),
+                            row.get("status"),
+                            _format_report_cell(
+                                row.get("total_runtime_with_topology"),
+                                row.get("total_runtime_with_topology_unavailable_reason"),
+                            ),
+                            _format_report_delta(
+                                row.get("total_runtime_with_topology"),
+                                baseline_total_runtime,
+                            ),
+                            _format_report_cell(
+                                row.get("total_runtime_without_topology"),
+                                row.get("total_runtime_without_topology_unavailable_reason"),
+                            ),
+                            _format_report_cell(
+                                row.get("total_qubit_volume"),
+                                row.get("total_qubit_volume_unavailable_reason"),
+                            ),
+                            _format_report_delta(
+                                row.get("total_qubit_volume"),
+                                baseline_total_qubit_volume,
+                            ),
+                            row.get("total_magic_state_count"),
+                            row.get("total_magic_state_depth"),
+                            _format_report_cell(
+                                row.get("chip_cells"),
+                                row.get("chip_cells_unavailable_reason"),
+                            ),
+                            _format_report_cell(
+                                row.get("physical_qubits"),
+                                row.get("physical_qubits_unavailable_reason"),
+                            ),
+                            _format_report_cell(
+                                row.get("code_distance"),
+                                row.get("code_distance_unavailable_reason"),
+                            ),
+                        ]
+                        for row in group_rows
+                    ],
+                ),
+                "",
+                "### Single-Step Resources",
                 "",
                 *_markdown_table(
                     [
@@ -619,7 +802,13 @@ def run_surface_code_architecture_sweep(config_path: str | Path) -> dict[str, An
         molecule_text = str(molecule)
         ham_name = grouped_hchain_ham_name(_hchain_length(molecule_text))
         for pf_label in pf_labels:
+            qpe_scale: dict[str, Any] | None = None
             try:
+                qpe_scale = _qpe_scale_row(
+                    ham_name,
+                    pf_label,
+                    target_error=target_error,
+                )
                 prepare_architecture = SurfaceCodeArchitecture(
                     qret_path=_path_or_default(config.get("qret_path"), SURFACE_CODE_QCSF_PATH)
                 )
@@ -631,7 +820,12 @@ def run_surface_code_architecture_sweep(config_path: str | Path) -> dict[str, An
                     rotation_precision=rotation_precision_value,
                 )
             except Exception as exc:
-                row = _artifact_row(None, molecule=molecule_text, pf_label=pf_label)
+                row = _artifact_row(
+                    None,
+                    molecule=molecule_text,
+                    pf_label=pf_label,
+                    qpe_scale=qpe_scale,
+                )
                 row.update(
                     {
                         "status": "failed",
@@ -646,7 +840,12 @@ def run_surface_code_architecture_sweep(config_path: str | Path) -> dict[str, An
                 if not isinstance(raw_case, Mapping):
                     raise ValueError("each architecture case must be a mapping")
                 case_name = str(raw_case.get("name", "case"))
-                row = _artifact_row(artifact, molecule=molecule_text, pf_label=pf_label)
+                row = _artifact_row(
+                    artifact,
+                    molecule=molecule_text,
+                    pf_label=pf_label,
+                    qpe_scale=qpe_scale,
+                )
                 if raw_case.get("enabled", True) is False:
                     row.update({"status": "skipped", "case_name": case_name})
                     row.update(
@@ -713,6 +912,7 @@ def run_surface_code_architecture_sweep(config_path: str | Path) -> dict[str, An
                         )
                     )
                     row["compile_cache_hit"] = metrics.get("compile_cache_hit")
+                    _add_qpe_total_resource_fields(row)
                     row["status"] = "success"
                 except Exception as exc:
                     row.update(
