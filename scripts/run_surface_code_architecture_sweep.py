@@ -28,6 +28,7 @@ def main() -> int:
     summary = run_surface_code_architecture_sweep(args.config)
     print(f"jsonl: {summary['jsonl_path']}")
     print(f"csv: {summary['csv_path']}")
+    print(f"markdown: {summary['markdown_path']}")
     print(
         "cases: "
         f"success={summary['success_count']} "

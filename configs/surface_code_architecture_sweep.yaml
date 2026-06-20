@@ -58,6 +58,7 @@ output:
   directory: artifacts/surface_code_architecture_sweep
   jsonl: results.jsonl
   csv: results.csv
+  markdown: results.md
 
 cache:
   reuse_compile_results: true

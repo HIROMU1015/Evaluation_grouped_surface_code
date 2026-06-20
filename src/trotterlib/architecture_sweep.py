@@ -388,11 +388,195 @@ def _finalize_row(row: Mapping[str, Any]) -> dict[str, Any]:
     return {field: row.get(field) for field in RESULT_FIELDS}
 
 
-def _write_outputs(rows: list[dict[str, Any]], output_config: Mapping[str, Any]) -> tuple[Path, Path]:
+def _short_unavailable_reason(reason: Any) -> str:
+    labels = {
+        "requires_ftqc_compile_topology_qec": "QEC mode only",
+        "requires_topology_compile_mode": "topology mode only",
+        "missing_in_compile_info": "not in compile info",
+        "not_collected": "not collected",
+        "runtime_metric_unavailable": "runtime unavailable",
+    }
+    return labels.get(str(reason), str(reason))
+
+
+def _format_report_cell(value: Any, reason: Any = None) -> str:
+    if value is None:
+        text = (
+            "N/A"
+            if reason in (None, "")
+            else f"N/A ({_short_unavailable_reason(reason)})"
+        )
+    elif isinstance(value, float):
+        text = f"{value:.6g}"
+    else:
+        text = str(value)
+    return text.replace("|", "\\|").replace("\n", "<br>")
+
+
+def _markdown_table(headers: list[str], rows: list[list[Any]]) -> list[str]:
+    lines = [
+        "| " + " | ".join(headers) + " |",
+        "| " + " | ".join(["---"] * len(headers)) + " |",
+    ]
+    for row in rows:
+        lines.append("| " + " | ".join(_format_report_cell(item) for item in row) + " |")
+    return lines
+
+
+def _format_report_delta(value: Any, baseline: Any) -> str:
+    if value is None or baseline in (None, 0):
+        return "N/A"
+    try:
+        value_float = float(value)
+        baseline_float = float(baseline)
+    except (TypeError, ValueError):
+        return "N/A"
+    delta = value_float - baseline_float
+    percent = 100.0 * delta / baseline_float
+    sign = "+" if delta > 0 else ""
+    if float(delta).is_integer():
+        delta_text = f"{sign}{int(delta)}"
+    else:
+        delta_text = f"{sign}{delta:.6g}"
+    return f"{delta_text} ({sign}{percent:.2f}%)"
+
+
+def _write_markdown_report(rows: list[dict[str, Any]], markdown_path: Path) -> None:
+    success_count = sum(1 for row in rows if row.get("status") == "success")
+    failed_count = sum(1 for row in rows if row.get("status") == "failed")
+    skipped_count = sum(1 for row in rows if row.get("status") == "skipped")
+    lines = [
+        "# Surface-Code Architecture Sweep",
+        "",
+        "## Summary",
+        "",
+        *_markdown_table(
+            ["rows", "success", "failed", "skipped"],
+            [[len(rows), success_count, failed_count, skipped_count]],
+        ),
+        "",
+    ]
+
+    groups: dict[tuple[Any, Any], list[dict[str, Any]]] = {}
+    for row in rows:
+        groups.setdefault((row.get("molecule"), row.get("pf_label")), []).append(row)
+
+    for (molecule, pf_label), group_rows in sorted(groups.items()):
+        baseline = next(
+            (row for row in group_rows if row.get("case_name") == "baseline"),
+            {},
+        )
+        baseline_runtime = baseline.get("runtime_with_topology")
+        baseline_qubit_volume = baseline.get("qubit_volume")
+        lines.extend(
+            [
+                f"## {molecule} / {pf_label}",
+                "",
+                *_markdown_table(
+                    [
+                        "case",
+                        "status",
+                        "magic period",
+                        "stock",
+                        "runtime topo",
+                        "runtime vs baseline",
+                        "runtime no topo",
+                        "topo - no topo",
+                        "qubit volume",
+                        "qv vs baseline",
+                        "cells",
+                        "physical qubits",
+                        "code distance",
+                        "magic count",
+                        "magic depth",
+                    ],
+                    [
+                        [
+                            row.get("case_name"),
+                            row.get("status"),
+                            row.get("magic_generation_period"),
+                            row.get("resolved_maximum_magic_state_stock"),
+                            _format_report_cell(
+                                row.get("runtime_with_topology"),
+                                row.get("runtime_with_topology_unavailable_reason"),
+                            ),
+                            _format_report_delta(
+                                row.get("runtime_with_topology"),
+                                baseline_runtime,
+                            ),
+                            _format_report_cell(
+                                row.get("runtime_without_topology"),
+                                row.get("runtime_without_topology_unavailable_reason"),
+                            ),
+                            _format_report_cell(
+                                row.get("routing_overhead"),
+                                row.get("routing_overhead_unavailable_reason"),
+                            ),
+                            _format_report_cell(
+                                row.get("qubit_volume"),
+                                row.get("qubit_volume_unavailable_reason"),
+                            ),
+                            _format_report_delta(
+                                row.get("qubit_volume"),
+                                baseline_qubit_volume,
+                            ),
+                            _format_report_cell(
+                                row.get("chip_cells"),
+                                row.get("chip_cells_unavailable_reason"),
+                            ),
+                            _format_report_cell(
+                                row.get("physical_qubits"),
+                                row.get("physical_qubits_unavailable_reason"),
+                            ),
+                            _format_report_cell(
+                                row.get("code_distance"),
+                                row.get("code_distance_unavailable_reason"),
+                            ),
+                            row.get("step_magic_state_count"),
+                            row.get("step_magic_state_depth"),
+                        ]
+                        for row in group_rows
+                    ],
+                ),
+                "",
+            ]
+        )
+
+    problem_rows = [
+        row for row in rows if row.get("status") in {"failed", "skipped"}
+    ]
+    if problem_rows:
+        lines.extend(
+            [
+                "## Failed Or Skipped Cases",
+                "",
+                *_markdown_table(
+                    ["molecule", "pf", "case", "status", "type", "message"],
+                    [
+                        [
+                            row.get("molecule"),
+                            row.get("pf_label"),
+                            row.get("case_name"),
+                            row.get("status"),
+                            row.get("error_type"),
+                            row.get("error_message"),
+                        ]
+                        for row in problem_rows
+                    ],
+                ),
+                "",
+            ]
+        )
+
+    markdown_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_outputs(rows: list[dict[str, Any]], output_config: Mapping[str, Any]) -> tuple[Path, Path, Path]:
     out_dir = _path_or_default(output_config.get("directory"), "artifacts/surface_code_architecture_sweep")
     out_dir.mkdir(parents=True, exist_ok=True)
     jsonl_path = out_dir / str(output_config.get("jsonl", "surface_code_architecture_sweep.jsonl"))
     csv_path = out_dir / str(output_config.get("csv", "surface_code_architecture_sweep.csv"))
+    markdown_path = out_dir / str(output_config.get("markdown", "surface_code_architecture_sweep.md"))
 
     with jsonl_path.open("w", encoding="utf-8") as f:
         for row in rows:
@@ -402,7 +586,8 @@ def _write_outputs(rows: list[dict[str, Any]], output_config: Mapping[str, Any])
         writer.writeheader()
         for row in rows:
             writer.writerow(_finalize_row(row))
-    return jsonl_path, csv_path
+    _write_markdown_report([_finalize_row(row) for row in rows], markdown_path)
+    return jsonl_path, csv_path, markdown_path
 
 
 def run_surface_code_architecture_sweep(config_path: str | Path) -> dict[str, Any]:
@@ -546,11 +731,12 @@ def run_surface_code_architecture_sweep(config_path: str | Path) -> dict[str, An
         output = {}
     if not isinstance(output, Mapping):
         raise ValueError("output must be a mapping")
-    jsonl_path, csv_path = _write_outputs(rows, output)
+    jsonl_path, csv_path, markdown_path = _write_outputs(rows, output)
     return {
         "rows": rows,
         "jsonl_path": str(jsonl_path),
         "csv_path": str(csv_path),
+        "markdown_path": str(markdown_path),
         "success_count": sum(1 for row in rows if row.get("status") == "success"),
         "failed_count": sum(1 for row in rows if row.get("status") == "failed"),
         "skipped_count": sum(1 for row in rows if row.get("status") == "skipped"),
