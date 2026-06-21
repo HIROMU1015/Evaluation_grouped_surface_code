@@ -152,6 +152,53 @@ class SurfaceCodeStepArtifact:
         }
 
 
+def surface_code_step_artifact_from_dict(payload: Mapping[str, Any]) -> SurfaceCodeStepArtifact:
+    return SurfaceCodeStepArtifact(
+        ham_name=str(payload["ham_name"]),
+        molecule=str(payload["molecule"]),
+        num_logical_qubits=int(payload["num_logical_qubits"]),
+        pf_label=str(payload["pf_label"]),
+        target_error=float(payload["target_error"]),
+        step_time=float(payload["step_time"]),
+        rotation_precision=float(payload["rotation_precision"]),
+        runtime_root=Path(payload["runtime_root"]).expanduser(),
+        qasm_path=Path(payload["qasm_path"]).expanduser(),
+        ir_path=Path(payload["ir_path"]).expanduser(),
+        optimized_ir_path=Path(payload["optimized_ir_path"]).expanduser(),
+        qasm_hash=str(payload["qasm_hash"]),
+        optimized_ir_hash=str(payload["optimized_ir_hash"]),
+        qret_path=Path(payload["qret_path"]).expanduser(),
+        qret_hash=str(payload["qret_hash"]),
+        step_rz_count=int(payload["step_rz_count"]),
+        step_rz_layer=(
+            None if payload.get("step_rz_layer") is None else int(payload["step_rz_layer"])
+        ),
+        step_magic_state_count=int(payload["step_magic_state_count"]),
+        step_magic_state_depth=int(payload["step_magic_state_depth"]),
+        peak_magic_layer=int(payload["peak_magic_layer"]),
+        instruction_count=int(payload["instruction_count"]),
+        gate_depth=int(payload["gate_depth"]),
+        rz_call_cache=dict(payload.get("rz_call_cache") or {}),
+    )
+
+
+def load_prepared_surface_code_step_artifact(
+    runtime_root: str | Path,
+) -> SurfaceCodeStepArtifact | None:
+    root = Path(runtime_root).expanduser()
+    metadata_path = root / "step_artifact.json"
+    opt_path = root / "step_opt.json"
+    if not metadata_path.exists() or not opt_path.exists():
+        return None
+    with metadata_path.open("r", encoding="utf-8") as f:
+        artifact = surface_code_step_artifact_from_dict(json.load(f))
+    if not Path(artifact.optimized_ir_path).expanduser().exists():
+        return None
+    if file_sha256(artifact.optimized_ir_path) != artifact.optimized_ir_hash:
+        return None
+    return artifact
+
+
 def file_sha256(path: str | Path) -> str:
     resolved = Path(path).expanduser().resolve()
     digest = hashlib.sha256()
@@ -1069,6 +1116,9 @@ def prepare_grouped_surface_code_step_artifact(
     qasm_path = runtime_root / "step.qasm"
     ir_path = runtime_root / "step_ir.json"
     opt_path = runtime_root / "step_opt.json"
+    cached_artifact = load_prepared_surface_code_step_artifact(runtime_root)
+    if cached_artifact is not None:
+        return cached_artifact
 
     qc = build_grouped_surface_code_step_circuit(
         ham_name,
