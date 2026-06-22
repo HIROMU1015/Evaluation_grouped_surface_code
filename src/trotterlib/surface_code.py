@@ -241,6 +241,8 @@ def _atomic_write_json(path: Path, payload: Any, *, indent: int | None = 2) -> N
 
 
 _PREPARE_STAGE_METRICS_VERSION = "surface_code_prepare_stage_metrics_v1"
+_PREPARE_STAGE_METRICS_FILENAME = "prepare_stage_metrics.json"
+_PREPARE_STAGE_CACHE_HIT_METRICS_FILENAME = "prepare_stage_cache_hit_metrics.json"
 _GNU_TIME_MAXRSS_RE = re.compile(
     r"Maximum resident set size \(kbytes\):\s*(?P<rss>\d+)"
 )
@@ -1043,6 +1045,10 @@ def _run_qret(
     details = dict(stage_details or {})
     details.setdefault("command", [str(item) for item in cmd])
     use_gnu_time = bool(stage_recorder is not None and Path("/usr/bin/time").exists())
+    if use_gnu_time:
+        env["LC_ALL"] = "C"
+        env["LANG"] = "C"
+        env.pop("LANGUAGE", None)
     run_cmd = (
         ["/usr/bin/time", "-v", *[str(item) for item in cmd]]
         if use_gnu_time
@@ -1722,7 +1728,10 @@ def prepare_grouped_surface_code_step_artifact(
     qasm_path = runtime_root / "step.qasm"
     ir_path = runtime_root / "step_ir.json"
     opt_path = runtime_root / "step_opt.json"
-    stage_metrics_path = runtime_root / "prepare_stage_metrics.json"
+    stage_metrics_path = runtime_root / _PREPARE_STAGE_METRICS_FILENAME
+    stage_cache_hit_metrics_path = (
+        runtime_root / _PREPARE_STAGE_CACHE_HIT_METRICS_FILENAME
+    )
     stage_files = {
         "qasm": qasm_path,
         "ir": ir_path,
@@ -1753,9 +1762,13 @@ def prepare_grouped_surface_code_step_artifact(
             span.add_result(cache_hit=cached_artifact is not None)
         if cached_artifact is not None:
             stage_recorder.write(
-                stage_metrics_path,
+                stage_cache_hit_metrics_path,
                 status="cache_hit",
                 files=stage_files,
+                extra={
+                    "cold_run_stage_metrics_path": str(stage_metrics_path),
+                    "cold_run_stage_metrics_exists": stage_metrics_path.exists(),
+                },
             )
             return cached_artifact
 

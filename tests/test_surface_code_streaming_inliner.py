@@ -336,7 +336,7 @@ def test_run_qret_records_stage_metrics_for_subprocess(tmp_path: Path) -> None:
     output_path = tmp_path / "out.json"
     script_path.write_text(
         "#!/bin/sh\n"
-        "printf '{\"ok\":true}' > \"$1\"\n",
+        "printf '{\"lc_all\":\"%s\",\"lang\":\"%s\"}' \"$LC_ALL\" \"$LANG\" > \"$1\"\n",
         encoding="utf-8",
     )
     script_path.chmod(0o755)
@@ -362,3 +362,77 @@ def test_run_qret_records_stage_metrics_for_subprocess(tmp_path: Path) -> None:
     assert summary["file_sizes_bytes"]["output"] == output_path.stat().st_size
     if stage["result"]["gnu_time_used"]:
         assert stage["result"]["subprocess_maxrss_kb"] > 0
+        with output_path.open("r", encoding="utf-8") as f:
+            output_payload = json.load(f)
+        assert output_payload["lc_all"] == "C"
+        assert output_payload["lang"] == "C"
+
+
+def test_prepare_cache_hit_preserves_cold_stage_metrics(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    runtime_root = tmp_path / "prepared"
+    runtime_root.mkdir()
+    qret_path = tmp_path / "qret"
+    qret_path.write_text("#!/bin/sh\n", encoding="utf-8")
+    qasm_path = runtime_root / "step.qasm"
+    ir_path = runtime_root / "step_ir.json"
+    opt_path = runtime_root / "step_opt.json"
+    qasm_path.write_text("OPENQASM 2.0;\n", encoding="utf-8")
+    ir_path.write_text("{}", encoding="utf-8")
+    opt_path.write_text("{}", encoding="utf-8")
+    cold_metrics_path = runtime_root / sc._PREPARE_STAGE_METRICS_FILENAME
+    cold_metrics = {
+        "version": sc._PREPARE_STAGE_METRICS_VERSION,
+        "status": "ok",
+        "sentinel": "cold-run",
+    }
+    cold_metrics_path.write_text(json.dumps(cold_metrics), encoding="utf-8")
+
+    artifact = sc.SurfaceCodeStepArtifact(
+        ham_name="H2_sto-3g_singlet_distance_100_charge_0_grouping",
+        molecule="H2",
+        num_logical_qubits=4,
+        pf_label="2nd",
+        target_error=1.0e-4,
+        step_time=1.0,
+        rotation_precision=1.0e-5,
+        runtime_root=runtime_root,
+        qasm_path=qasm_path,
+        ir_path=ir_path,
+        optimized_ir_path=opt_path,
+        qasm_hash=sc.file_sha256(qasm_path),
+        optimized_ir_hash=sc.file_sha256(opt_path),
+        qret_path=qret_path,
+        qret_hash=sc.file_sha256(qret_path),
+        step_rz_count=0,
+        step_rz_layer=None,
+        step_magic_state_count=0,
+        step_magic_state_depth=0,
+        peak_magic_layer=0,
+        instruction_count=0,
+        gate_depth=0,
+        rz_call_cache={},
+    )
+    sc._atomic_write_json(runtime_root / "step_artifact.json", artifact.to_dict())
+    monkeypatch.setattr(sc, "_step_artifact_runtime_root", lambda *_, **__: runtime_root)
+
+    cached = sc.prepare_grouped_surface_code_step_artifact(
+        artifact.ham_name,
+        artifact.pf_label,
+        architecture=sc.SurfaceCodeArchitecture(qret_path=qret_path),
+        step_time=artifact.step_time,
+        rotation_precision=artifact.rotation_precision,
+    )
+
+    assert cached.optimized_ir_hash == artifact.optimized_ir_hash
+    with cold_metrics_path.open("r", encoding="utf-8") as f:
+        assert json.load(f) == cold_metrics
+
+    cache_hit_path = runtime_root / sc._PREPARE_STAGE_CACHE_HIT_METRICS_FILENAME
+    with cache_hit_path.open("r", encoding="utf-8") as f:
+        cache_hit_metrics = json.load(f)
+    assert cache_hit_metrics["status"] == "cache_hit"
+    assert cache_hit_metrics["cold_run_stage_metrics_exists"] is True
+    assert cache_hit_metrics["cold_run_stage_metrics_path"] == str(cold_metrics_path)
