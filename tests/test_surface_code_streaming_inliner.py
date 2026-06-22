@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import multiprocessing as mp
+import time
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -57,6 +59,111 @@ def _fixture_ir() -> dict[str, Any]:
             },
         ],
     }
+
+
+def _rz_helper_cache_fixture_ir(function_name: str = "__helper()") -> dict[str, Any]:
+    return {
+        "metadata": {"format": "test", "created_at": "first"},
+        "name": "fixture",
+        "circuit_list": [
+            {
+                "name": function_name,
+                "entry_point": "entry",
+                "argument": {
+                    "num_qubits": 1,
+                    "qubits": {"arg": 1},
+                    "num_registers": 0,
+                },
+                "num_tmp_registers": 0,
+                "bb_list": [
+                    {
+                        "name": "entry",
+                        "inst_list": [
+                            {
+                                "opcode": "RZ",
+                                "q": 0,
+                                "theta": {"value": 0.125, "precision": 1.0e-5},
+                            },
+                            {"opcode": "Return"},
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+
+
+def _rz_helper_fixture_metadata(function_name: str = "__helper()") -> dict[str, str]:
+    return {
+        "function_name": function_name,
+        "theta": "0.125",
+        "key": "0.125",
+    }
+
+
+def _rz_helper_e2e_fixture_ir() -> dict[str, Any]:
+    return {
+        "metadata": {"format": "test", "created_at": "first"},
+        "name": "fixture",
+        "circuit_list": [
+            {
+                "name": "main",
+                "entry_point": "entry",
+                "argument": {"num_qubits": 2, "qubits": {"arg": 2}},
+                "num_tmp_registers": 0,
+                "bb_list": [
+                    {
+                        "name": "entry",
+                        "inst_list": [
+                            {"opcode": "H", "q": 0},
+                            {
+                                "opcode": "Call",
+                                "callee": "__helper()",
+                                "operate": [1],
+                            },
+                            {"opcode": "CX", "q0": 0, "q1": 1},
+                            {"opcode": "Return"},
+                        ],
+                    }
+                ],
+            },
+            _rz_helper_cache_fixture_ir()["circuit_list"][0],
+        ],
+    }
+
+
+def _run_parallel_rz_helper_cache_worker(
+    cache_root: str,
+    qret_path: str,
+    result_queue: Any,
+) -> None:
+    try:
+        sc.SURFACE_CODE_CACHE_DIR = Path(cache_root)
+        circuit, metadata = sc._optimize_rz_helper_independent_cached(
+            qret_path=Path(qret_path),
+            runtime_root=Path(cache_root),
+            full_ir_data=_rz_helper_cache_fixture_ir(),
+            helper=_rz_helper_fixture_metadata(),
+            helper_index=0,
+            rotation_precision=1.0e-5,
+            qret_hash=sc.file_sha256(qret_path),
+            helper_passes=sc._rz_helper_passes(),
+            stage_recorder=None,
+        )
+        result_queue.put(
+            {
+                "ok": True,
+                "cache_status": metadata["cache_status"],
+                "filled_by_other_process": metadata.get(
+                    "filled_by_other_process",
+                    False,
+                ),
+                "circuit_name": circuit["name"],
+            }
+        )
+    except BaseException as exc:
+        result_queue.put({"ok": False, "error": repr(exc)})
+        raise
 
 
 def _legacy_python_inline_ir(
@@ -445,40 +552,8 @@ def test_independent_rz_helper_cache_generate_hit_and_corrupt_invalidate(
     cache_root = tmp_path / "cache"
     qret_path = tmp_path / "qret"
     qret_path.write_text("#!/bin/sh\n", encoding="utf-8")
-    full_ir = {
-        "metadata": {"format": "test", "created_at": "first"},
-        "name": "fixture",
-        "circuit_list": [
-            {
-                "name": "__helper()",
-                "entry_point": "entry",
-                "argument": {
-                    "num_qubits": 1,
-                    "qubits": {"arg": 1},
-                    "num_registers": 0,
-                },
-                "num_tmp_registers": 0,
-                "bb_list": [
-                    {
-                        "name": "entry",
-                        "inst_list": [
-                            {
-                                "opcode": "RZ",
-                                "q": 0,
-                                "theta": {"value": 0.125, "precision": 1.0e-5},
-                            },
-                            {"opcode": "Return"},
-                        ],
-                    }
-                ],
-            }
-        ],
-    }
-    helper = {
-        "function_name": "__helper()",
-        "theta": "0.125",
-        "key": "0.125",
-    }
+    full_ir = _rz_helper_cache_fixture_ir()
+    helper = _rz_helper_fixture_metadata()
     calls: list[dict[str, Any]] = []
 
     def fake_run_qret(
@@ -563,3 +638,163 @@ def test_independent_rz_helper_cache_generate_hit_and_corrupt_invalidate(
     assert third_meta["cache_status"] == "miss"
     assert str(third_meta["invalid_reason"]).startswith("invalid:")
     assert len(calls) == 2
+
+
+def test_independent_rz_helper_cache_lock_prevents_parallel_generation(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    qret_path = tmp_path / "fake_qret.py"
+    started_path = tmp_path / "qret_started"
+    runs_path = tmp_path / "qret_runs.txt"
+    qret_path.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json\n"
+        "import os\n"
+        "import sys\n"
+        "import time\n"
+        "from pathlib import Path\n"
+        "pipeline = Path(sys.argv[sys.argv.index('--pipeline') + 1])\n"
+        "values = {}\n"
+        "for line in pipeline.read_text(encoding='utf-8').splitlines():\n"
+        "    if ': ' in line:\n"
+        "        key, value = line.split(': ', 1)\n"
+        "        values[key] = value\n"
+        "Path(os.environ['FAKE_QRET_STARTED']).write_text('started', encoding='utf-8')\n"
+        "time.sleep(0.6)\n"
+        "with Path(values['input']).open('r', encoding='utf-8') as f:\n"
+        "    payload = json.load(f)\n"
+        "payload['circuit_list'][0]['bb_list'][0]['inst_list'] = [\n"
+        "    {'opcode': 'H', 'q': 0},\n"
+        "    {'opcode': 'T', 'q': 0},\n"
+        "    {'opcode': 'Return'},\n"
+        "]\n"
+        "Path(values['output']).write_text(\n"
+        "    json.dumps(payload, ensure_ascii=True, separators=(',', ':')),\n"
+        "    encoding='utf-8',\n"
+        ")\n"
+        "with Path(os.environ['FAKE_QRET_RUNS']).open('a', encoding='utf-8') as f:\n"
+        "    f.write('run\\n')\n",
+        encoding="utf-8",
+    )
+    qret_path.chmod(0o755)
+    monkeypatch.setenv("FAKE_QRET_STARTED", str(started_path))
+    monkeypatch.setenv("FAKE_QRET_RUNS", str(runs_path))
+
+    ctx = mp.get_context("fork")
+    result_queue = ctx.Queue()
+    cache_root = tmp_path / "cache"
+    first = ctx.Process(
+        target=_run_parallel_rz_helper_cache_worker,
+        args=(str(cache_root), str(qret_path), result_queue),
+    )
+    first.start()
+    deadline = time.monotonic() + 5.0
+    while not started_path.exists() and time.monotonic() < deadline:
+        if first.exitcode is not None:
+            break
+        time.sleep(0.01)
+    assert started_path.exists()
+
+    second = ctx.Process(
+        target=_run_parallel_rz_helper_cache_worker,
+        args=(str(cache_root), str(qret_path), result_queue),
+    )
+    second.start()
+    first.join(10)
+    second.join(10)
+    assert first.exitcode == 0
+    assert second.exitcode == 0
+
+    results = [result_queue.get(timeout=2), result_queue.get(timeout=2)]
+    assert all(item["ok"] for item in results)
+    assert sorted(item["cache_status"] for item in results) == ["hit", "miss"]
+    assert sum(1 for item in results if item["filled_by_other_process"]) == 1
+    assert runs_path.read_text(encoding="utf-8").splitlines() == ["run"]
+
+
+def test_rz_helper_opt_modes_produce_equivalent_flat_ir(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    qret_path = tmp_path / "qret"
+    qret_path.write_text("#!/bin/sh\n", encoding="utf-8")
+    rz_metadata = {
+        "enabled": True,
+        "helpers": [_rz_helper_fixture_metadata()],
+    }
+    stream_keys = [
+        "normalized_instruction_stream_hash",
+        "opcode_count",
+        "emitted_instruction_count",
+        "scheduled_instruction_count",
+        "gate_depth",
+        "step_magic_state_count",
+        "step_magic_state_depth",
+        "peak_magic_layer",
+    ]
+
+    def fake_run_qret(
+        cmd: Any,
+        *,
+        runtime_root: Path,
+        rotation_precision: float | None = None,
+        stage_recorder: Any = None,
+        stage_name: str | None = None,
+        stage_details: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        del cmd, runtime_root, rotation_precision, stage_recorder
+        assert stage_details is not None
+        input_path = Path(str(stage_details["input_path"]))
+        output_path = Path(str(stage_details["output_path"]))
+        with input_path.open("r", encoding="utf-8") as f:
+            payload = json.load(f)
+        helper_function_name = stage_details.get("helper_function_name")
+        if helper_function_name is not None:
+            for circuit in payload["circuit_list"]:
+                if circuit["name"] == helper_function_name:
+                    circuit["bb_list"][0]["inst_list"] = [
+                        {"opcode": "T", "q": 0},
+                        {"opcode": "H", "q": 0},
+                        {"opcode": "Return"},
+                    ]
+                    break
+            else:
+                raise AssertionError(f"missing helper {helper_function_name}")
+        elif stage_name != "qret_opt_main_cleanup":
+            raise AssertionError(f"unexpected qret stage {stage_name}")
+        sc._atomic_write_json(output_path, payload, indent=None)
+        return {
+            "returncode": 0,
+            "gnu_time_used": False,
+            "stdout_bytes": 0,
+            "stderr_bytes": 0,
+        }
+
+    monkeypatch.setattr(sc, "_run_qret", fake_run_qret)
+
+    def run_mode(mode: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        runtime_root = tmp_path / mode
+        runtime_root.mkdir()
+        ir_path = runtime_root / "step_ir.json"
+        opt_path = runtime_root / "step_opt.json"
+        sc._atomic_write_json(ir_path, _rz_helper_e2e_fixture_ir(), indent=None)
+        monkeypatch.setattr(sc, "SURFACE_CODE_RZ_HELPER_OPT_MODE", mode)
+        monkeypatch.setattr(sc, "SURFACE_CODE_CACHE_DIR", tmp_path / f"cache_{mode}")
+        result = sc._run_rz_call_cached_opt(
+            qret_path=qret_path,
+            runtime_root=runtime_root,
+            ir_path=ir_path,
+            opt_path=opt_path,
+            rz_metadata=rz_metadata,
+            rotation_precision=1.0e-5,
+            stage_recorder=None,
+        )
+        return _flat_inst_list(opt_path), result["inline_summary"]["instruction_stream"]
+
+    legacy_flat, legacy_stream = run_mode("legacy_full_ir")
+    independent_flat, independent_stream = run_mode("independent_helper")
+
+    assert independent_flat == legacy_flat
+    for key in stream_keys:
+        assert independent_stream[key] == legacy_stream[key]

@@ -241,6 +241,35 @@ def _atomic_write_json(path: Path, payload: Any, *, indent: int | None = 2) -> N
         raise
 
 
+class _FileLock:
+    def __init__(self, path: Path) -> None:
+        self._path = path
+        self._file: Any | None = None
+
+    def __enter__(self) -> "_FileLock":
+        import fcntl
+
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._file = self._path.open("a+", encoding="utf-8")
+        fcntl.flock(self._file.fileno(), fcntl.LOCK_EX)
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: Any,
+    ) -> bool:
+        del exc_type, exc, traceback
+        if self._file is not None:
+            import fcntl
+
+            fcntl.flock(self._file.fileno(), fcntl.LOCK_UN)
+            self._file.close()
+            self._file = None
+        return False
+
+
 _PREPARE_STAGE_METRICS_VERSION = "surface_code_prepare_stage_metrics_v1"
 _PREPARE_STAGE_METRICS_FILENAME = "prepare_stage_metrics.json"
 _PREPARE_STAGE_CACHE_HIT_METRICS_FILENAME = "prepare_stage_cache_hit_metrics.json"
@@ -1597,6 +1626,28 @@ def _load_valid_rz_helper_cache(
         return {}, {}, f"invalid:{type(exc).__name__}"
 
 
+def _rz_helper_cache_hit_metadata(
+    *,
+    helper_index: int,
+    function_name: str,
+    cache_key: str,
+    cache_dir: Path,
+    cached_metadata: Mapping[str, Any],
+    filled_by_other_process: bool = False,
+) -> dict[str, Any]:
+    metadata = {
+        "helper_index": int(helper_index),
+        "function_name": function_name,
+        "cache_key": cache_key,
+        "cache_status": "hit",
+        "cache_dir": str(cache_dir),
+        "output_summary": dict(cached_metadata.get("output_summary", {})),
+    }
+    if filled_by_other_process:
+        metadata["filled_by_other_process"] = True
+    return metadata
+
+
 def _optimize_rz_helper_independent_cached(
     *,
     qret_path: Path,
@@ -1652,79 +1703,120 @@ def _optimize_rz_helper_independent_cached(
             invalid_reason=invalid_reason,
         )
     if invalid_reason is None:
-        run_metadata = {
-            "helper_index": int(helper_index),
-            "function_name": function_name,
-            "cache_key": cache_key,
-            "cache_status": "hit",
-            "cache_dir": str(cache_dir),
-            "output_summary": dict(cached_metadata.get("output_summary", {})),
-        }
-        return cached_circuit, run_metadata
+        return cached_circuit, _rz_helper_cache_hit_metadata(
+            helper_index=helper_index,
+            function_name=function_name,
+            cache_key=cache_key,
+            cache_dir=cache_dir,
+            cached_metadata=cached_metadata,
+        )
 
     input_path = cache_dir / "helper_input.json"
     output_path = cache_dir / "helper_opt.json"
     metadata_path = cache_dir / "metadata.json"
-    output_tmp = _atomic_temp_path(output_path)
-    yaml_tmp = _atomic_temp_path(cache_dir / "helper_opt.yaml")
-    try:
-        try:
-            output_tmp.unlink()
-        except FileNotFoundError:
-            pass
-        _write_compact_json_atomic(input_path, helper_input_ir)
-        yaml_tmp.write_text(
-            opt_pipeline_yaml(
-                ir_path=input_path,
-                opt_path=output_tmp,
-                passes=helper_passes,
-                entry_name=function_name,
-            ),
-            encoding="utf-8",
+    lock_path = cache_dir / "cache.lock"
+    with (
+        stage_recorder.stage(
+            f"rz_helper_independent_cache_lock_{helper_index:04d}",
+            helper_index=int(helper_index),
+            helper_function_name=function_name,
+            helper_key=helper.get("key"),
+            helper_theta=helper.get("theta"),
+            cache_key=cache_key,
+            cache_dir=str(cache_dir),
+            lock_path=str(lock_path),
+            initial_invalid_reason=invalid_reason,
         )
-        qret_metrics = _run_qret(
-            [str(qret_path), "opt", "--pipeline", str(yaml_tmp), "--verbose"],
-            runtime_root=cache_dir,
-            rotation_precision=rotation_precision,
-            stage_recorder=stage_recorder,
-            stage_name=f"qret_opt_rz_helper_independent_{helper_index:04d}",
-            stage_details={
-                "helper_index": int(helper_index),
-                "helper_function_name": function_name,
-                "helper_key": helper.get("key"),
-                "helper_theta": helper.get("theta"),
-                "cache_key": cache_key,
-                "cache_status": "miss",
-                "invalid_reason": invalid_reason,
-                "input_path": str(input_path),
-                "output_path": str(output_tmp),
-                "pipeline_path": str(yaml_tmp),
-            },
-        )
-        output_summary = _helper_output_summary(output_tmp, function_name)
-        os.replace(output_tmp, output_path)
-        metadata = {
-            "schema_version": _RZ_HELPER_INDEPENDENT_CACHE_VERSION,
-            "cache_key": cache_key,
-            "cache_payload": payload,
-            "cache_status": "created",
-            "created_unix_seconds": time.time(),
-            "helper_index": int(helper_index),
-            "function_name": function_name,
-            "input_path": str(input_path),
-            "output_path": str(output_path),
-            "input_size_bytes": _file_size_bytes(input_path),
-            "output_size_bytes": _file_size_bytes(output_path),
-            "output_summary": output_summary,
-            "qret_metrics": qret_metrics,
-        }
-        _atomic_write_json(metadata_path, metadata)
-    finally:
-        for tmp_path in (output_tmp, yaml_tmp):
+        if stage_recorder is not None
+        else _null_stage()
+    ) as lock_span:
+        with _FileLock(lock_path):
+            cached_circuit, cached_metadata, locked_invalid_reason = (
+                _load_valid_rz_helper_cache(
+                    cache_dir=cache_dir,
+                    cache_key=cache_key,
+                    function_name=function_name,
+                )
+            )
+            if locked_invalid_reason is None:
+                lock_span.add_result(
+                    cache_status="hit",
+                    filled_by_other_process=True,
+                    invalid_reason=None,
+                )
+                return cached_circuit, _rz_helper_cache_hit_metadata(
+                    helper_index=helper_index,
+                    function_name=function_name,
+                    cache_key=cache_key,
+                    cache_dir=cache_dir,
+                    cached_metadata=cached_metadata,
+                    filled_by_other_process=True,
+                )
+
+            lock_span.add_result(
+                cache_status="miss",
+                invalid_reason=locked_invalid_reason,
+            )
+            output_tmp = _atomic_temp_path(output_path)
+            yaml_tmp = _atomic_temp_path(cache_dir / "helper_opt.yaml")
             try:
-                tmp_path.unlink()
-            except FileNotFoundError:
-                pass
+                try:
+                    output_tmp.unlink()
+                except FileNotFoundError:
+                    pass
+                _write_compact_json_atomic(input_path, helper_input_ir)
+                yaml_tmp.write_text(
+                    opt_pipeline_yaml(
+                        ir_path=input_path,
+                        opt_path=output_tmp,
+                        passes=helper_passes,
+                        entry_name=function_name,
+                    ),
+                    encoding="utf-8",
+                )
+                qret_metrics = _run_qret(
+                    [str(qret_path), "opt", "--pipeline", str(yaml_tmp), "--verbose"],
+                    runtime_root=cache_dir,
+                    rotation_precision=rotation_precision,
+                    stage_recorder=stage_recorder,
+                    stage_name=f"qret_opt_rz_helper_independent_{helper_index:04d}",
+                    stage_details={
+                        "helper_index": int(helper_index),
+                        "helper_function_name": function_name,
+                        "helper_key": helper.get("key"),
+                        "helper_theta": helper.get("theta"),
+                        "cache_key": cache_key,
+                        "cache_status": "miss",
+                        "invalid_reason": locked_invalid_reason,
+                        "input_path": str(input_path),
+                        "output_path": str(output_tmp),
+                        "pipeline_path": str(yaml_tmp),
+                    },
+                )
+                output_summary = _helper_output_summary(output_tmp, function_name)
+                os.replace(output_tmp, output_path)
+                metadata = {
+                    "schema_version": _RZ_HELPER_INDEPENDENT_CACHE_VERSION,
+                    "cache_key": cache_key,
+                    "cache_payload": payload,
+                    "cache_status": "created",
+                    "created_unix_seconds": time.time(),
+                    "helper_index": int(helper_index),
+                    "function_name": function_name,
+                    "input_path": str(input_path),
+                    "output_path": str(output_path),
+                    "input_size_bytes": _file_size_bytes(input_path),
+                    "output_size_bytes": _file_size_bytes(output_path),
+                    "output_summary": output_summary,
+                    "qret_metrics": qret_metrics,
+                }
+                _atomic_write_json(metadata_path, metadata)
+            finally:
+                for tmp_path in (output_tmp, yaml_tmp):
+                    try:
+                        tmp_path.unlink()
+                    except FileNotFoundError:
+                        pass
 
     output_data = _load_ir_json(output_path)
     circuit = _ir_circuit_by_name(output_data, function_name)
@@ -1733,7 +1825,7 @@ def _optimize_rz_helper_independent_cached(
         "function_name": function_name,
         "cache_key": cache_key,
         "cache_status": "miss",
-        "invalid_reason": invalid_reason,
+        "invalid_reason": locked_invalid_reason,
         "cache_dir": str(cache_dir),
         "input_size_bytes": _file_size_bytes(input_path),
         "output_size_bytes": _file_size_bytes(output_path),
