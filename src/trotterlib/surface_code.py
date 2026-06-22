@@ -5,6 +5,7 @@ import json
 import math
 import os
 import re
+import resource
 import subprocess
 import tempfile
 import time
@@ -237,6 +238,187 @@ def _atomic_write_json(path: Path, payload: Any, *, indent: int | None = 2) -> N
         except FileNotFoundError:
             pass
         raise
+
+
+_PREPARE_STAGE_METRICS_VERSION = "surface_code_prepare_stage_metrics_v1"
+_GNU_TIME_MAXRSS_RE = re.compile(
+    r"Maximum resident set size \(kbytes\):\s*(?P<rss>\d+)"
+)
+
+
+def _resource_rss_snapshot() -> dict[str, int]:
+    self_usage = resource.getrusage(resource.RUSAGE_SELF)
+    child_usage = resource.getrusage(resource.RUSAGE_CHILDREN)
+    return {
+        "self_maxrss_kb": int(self_usage.ru_maxrss),
+        "children_maxrss_kb": int(child_usage.ru_maxrss),
+    }
+
+
+def _file_size_bytes(path: str | Path | None) -> int | None:
+    if path is None:
+        return None
+    try:
+        return int(Path(path).expanduser().stat().st_size)
+    except FileNotFoundError:
+        return None
+
+
+def _existing_file_sizes(paths: Mapping[str, str | Path | None]) -> dict[str, int]:
+    sizes: dict[str, int] = {}
+    for key, path in paths.items():
+        size = _file_size_bytes(path)
+        if size is not None:
+            sizes[str(key)] = size
+    return sizes
+
+
+def _parse_gnu_time_maxrss_kb(stderr_text: str) -> int | None:
+    matches = list(_GNU_TIME_MAXRSS_RE.finditer(stderr_text))
+    if not matches:
+        return None
+    return int(matches[-1].group("rss"))
+
+
+class _StageMetricsRecorder:
+    def __init__(self, *, scope: str, metadata: Mapping[str, Any]) -> None:
+        self._scope = str(scope)
+        self._metadata = dict(metadata)
+        self._started_monotonic = time.perf_counter()
+        self._started_unix = time.time()
+        self._stages: list[dict[str, Any]] = []
+
+    def stage(self, name: str, **details: Any) -> "_StageSpan":
+        return _StageSpan(self, str(name), details)
+
+    def _finish_stage(self, span: "_StageSpan", exc: BaseException | None) -> None:
+        ended = time.perf_counter()
+        rss_after = _resource_rss_snapshot()
+        rss_before = span.rss_before
+        event = {
+            "index": len(self._stages),
+            "name": span.name,
+            "status": "failed" if exc is not None else "ok",
+            "elapsed_seconds": float(ended - span.started),
+            "rss_before": rss_before,
+            "rss_after": rss_after,
+            "self_maxrss_delta_kb": max(
+                0,
+                int(rss_after["self_maxrss_kb"]) - int(rss_before["self_maxrss_kb"]),
+            ),
+            "children_maxrss_delta_kb": max(
+                0,
+                int(rss_after["children_maxrss_kb"])
+                - int(rss_before["children_maxrss_kb"]),
+            ),
+        }
+        if span.details:
+            event["details"] = dict(span.details)
+        if span.result:
+            event["result"] = dict(span.result)
+        if exc is not None:
+            event["error_type"] = type(exc).__name__
+            event["error_message"] = str(exc)
+        self._stages.append(event)
+
+    def summary(
+        self,
+        *,
+        status: str,
+        files: Mapping[str, str | Path | None] | None = None,
+        extra: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        rss = _resource_rss_snapshot()
+        payload: dict[str, Any] = {
+            "version": _PREPARE_STAGE_METRICS_VERSION,
+            "scope": self._scope,
+            "status": str(status),
+            "metadata": dict(self._metadata),
+            "started_unix_seconds": float(self._started_unix),
+            "elapsed_seconds": float(time.perf_counter() - self._started_monotonic),
+            "rss": rss,
+            "stage_count": int(len(self._stages)),
+            "stages": list(self._stages),
+            "rss_semantics": {
+                "self_maxrss_kb": "Python process high-water mark after the stage",
+                "self_maxrss_delta_kb": (
+                    "increase in Python process high-water mark during the stage"
+                ),
+                "children_maxrss_kb": (
+                    "cumulative high-water mark reported by RUSAGE_CHILDREN"
+                ),
+                "subprocess_maxrss_kb": (
+                    "per-qret command max RSS from /usr/bin/time -v when available"
+                ),
+            },
+        }
+        if files is not None:
+            payload["file_sizes_bytes"] = _existing_file_sizes(files)
+        if extra:
+            payload.update(dict(extra))
+        return payload
+
+    def write(
+        self,
+        path: Path,
+        *,
+        status: str,
+        files: Mapping[str, str | Path | None] | None = None,
+        extra: Mapping[str, Any] | None = None,
+    ) -> None:
+        _atomic_write_json(path, self.summary(status=status, files=files, extra=extra))
+
+
+class _StageSpan:
+    def __init__(
+        self,
+        recorder: _StageMetricsRecorder,
+        name: str,
+        details: Mapping[str, Any],
+    ) -> None:
+        self._recorder = recorder
+        self.name = name
+        self.details = dict(details)
+        self.result: dict[str, Any] = {}
+        self.started = 0.0
+        self.rss_before: dict[str, int] = {}
+
+    def __enter__(self) -> "_StageSpan":
+        self.started = time.perf_counter()
+        self.rss_before = _resource_rss_snapshot()
+        return self
+
+    def add_result(self, **items: Any) -> None:
+        self.result.update(items)
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: Any,
+    ) -> bool:
+        self._recorder._finish_stage(self, exc)
+        return False
+
+
+class _NullStageSpan:
+    def __enter__(self) -> "_NullStageSpan":
+        return self
+
+    def add_result(self, **items: Any) -> None:
+        return None
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: Any,
+    ) -> bool:
+        return False
+
+
+def _null_stage() -> _NullStageSpan:
+    return _NullStageSpan()
 
 
 def grouped_hchain_ham_name(chain_length: int) -> str:
@@ -848,30 +1030,67 @@ def _run_qret(
     *,
     runtime_root: Path,
     rotation_precision: float | None = None,
-) -> None:
+    stage_recorder: _StageMetricsRecorder | None = None,
+    stage_name: str | None = None,
+    stage_details: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     binary_path = Path(cmd[0]).expanduser().resolve()
     env = _prepare_runtime_env(
         runtime_root,
         binary_path=binary_path,
         rotation_precision=rotation_precision,
     )
-    completed = subprocess.run(
-        list(cmd),
-        cwd=str(runtime_root),
-        env=env,
-        text=True,
-        capture_output=True,
-        check=False,
+    details = dict(stage_details or {})
+    details.setdefault("command", [str(item) for item in cmd])
+    use_gnu_time = bool(stage_recorder is not None and Path("/usr/bin/time").exists())
+    run_cmd = (
+        ["/usr/bin/time", "-v", *[str(item) for item in cmd]]
+        if use_gnu_time
+        else [str(item) for item in cmd]
     )
-    if completed.returncode == 0:
-        return
-    details = "\n".join(
-        part.strip() for part in (completed.stdout, completed.stderr) if part.strip()
-    )
-    raise RuntimeError(
-        f"quration command failed (code={completed.returncode}): {' '.join(cmd)}"
-        + (f"\n{details}" if details else "")
-    )
+
+    def run_command(span: _StageSpan | None = None) -> dict[str, Any]:
+        completed = subprocess.run(
+            run_cmd,
+            cwd=str(runtime_root),
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        stdout = completed.stdout or ""
+        stderr = completed.stderr or ""
+        metrics: dict[str, Any] = {
+            "returncode": int(completed.returncode),
+            "stdout_bytes": len(stdout.encode("utf-8")),
+            "stderr_bytes": len(stderr.encode("utf-8")),
+            "gnu_time_used": use_gnu_time,
+        }
+        subprocess_maxrss = (
+            _parse_gnu_time_maxrss_kb(stderr) if use_gnu_time else None
+        )
+        if subprocess_maxrss is not None:
+            metrics["subprocess_maxrss_kb"] = int(subprocess_maxrss)
+        output_path = details.get("output_path")
+        output_size = _file_size_bytes(output_path) if output_path is not None else None
+        if output_size is not None:
+            metrics["output_size_bytes"] = int(output_size)
+        if span is not None:
+            span.add_result(**metrics)
+        if completed.returncode == 0:
+            return metrics
+        failure_details = "\n".join(
+            part.strip() for part in (stdout, stderr) if part.strip()
+        )
+        raise RuntimeError(
+            f"quration command failed (code={completed.returncode}): {' '.join(cmd)}"
+            + (f"\n{failure_details}" if failure_details else "")
+        )
+
+    if stage_recorder is not None and stage_name is not None:
+        with stage_recorder.stage(stage_name, **details) as span:
+            return run_command(span)
+    return run_command()
 
 
 def _opt_passes() -> list[str]:
@@ -1143,6 +1362,7 @@ def _run_rz_call_cached_opt(
     opt_path: Path,
     rz_metadata: Mapping[str, Any],
     rotation_precision: float,
+    stage_recorder: _StageMetricsRecorder | None = None,
 ) -> dict[str, Any]:
     helpers = [
         dict(item)
@@ -1159,12 +1379,26 @@ def _run_rz_call_cached_opt(
             [str(qret_path), "opt", "--pipeline", str(opt_yaml_path), "--verbose"],
             runtime_root=runtime_root,
             rotation_precision=rotation_precision,
+            stage_recorder=stage_recorder,
+            stage_name="qret_opt_without_rz_helpers",
+            stage_details={
+                "input_path": str(ir_path),
+                "output_path": str(opt_path),
+                "pipeline_path": str(opt_yaml_path),
+            },
         )
         return {"mode": "qret_opt_without_rz_helpers"}
 
     cache_dir = runtime_root / "rz_call_cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
-    _atomic_write_json(runtime_root / "rz_call_cache_metadata.json", rz_metadata)
+    with (
+        stage_recorder.stage("write_rz_call_cache_metadata")
+        if stage_recorder is not None
+        else _null_stage()
+    ) as span:
+        metadata_path = runtime_root / "rz_call_cache_metadata.json"
+        _atomic_write_json(metadata_path, rz_metadata)
+        span.add_result(output_size_bytes=_file_size_bytes(metadata_path))
 
     current_input = ir_path
     helper_passes = [
@@ -1189,6 +1423,17 @@ def _run_rz_call_cached_opt(
             [str(qret_path), "opt", "--pipeline", str(pass_yaml), "--verbose"],
             runtime_root=runtime_root,
             rotation_precision=rotation_precision,
+            stage_recorder=stage_recorder,
+            stage_name=f"qret_opt_rz_helper_{index:04d}",
+            stage_details={
+                "helper_index": int(index),
+                "helper_function_name": str(helper["function_name"]),
+                "helper_key": helper.get("key"),
+                "helper_theta": helper.get("theta"),
+                "input_path": str(current_input),
+                "output_path": str(pass_output),
+                "pipeline_path": str(pass_yaml),
+            },
         )
         current_input = pass_output
 
@@ -1212,9 +1457,47 @@ def _run_rz_call_cached_opt(
         [str(qret_path), "opt", "--pipeline", str(main_yaml), "--verbose"],
         runtime_root=runtime_root,
         rotation_precision=rotation_precision,
+        stage_recorder=stage_recorder,
+        stage_name="qret_opt_main_cleanup",
+        stage_details={
+            "input_path": str(current_input),
+            "output_path": str(main_pre_inline),
+            "pipeline_path": str(main_yaml),
+        },
     )
-    inline_summary = _python_inline_ir(main_pre_inline, opt_path, function_name="main")
-    _atomic_write_json(runtime_root / "python_inline_summary.json", inline_summary)
+    with (
+        stage_recorder.stage(
+            "python_streaming_inline",
+            input_path=str(main_pre_inline),
+            output_path=str(opt_path),
+        )
+        if stage_recorder is not None
+        else _null_stage()
+    ) as span:
+        inline_summary = _python_inline_ir(
+            main_pre_inline,
+            opt_path,
+            function_name="main",
+        )
+        span.add_result(
+            output_size_bytes=_file_size_bytes(opt_path),
+            emitted_instruction_count=inline_summary.get("emitted_instruction_count"),
+            scheduled_instruction_count=inline_summary.get(
+                "scheduled_instruction_count"
+            ),
+            normalized_instruction_stream_hash=inline_summary.get(
+                "instruction_stream",
+                {},
+            ).get("normalized_instruction_stream_hash"),
+        )
+    with (
+        stage_recorder.stage("write_python_inline_summary")
+        if stage_recorder is not None
+        else _null_stage()
+    ) as span:
+        inline_summary_path = runtime_root / "python_inline_summary.json"
+        _atomic_write_json(inline_summary_path, inline_summary)
+        span.add_result(output_size_bytes=_file_size_bytes(inline_summary_path))
     return {
         "mode": "rz_call_cached_streaming_python_inline",
         "helper_count": int(len(helpers)),
@@ -1439,119 +1722,246 @@ def prepare_grouped_surface_code_step_artifact(
     qasm_path = runtime_root / "step.qasm"
     ir_path = runtime_root / "step_ir.json"
     opt_path = runtime_root / "step_opt.json"
-    cached_artifact = load_prepared_surface_code_step_artifact(runtime_root)
-    if cached_artifact is not None:
-        return cached_artifact
+    stage_metrics_path = runtime_root / "prepare_stage_metrics.json"
+    stage_files = {
+        "qasm": qasm_path,
+        "ir": ir_path,
+        "optimized_ir": opt_path,
+        "python_inline_summary": runtime_root / "python_inline_summary.json",
+        "step_instruction_stream_summary": (
+            runtime_root / "step_instruction_stream_summary.json"
+        ),
+        "step_artifact": runtime_root / "step_artifact.json",
+    }
+    stage_recorder = _StageMetricsRecorder(
+        scope="prepare_grouped_surface_code_step_artifact",
+        metadata={
+            "ham_name": ham_name,
+            "pf_label": pf_label,
+            "target_error": float(target_error),
+            "step_time": float(step_t),
+            "rotation_precision": float(rot_precision),
+            "qret_path": str(qret_path),
+            "qret_hash": qret_hash,
+            "rz_call_cache_enabled": bool(SURFACE_CODE_RZ_CALL_CACHE),
+        },
+    )
 
-    qc = build_grouped_surface_code_step_circuit(
-        ham_name,
-        pf_label,
-        step_time=step_t,
-    )
-    qc_basis = _basis_circuit(qc, runtime_root=runtime_root)
-    qasm_text = _qasm2_text(qc_basis)
-    rz_count = _count_qasm_rz(qasm_text)
-    rz_metadata: dict[str, Any] | None = None
-    if bool(SURFACE_CODE_RZ_CALL_CACHE):
-        qasm_text, rz_metadata = _rewrite_qasm_rz_as_calls(qasm_text)
-    if rz_metadata is None:
-        rz_metadata = {
-            "enabled": False,
-            "rz_count": int(rz_count),
-            "unique_rotation_count": None,
-            "round_digits": SURFACE_CODE_RZ_CALL_CACHE_ROUND_DIGITS,
-        }
-    qasm_path.write_text(qasm_text, encoding="utf-8")
+    try:
+        with stage_recorder.stage("cache_lookup") as span:
+            cached_artifact = load_prepared_surface_code_step_artifact(runtime_root)
+            span.add_result(cache_hit=cached_artifact is not None)
+        if cached_artifact is not None:
+            stage_recorder.write(
+                stage_metrics_path,
+                status="cache_hit",
+                files=stage_files,
+            )
+            return cached_artifact
 
-    _run_qret(
-        [
-            str(qret_path),
-            "parse",
-            "--input",
-            str(qasm_path),
-            "--output",
-            str(ir_path),
-            "--format",
-            "OpenQASM2",
-            "--verbose",
-        ],
-        runtime_root=runtime_root,
-        rotation_precision=rot_precision,
-    )
-    rz_metadata["ir_rotation_precision"] = _rewrite_ir_rotation_precision(
-        ir_path,
-        rotation_precision=rot_precision,
-    )
-    if rz_metadata.get("enabled"):
-        rz_metadata["cached_opt"] = _run_rz_call_cached_opt(
-            qret_path=qret_path,
-            runtime_root=runtime_root,
-            ir_path=ir_path,
-            opt_path=opt_path,
-            rz_metadata=rz_metadata,
-            rotation_precision=rot_precision,
-        )
-    else:
-        opt_yaml_path = runtime_root / "opt.yaml"
-        opt_yaml_path.write_text(
-            opt_pipeline_yaml(ir_path=ir_path, opt_path=opt_path),
-            encoding="utf-8",
-        )
+        with stage_recorder.stage("build_step_circuit") as span:
+            qc = build_grouped_surface_code_step_circuit(
+                ham_name,
+                pf_label,
+                step_time=step_t,
+            )
+            span.add_result(circuit_type=type(qc).__name__)
+
+        with stage_recorder.stage("basis_circuit") as span:
+            qc_basis = _basis_circuit(qc, runtime_root=runtime_root)
+            span.add_result(circuit_type=type(qc_basis).__name__)
+
+        with stage_recorder.stage("qasm_text") as span:
+            qasm_text = _qasm2_text(qc_basis)
+            rz_count = _count_qasm_rz(qasm_text)
+            span.add_result(
+                qasm_bytes=len(qasm_text.encode("utf-8")),
+                rz_count=int(rz_count),
+            )
+
+        rz_metadata: dict[str, Any] | None = None
+        with stage_recorder.stage(
+            "rz_helper_rewrite",
+            enabled=bool(SURFACE_CODE_RZ_CALL_CACHE),
+        ) as span:
+            if bool(SURFACE_CODE_RZ_CALL_CACHE):
+                qasm_text, rz_metadata = _rewrite_qasm_rz_as_calls(qasm_text)
+            if rz_metadata is None:
+                rz_metadata = {
+                    "enabled": False,
+                    "rz_count": int(rz_count),
+                    "unique_rotation_count": None,
+                    "round_digits": SURFACE_CODE_RZ_CALL_CACHE_ROUND_DIGITS,
+                }
+            span.add_result(
+                rz_count=int(rz_metadata.get("rz_count") or rz_count),
+                unique_rotation_count=rz_metadata.get("unique_rotation_count"),
+                qasm_bytes=len(qasm_text.encode("utf-8")),
+            )
+
+        with stage_recorder.stage("write_qasm", output_path=str(qasm_path)) as span:
+            qasm_path.write_text(qasm_text, encoding="utf-8")
+            span.add_result(output_size_bytes=_file_size_bytes(qasm_path))
+
         _run_qret(
             [
                 str(qret_path),
-                "opt",
-                "--pipeline",
-                str(opt_yaml_path),
+                "parse",
+                "--input",
+                str(qasm_path),
+                "--output",
+                str(ir_path),
+                "--format",
+                "OpenQASM2",
                 "--verbose",
             ],
             runtime_root=runtime_root,
             rotation_precision=rot_precision,
+            stage_recorder=stage_recorder,
+            stage_name="qret_parse",
+            stage_details={
+                "input_path": str(qasm_path),
+                "output_path": str(ir_path),
+            },
         )
 
-    summary = _optimized_ir_summary_from_inline_or_file(
-        opt_path,
-        rz_metadata.get("cached_opt"),
-    )
-    if isinstance(summary.get("instruction_stream"), Mapping):
-        _atomic_write_json(
-            runtime_root / "step_instruction_stream_summary.json",
-            summary["instruction_stream"],
+        with stage_recorder.stage(
+            "ir_rotation_precision_rewrite",
+            input_path=str(ir_path),
+        ) as span:
+            rz_metadata["ir_rotation_precision"] = _rewrite_ir_rotation_precision(
+                ir_path,
+                rotation_precision=rot_precision,
+            )
+            span.add_result(
+                **rz_metadata["ir_rotation_precision"],
+                output_size_bytes=_file_size_bytes(ir_path),
+            )
+
+        if rz_metadata.get("enabled"):
+            rz_metadata["cached_opt"] = _run_rz_call_cached_opt(
+                qret_path=qret_path,
+                runtime_root=runtime_root,
+                ir_path=ir_path,
+                opt_path=opt_path,
+                rz_metadata=rz_metadata,
+                rotation_precision=rot_precision,
+                stage_recorder=stage_recorder,
+            )
+        else:
+            opt_yaml_path = runtime_root / "opt.yaml"
+            opt_yaml_path.write_text(
+                opt_pipeline_yaml(ir_path=ir_path, opt_path=opt_path),
+                encoding="utf-8",
+            )
+            _run_qret(
+                [
+                    str(qret_path),
+                    "opt",
+                    "--pipeline",
+                    str(opt_yaml_path),
+                    "--verbose",
+                ],
+                runtime_root=runtime_root,
+                rotation_precision=rot_precision,
+                stage_recorder=stage_recorder,
+                stage_name="qret_opt",
+                stage_details={
+                    "input_path": str(ir_path),
+                    "output_path": str(opt_path),
+                    "pipeline_path": str(opt_yaml_path),
+                },
+            )
+
+        with stage_recorder.stage("optimized_ir_summary") as span:
+            summary = _optimized_ir_summary_from_inline_or_file(
+                opt_path,
+                rz_metadata.get("cached_opt"),
+            )
+            span.add_result(
+                instruction_count=summary.get("instruction_count"),
+                emitted_instruction_count=summary.get("emitted_instruction_count"),
+                step_magic_state_count=summary.get("step_magic_state_count"),
+                normalized_instruction_stream_hash=summary.get(
+                    "instruction_stream",
+                    {},
+                ).get("normalized_instruction_stream_hash"),
+            )
+        if isinstance(summary.get("instruction_stream"), Mapping):
+            with stage_recorder.stage("write_step_instruction_stream_summary") as span:
+                stream_summary_path = (
+                    runtime_root / "step_instruction_stream_summary.json"
+                )
+                _atomic_write_json(stream_summary_path, summary["instruction_stream"])
+                span.add_result(output_size_bytes=_file_size_bytes(stream_summary_path))
+            rz_metadata["optimized_ir_stream"] = dict(summary["instruction_stream"])
+        if int(summary.get("unresolved_call_count", 0)) != 0:
+            raise ValueError(
+                "Optimized IR still contains Call instructions; "
+                "architecture sweep requires a concrete single-step IR."
+            )
+        molecule = f"H{_parse_hchain_length(ham_name)}"
+
+        with stage_recorder.stage("hash_outputs") as span:
+            qasm_hash = file_sha256(qasm_path)
+            optimized_ir_hash = file_sha256(opt_path)
+            span.add_result(
+                qasm_hash=qasm_hash,
+                optimized_ir_hash=optimized_ir_hash,
+                qasm_size_bytes=_file_size_bytes(qasm_path),
+                optimized_ir_size_bytes=_file_size_bytes(opt_path),
+            )
+
+        artifact = SurfaceCodeStepArtifact(
+            ham_name=ham_name,
+            molecule=molecule,
+            num_logical_qubits=int(summary["num_logical_qubits"]),
+            pf_label=pf_label,
+            target_error=float(target_error),
+            step_time=float(step_t),
+            rotation_precision=float(rot_precision),
+            runtime_root=runtime_root,
+            qasm_path=qasm_path,
+            ir_path=ir_path,
+            optimized_ir_path=opt_path,
+            qasm_hash=qasm_hash,
+            optimized_ir_hash=optimized_ir_hash,
+            qret_path=qret_path,
+            qret_hash=qret_hash,
+            step_rz_count=int(rz_metadata.get("rz_count") or rz_count),
+            step_rz_layer=PF_RZ_LAYER.get(molecule, {}).get(pf_label),
+            step_magic_state_count=int(summary["step_magic_state_count"]),
+            step_magic_state_depth=int(summary["step_magic_state_depth"]),
+            peak_magic_layer=int(summary["peak_magic_layer"]),
+            instruction_count=int(summary["instruction_count"]),
+            gate_depth=int(summary["gate_depth"]),
+            rz_call_cache=dict(rz_metadata),
         )
-        rz_metadata["optimized_ir_stream"] = dict(summary["instruction_stream"])
-    if int(summary.get("unresolved_call_count", 0)) != 0:
-        raise ValueError(
-            "Optimized IR still contains Call instructions; "
-            "architecture sweep requires a concrete single-step IR."
+        with stage_recorder.stage("write_step_artifact") as span:
+            artifact_path = runtime_root / "step_artifact.json"
+            _atomic_write_json(artifact_path, artifact.to_dict())
+            span.add_result(output_size_bytes=_file_size_bytes(artifact_path))
+        stage_recorder.write(
+            stage_metrics_path,
+            status="ok",
+            files=stage_files,
+            extra={
+                "artifact_instruction_count": int(artifact.instruction_count),
+                "artifact_magic_state_count": int(artifact.step_magic_state_count),
+                "artifact_gate_depth": int(artifact.gate_depth),
+            },
         )
-    molecule = f"H{_parse_hchain_length(ham_name)}"
-    artifact = SurfaceCodeStepArtifact(
-        ham_name=ham_name,
-        molecule=molecule,
-        num_logical_qubits=int(summary["num_logical_qubits"]),
-        pf_label=pf_label,
-        target_error=float(target_error),
-        step_time=float(step_t),
-        rotation_precision=float(rot_precision),
-        runtime_root=runtime_root,
-        qasm_path=qasm_path,
-        ir_path=ir_path,
-        optimized_ir_path=opt_path,
-        qasm_hash=file_sha256(qasm_path),
-        optimized_ir_hash=file_sha256(opt_path),
-        qret_path=qret_path,
-        qret_hash=qret_hash,
-        step_rz_count=int(rz_metadata.get("rz_count") or rz_count),
-        step_rz_layer=PF_RZ_LAYER.get(molecule, {}).get(pf_label),
-        step_magic_state_count=int(summary["step_magic_state_count"]),
-        step_magic_state_depth=int(summary["step_magic_state_depth"]),
-        peak_magic_layer=int(summary["peak_magic_layer"]),
-        instruction_count=int(summary["instruction_count"]),
-        gate_depth=int(summary["gate_depth"]),
-        rz_call_cache=dict(rz_metadata),
-    )
-    _atomic_write_json(runtime_root / "step_artifact.json", artifact.to_dict())
-    return artifact
+        return artifact
+    except Exception:
+        try:
+            stage_recorder.write(
+                stage_metrics_path,
+                status="failed",
+                files=stage_files,
+            )
+        except Exception:
+            pass
+        raise
 
 
 def surface_code_compile_cache_payload(

@@ -299,3 +299,66 @@ def test_mapping_result_collection_is_opt_in(tmp_path: Path, monkeypatch: Any) -
     assert metrics["mapping_result_json"] is None
     assert metrics["mapping_result_hash"] is None
     assert metrics["mapping_result_unavailable_reason"] == "disabled"
+
+
+def test_stage_metrics_recorder_writes_valid_json(tmp_path: Path) -> None:
+    output_path = tmp_path / "payload.json"
+    metrics_path = tmp_path / "prepare_stage_metrics.json"
+    recorder = sc._StageMetricsRecorder(
+        scope="unit_test",
+        metadata={"case": "stage_recorder"},
+    )
+
+    with recorder.stage("write_payload", output_path=str(output_path)) as span:
+        output_path.write_text("{}", encoding="utf-8")
+        span.add_result(output_size_bytes=output_path.stat().st_size)
+
+    recorder.write(
+        metrics_path,
+        status="ok",
+        files={"payload": output_path},
+        extra={"example": True},
+    )
+
+    with metrics_path.open("r", encoding="utf-8") as f:
+        payload = json.load(f)
+    assert payload["version"] == sc._PREPARE_STAGE_METRICS_VERSION
+    assert payload["status"] == "ok"
+    assert payload["scope"] == "unit_test"
+    assert payload["stage_count"] == 1
+    assert payload["stages"][0]["name"] == "write_payload"
+    assert payload["stages"][0]["result"]["output_size_bytes"] == 2
+    assert payload["file_sizes_bytes"]["payload"] == 2
+
+
+def test_run_qret_records_stage_metrics_for_subprocess(tmp_path: Path) -> None:
+    script_path = tmp_path / "fake_qret.sh"
+    output_path = tmp_path / "out.json"
+    script_path.write_text(
+        "#!/bin/sh\n"
+        "printf '{\"ok\":true}' > \"$1\"\n",
+        encoding="utf-8",
+    )
+    script_path.chmod(0o755)
+    recorder = sc._StageMetricsRecorder(
+        scope="unit_test_qret",
+        metadata={"case": "fake_qret"},
+    )
+
+    result = sc._run_qret(
+        [str(script_path), str(output_path)],
+        runtime_root=tmp_path,
+        stage_recorder=recorder,
+        stage_name="fake_qret",
+        stage_details={"output_path": str(output_path)},
+    )
+
+    summary = recorder.summary(status="ok", files={"output": output_path})
+    stage = summary["stages"][0]
+    assert result["returncode"] == 0
+    assert stage["name"] == "fake_qret"
+    assert stage["result"]["returncode"] == 0
+    assert stage["result"]["output_size_bytes"] == output_path.stat().st_size
+    assert summary["file_sizes_bytes"]["output"] == output_path.stat().st_size
+    if stage["result"]["gnu_time_used"]:
+        assert stage["result"]["subprocess_maxrss_kb"] > 0
