@@ -43,6 +43,7 @@ from .config import (
     SURFACE_CODE_REACTION_TIME,
     SURFACE_CODE_RZ_CALL_CACHE,
     SURFACE_CODE_RZ_CALL_CACHE_ROUND_DIGITS,
+    SURFACE_CODE_SAVE_MAPPING_RESULT,
     SURFACE_CODE_ROTATION_ERROR_BUDGET_FRACTION,
     SURFACE_CODE_ROTATION_PRECISION_FLOOR,
     SURFACE_CODE_ROTATION_PRECISION_MODE,
@@ -70,6 +71,7 @@ class SurfaceCodeArchitecture:
     code_cycle_time_sec: float = SURFACE_CODE_QEC_CODE_CYCLE_TIME_SECONDS
     allowed_failure_prob: float = SURFACE_CODE_QEC_ALLOWED_FAILURE_PROB
     skip_compile_output: bool = SURFACE_CODE_COMPILE_SKIP_OUTPUT
+    save_mapping_result: bool = SURFACE_CODE_SAVE_MAPPING_RESULT
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -88,6 +90,7 @@ class SurfaceCodeArchitecture:
             "code_cycle_time_sec": float(self.code_cycle_time_sec),
             "allowed_failure_prob": float(self.allowed_failure_prob),
             "skip_compile_output": bool(self.skip_compile_output),
+            "save_mapping_result": bool(self.save_mapping_result),
         }
 
     def cache_tag(self) -> str:
@@ -206,6 +209,34 @@ def file_sha256(path: str | Path) -> str:
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _atomic_temp_path(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+    )
+    os.close(fd)
+    return Path(tmp_name)
+
+
+def _atomic_write_json(path: Path, payload: Any, *, indent: int | None = 2) -> None:
+    tmp_path = _atomic_temp_path(path)
+    try:
+        with tmp_path.open("w", encoding="utf-8") as f:
+            if indent is None:
+                json.dump(payload, f, ensure_ascii=True, separators=(",", ":"))
+            else:
+                json.dump(payload, f, ensure_ascii=True, indent=indent)
+        os.replace(tmp_path, path)
+    except Exception:
+        try:
+            tmp_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def grouped_hchain_ham_name(chain_length: int) -> str:
@@ -599,6 +630,25 @@ class _InstructionStreamRecorder:
         }
 
 
+def _optimized_ir_summary_from_stream(
+    stream_summary: Mapping[str, Any],
+) -> dict[str, Any]:
+    scheduled_instruction_count = int(stream_summary["scheduled_instruction_count"])
+    return {
+        "num_logical_qubits": int(stream_summary["num_logical_qubits"]),
+        "instruction_count": scheduled_instruction_count,
+        "instruction_count_semantics": "scheduled_non_control_instructions",
+        "emitted_instruction_count": int(stream_summary["emitted_instruction_count"]),
+        "scheduled_instruction_count": scheduled_instruction_count,
+        "gate_depth": int(stream_summary["gate_depth"]),
+        "step_magic_state_count": int(stream_summary["step_magic_state_count"]),
+        "step_magic_state_depth": int(stream_summary["step_magic_state_depth"]),
+        "peak_magic_layer": int(stream_summary["peak_magic_layer"]),
+        "unresolved_call_count": int(stream_summary["call_count"]),
+        "instruction_stream": dict(stream_summary),
+    }
+
+
 def summarize_optimized_ir(ir_path: str | Path, *, function_name: str = "main") -> Dict[str, Any]:
     path = Path(ir_path).expanduser().resolve()
     with path.open("r", encoding="utf-8") as f:
@@ -634,16 +684,24 @@ def summarize_optimized_ir(ir_path: str | Path, *, function_name: str = "main") 
 
     stream_summary = recorder.summary()
 
-    return {
-        "num_logical_qubits": int(stream_summary["num_logical_qubits"]),
-        "instruction_count": int(stream_summary["scheduled_instruction_count"]),
-        "gate_depth": int(stream_summary["gate_depth"]),
-        "step_magic_state_count": int(stream_summary["step_magic_state_count"]),
-        "step_magic_state_depth": int(stream_summary["step_magic_state_depth"]),
-        "peak_magic_layer": int(stream_summary["peak_magic_layer"]),
-        "unresolved_call_count": int(stream_summary["call_count"]),
-        "instruction_stream": stream_summary,
-    }
+    return _optimized_ir_summary_from_stream(stream_summary)
+
+
+def _optimized_ir_summary_from_inline_or_file(
+    opt_path: Path,
+    cached_opt: Any,
+) -> dict[str, Any]:
+    inline_summary = (
+        cached_opt.get("inline_summary") if isinstance(cached_opt, Mapping) else None
+    )
+    instruction_stream = (
+        inline_summary.get("instruction_stream")
+        if isinstance(inline_summary, Mapping)
+        else None
+    )
+    if isinstance(instruction_stream, Mapping):
+        return _optimized_ir_summary_from_stream(instruction_stream)
+    return summarize_optimized_ir(opt_path)
 
 
 _RZ_QASM_LINE_RE = re.compile(
@@ -1043,7 +1101,7 @@ def _python_inline_ir(
     num_qubits = int(functions[function_name]["num_qubits"])
     recorder = _InstructionStreamRecorder(num_qubits=num_qubits)
     output_ir_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = output_ir_path.with_name(f"{output_ir_path.name}.tmp")
+    tmp_path = _atomic_temp_path(output_ir_path)
     try:
         write_streamed_ir(tmp_path=tmp_path, recorder=recorder)
         os.replace(tmp_path, output_ir_path)
@@ -1061,7 +1119,18 @@ def _python_inline_ir(
         "output_path": str(output_ir_path),
         "function_name": function_name,
         "elapsed_seconds": float(time.perf_counter() - started),
-        "instruction_count": int(stream_summary["emitted_instruction_count"]),
+        "emitted_instruction_count": int(stream_summary["emitted_instruction_count"]),
+        "scheduled_instruction_count": int(
+            stream_summary["scheduled_instruction_count"]
+        ),
+        "instruction_count_semantics": {
+            "emitted_instruction_count": (
+                "all emitted flat IR instructions including Return"
+            ),
+            "scheduled_instruction_count": (
+                "non-control instructions included in depth scheduling"
+            ),
+        },
         "instruction_stream": stream_summary,
     }
 
@@ -1095,8 +1164,7 @@ def _run_rz_call_cached_opt(
 
     cache_dir = runtime_root / "rz_call_cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
-    with (runtime_root / "rz_call_cache_metadata.json").open("w", encoding="utf-8") as f:
-        json.dump(rz_metadata, f, ensure_ascii=True, indent=2)
+    _atomic_write_json(runtime_root / "rz_call_cache_metadata.json", rz_metadata)
 
     current_input = ir_path
     helper_passes = [
@@ -1146,8 +1214,7 @@ def _run_rz_call_cached_opt(
         rotation_precision=rotation_precision,
     )
     inline_summary = _python_inline_ir(main_pre_inline, opt_path, function_name="main")
-    with (runtime_root / "python_inline_summary.json").open("w", encoding="utf-8") as f:
-        json.dump(inline_summary, f, ensure_ascii=True, indent=2)
+    _atomic_write_json(runtime_root / "python_inline_summary.json", inline_summary)
     return {
         "mode": "rz_call_cached_streaming_python_inline",
         "helper_count": int(len(helpers)),
@@ -1442,13 +1509,15 @@ def prepare_grouped_surface_code_step_artifact(
             rotation_precision=rot_precision,
         )
 
-    summary = summarize_optimized_ir(opt_path)
+    summary = _optimized_ir_summary_from_inline_or_file(
+        opt_path,
+        rz_metadata.get("cached_opt"),
+    )
     if isinstance(summary.get("instruction_stream"), Mapping):
-        with (runtime_root / "step_instruction_stream_summary.json").open(
-            "w",
-            encoding="utf-8",
-        ) as f:
-            json.dump(summary["instruction_stream"], f, ensure_ascii=True, indent=2)
+        _atomic_write_json(
+            runtime_root / "step_instruction_stream_summary.json",
+            summary["instruction_stream"],
+        )
         rz_metadata["optimized_ir_stream"] = dict(summary["instruction_stream"])
     if int(summary.get("unresolved_call_count", 0)) != 0:
         raise ValueError(
@@ -1481,8 +1550,7 @@ def prepare_grouped_surface_code_step_artifact(
         gate_depth=int(summary["gate_depth"]),
         rz_call_cache=dict(rz_metadata),
     )
-    with (runtime_root / "step_artifact.json").open("w", encoding="utf-8") as f:
-        json.dump(artifact.to_dict(), f, ensure_ascii=True, indent=2)
+    _atomic_write_json(runtime_root / "step_artifact.json", artifact.to_dict())
     return artifact
 
 
@@ -1617,8 +1685,7 @@ def _extract_mapping_result(
         "magic_factory_mapping_count": int(len(magic_factories)),
         "entanglement_factory_mapping_count": int(len(entanglement_factories)),
     }
-    with mapping_result_path.open("w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=True, indent=2)
+    _atomic_write_json(mapping_result_path, payload)
 
 
 def save_surface_code_mapping_result(
@@ -1644,39 +1711,53 @@ def save_surface_code_mapping_result(
         }
 
     qret_path = Path(architecture.qret_path).expanduser().resolve()
-    mapping_yaml_path = runtime_root / "mapping.yaml"
-    mapping_state_path = runtime_root / "mapping_state.tmp.json"
-    mapping_compile_info_path = runtime_root / "mapping_compile_info.json"
-    mapping_yaml_path.write_text(
-        mapping_pipeline_yaml(
-            opt_path=artifact.optimized_ir_path,
-            mapping_state_path=mapping_state_path,
-            mapping_compile_info_path=mapping_compile_info_path,
-            architecture=architecture,
-        ),
-        encoding="utf-8",
+    mapping_yaml_path = _atomic_temp_path(runtime_root / "mapping.yaml")
+    mapping_state_path = _atomic_temp_path(runtime_root / "mapping_state.json")
+    mapping_compile_info_path = _atomic_temp_path(
+        runtime_root / "mapping_compile_info.json"
     )
-    _run_qret(
-        [
-            str(qret_path),
-            "compile",
-            "--pipeline",
-            str(mapping_yaml_path),
-            "--verbose",
-        ],
-        runtime_root=runtime_root,
-        rotation_precision=artifact.rotation_precision,
-    )
-    _extract_mapping_result(
-        mapping_state_path=mapping_state_path,
-        mapping_result_path=mapping_result_path,
-        artifact=artifact,
-        architecture=architecture,
-    )
+    for output_path in (mapping_state_path, mapping_compile_info_path):
+        try:
+            output_path.unlink()
+        except FileNotFoundError:
+            pass
     try:
-        mapping_state_path.unlink()
-    except FileNotFoundError:
-        pass
+        mapping_yaml_path.write_text(
+            mapping_pipeline_yaml(
+                opt_path=artifact.optimized_ir_path,
+                mapping_state_path=mapping_state_path,
+                mapping_compile_info_path=mapping_compile_info_path,
+                architecture=architecture,
+            ),
+            encoding="utf-8",
+        )
+        _run_qret(
+            [
+                str(qret_path),
+                "compile",
+                "--pipeline",
+                str(mapping_yaml_path),
+                "--verbose",
+            ],
+            runtime_root=runtime_root,
+            rotation_precision=artifact.rotation_precision,
+        )
+        _extract_mapping_result(
+            mapping_state_path=mapping_state_path,
+            mapping_result_path=mapping_result_path,
+            artifact=artifact,
+            architecture=architecture,
+        )
+    finally:
+        for tmp_path in (
+            mapping_state_path,
+            mapping_yaml_path,
+            mapping_compile_info_path,
+        ):
+            try:
+                tmp_path.unlink()
+            except FileNotFoundError:
+                pass
     return {
         "mapping_result_json": str(mapping_result_path),
         "mapping_result_hash": file_sha256(mapping_result_path),
@@ -1745,12 +1826,19 @@ def compile_prepared_surface_code_step_artifact(
         )
     elapsed = float(time.perf_counter() - started)
 
-    mapping_metadata = save_surface_code_mapping_result(
-        artifact=artifact,
-        architecture=architecture,
-        runtime_root=runtime_root,
-        reuse_cache=reuse_cache,
-    )
+    if architecture.save_mapping_result:
+        mapping_metadata = save_surface_code_mapping_result(
+            artifact=artifact,
+            architecture=architecture,
+            runtime_root=runtime_root,
+            reuse_cache=reuse_cache,
+        )
+    else:
+        mapping_metadata = {
+            "mapping_result_json": None,
+            "mapping_result_hash": None,
+            "mapping_result_unavailable_reason": "disabled",
+        }
     metrics = surface_code_step_metrics_from_compile_info_json(compile_info_path)
     cache_key = surface_code_compile_cache_key(artifact, architecture)
     metrics.update(
@@ -1805,8 +1893,7 @@ def compile_prepared_surface_code_step_artifact(
     ):
         if key in metrics:
             normalized[key] = metrics[key]
-    with (runtime_root / "step_metrics.json").open("w", encoding="utf-8") as f:
-        json.dump(normalized, f, ensure_ascii=True, indent=2)
+    _atomic_write_json(runtime_root / "step_metrics.json", normalized)
     return normalized
 
 

@@ -252,6 +252,9 @@ def build_architecture_for_case(
         skip_compile_output=bool(
             case.get("skip_compile_output", defaults.get("skip_compile_output", True))
         ),
+        save_mapping_result=bool(
+            case.get("save_mapping_result", defaults.get("save_mapping_result", False))
+        ),
     )
     return architecture, stock_policy, resolved_stock, topology_name, topology_path
 
