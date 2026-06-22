@@ -8,6 +8,7 @@ __pycache__/
 .ruff_cache/
 .ipynb_checkpoints/
 artifacts/surface_code_cache/
+artifacts/surface_code_experiments/
 artifacts/surface_code_architecture_sweep/
 artifacts/implementation_visual_overview/
 artifacts/surface_code_share/quration_topology_free_memory_note_logs_*/
