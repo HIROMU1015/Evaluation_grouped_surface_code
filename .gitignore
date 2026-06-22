@@ -1,6 +1,8 @@
 .venv/
+.venv*/
 __pycache__/
 *.py[cod]
+*.egg-info/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -8,4 +10,8 @@ __pycache__/
 artifacts/surface_code_cache/
 artifacts/surface_code_architecture_sweep/
 artifacts/implementation_visual_overview/
+artifacts/surface_code_share/quration_topology_free_memory_note_logs_*/
+artifacts/surface_code_share/quration_topology_free_memory_note_logs_*.tar.gz
+docs/quration_memory_measurement_plan.md
+docs/quration_topology_free_memory_note.md
 Quration_QS18*.pdf

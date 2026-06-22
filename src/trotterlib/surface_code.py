@@ -524,6 +524,81 @@ def _ir_instruction_qubits(inst: Mapping[str, Any]) -> list[int]:
     return []
 
 
+def _canonical_json_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            str(key): _canonical_json_value(value[key])
+            for key in sorted(value, key=lambda item: str(item))
+        }
+    if isinstance(value, list):
+        return [_canonical_json_value(item) for item in value]
+    return value
+
+
+def _normalized_instruction_line(inst: Mapping[str, Any]) -> str:
+    return json.dumps(
+        _canonical_json_value(inst),
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+class _InstructionStreamRecorder:
+    def __init__(self, *, num_qubits: int) -> None:
+        if int(num_qubits) < 0:
+            raise ValueError(f"Invalid num_qubits={num_qubits}")
+        self._stream_hash = hashlib.sha256()
+        self._qubit_depth = [0] * int(num_qubits)
+        self._magic_layers: dict[int, int] = {}
+        self._opcode_count: dict[str, int] = {}
+        self._emitted_instruction_count = 0
+        self._scheduled_instruction_count = 0
+        self._call_count = 0
+        self._magic_count = 0
+
+    def observe(self, inst: Mapping[str, Any]) -> None:
+        opcode = str(inst.get("opcode"))
+        self._stream_hash.update(_normalized_instruction_line(inst).encode("utf-8"))
+        self._stream_hash.update(b"\n")
+        self._emitted_instruction_count += 1
+        self._opcode_count[opcode] = self._opcode_count.get(opcode, 0) + 1
+
+        if opcode in _INLINE_IGNORED_OPS:
+            return
+        if opcode == "Call":
+            self._call_count += 1
+            return
+
+        qargs = _ir_instruction_qubits(inst)
+        if not qargs:
+            return
+        if max(qargs) >= len(self._qubit_depth):
+            self._qubit_depth.extend([0] * (max(qargs) + 1 - len(self._qubit_depth)))
+        layer = max(self._qubit_depth[q] for q in qargs) + 1
+        for q in qargs:
+            self._qubit_depth[q] = layer
+        self._scheduled_instruction_count += 1
+        if opcode in {"T", "TDag"}:
+            self._magic_count += 1
+            self._magic_layers[layer] = self._magic_layers.get(layer, 0) + 1
+
+    def summary(self) -> dict[str, Any]:
+        return {
+            "version": _IR_STREAM_SUMMARY_VERSION,
+            "normalized_instruction_stream_hash": self._stream_hash.hexdigest(),
+            "emitted_instruction_count": int(self._emitted_instruction_count),
+            "scheduled_instruction_count": int(self._scheduled_instruction_count),
+            "call_count": int(self._call_count),
+            "opcode_count": dict(sorted(self._opcode_count.items())),
+            "num_logical_qubits": int(len(self._qubit_depth)),
+            "gate_depth": int(max(self._qubit_depth, default=0)),
+            "step_magic_state_count": int(self._magic_count),
+            "step_magic_state_depth": int(len(self._magic_layers)),
+            "peak_magic_layer": int(max(self._magic_layers.values(), default=0)),
+        }
+
+
 def summarize_optimized_ir(ir_path: str | Path, *, function_name: str = "main") -> Dict[str, Any]:
     path = Path(ir_path).expanduser().resolve()
     with path.open("r", encoding="utf-8") as f:
@@ -551,43 +626,23 @@ def summarize_optimized_ir(ir_path: str | Path, *, function_name: str = "main") 
     if not isinstance(inst_list, list):
         raise ValueError(f"Invalid inst_list for '{function_name}' in {path}")
 
-    qubit_depth = [0] * max(num_qubits, 0)
-    magic_layers: dict[int, int] = {}
-    magic_count = 0
-    scheduled_inst_count = 0
-    unsupported_calls = 0
-
+    recorder = _InstructionStreamRecorder(num_qubits=num_qubits)
     for inst in inst_list:
         if not isinstance(inst, Mapping):
             continue
-        opcode = str(inst.get("opcode"))
-        if opcode in _INLINE_IGNORED_OPS:
-            continue
-        if opcode == "Call":
-            unsupported_calls += 1
-            continue
+        recorder.observe(inst)
 
-        qargs = _ir_instruction_qubits(inst)
-        if not qargs:
-            continue
-        if max(qargs) >= len(qubit_depth):
-            qubit_depth.extend([0] * (max(qargs) + 1 - len(qubit_depth)))
-        layer = max(qubit_depth[q] for q in qargs) + 1
-        for q in qargs:
-            qubit_depth[q] = layer
-        scheduled_inst_count += 1
-        if opcode in {"T", "TDag"}:
-            magic_count += 1
-            magic_layers[layer] = magic_layers.get(layer, 0) + 1
+    stream_summary = recorder.summary()
 
     return {
-        "num_logical_qubits": int(len(qubit_depth)),
-        "instruction_count": int(scheduled_inst_count),
-        "gate_depth": int(max(qubit_depth, default=0)),
-        "step_magic_state_count": int(magic_count),
-        "step_magic_state_depth": int(len(magic_layers)),
-        "peak_magic_layer": int(max(magic_layers.values(), default=0)),
-        "unresolved_call_count": int(unsupported_calls),
+        "num_logical_qubits": int(stream_summary["num_logical_qubits"]),
+        "instruction_count": int(stream_summary["scheduled_instruction_count"]),
+        "gate_depth": int(stream_summary["gate_depth"]),
+        "step_magic_state_count": int(stream_summary["step_magic_state_count"]),
+        "step_magic_state_depth": int(stream_summary["step_magic_state_depth"]),
+        "peak_magic_layer": int(stream_summary["peak_magic_layer"]),
+        "unresolved_call_count": int(stream_summary["call_count"]),
+        "instruction_stream": stream_summary,
     }
 
 
@@ -595,6 +650,10 @@ _RZ_QASM_LINE_RE = re.compile(
     r"^(?P<indent>\s*)rz\((?P<theta>[^;\n]+)\)\s+"
     r"(?P<target>[A-Za-z_][A-Za-z0-9_]*(?:\[\d+\])?)\s*;\s*$"
 )
+_IR_ROTATION_PRECISION_REWRITE_VERSION = "ir_param_rotation_precision_v1"
+_IR_STREAM_SUMMARY_VERSION = "ir_instruction_stream_summary_v1"
+_PYTHON_INLINE_IR_VERSION = "python_streaming_inline_ir_v1"
+_PARAMETRIZED_ROTATION_OPS = {"RX", "RY", "RZ"}
 
 
 def _eval_qasm_angle(theta: str) -> float:
@@ -671,6 +730,58 @@ def _rewrite_qasm_rz_as_calls(qasm_text: str) -> tuple[str, dict[str, Any]]:
         "unique_rotation_count": int(len(key_to_gate)),
         "round_digits": SURFACE_CODE_RZ_CALL_CACHE_ROUND_DIGITS,
         "helpers": list(key_to_gate.values()),
+    }
+
+
+def _rewrite_ir_rotation_precision(
+    ir_path: Path,
+    *,
+    rotation_precision: float,
+) -> dict[str, Any]:
+    precision = float(rotation_precision)
+    if not np.isfinite(precision) or precision <= 0:
+        raise ValueError(f"rotation precision must be positive: {rotation_precision}")
+
+    with Path(ir_path).open("r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    scanned = 0
+    rewritten = 0
+    for circuit in data.get("circuit_list", []):
+        if not isinstance(circuit, Mapping):
+            continue
+        for bb in circuit.get("bb_list", []):
+            if not isinstance(bb, Mapping):
+                continue
+            inst_list = bb.get("inst_list", [])
+            if not isinstance(inst_list, list):
+                continue
+            for inst in inst_list:
+                if not isinstance(inst, Mapping):
+                    continue
+                if str(inst.get("opcode")) not in _PARAMETRIZED_ROTATION_OPS:
+                    continue
+                theta = inst.get("theta")
+                if not isinstance(theta, Mapping):
+                    continue
+                scanned += 1
+                try:
+                    if float(theta.get("precision")) == precision:
+                        continue
+                except (TypeError, ValueError):
+                    pass
+                theta["precision"] = precision
+                rewritten += 1
+
+    with Path(ir_path).open("w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=True, separators=(",", ":"))
+
+    return {
+        "version": _IR_ROTATION_PRECISION_REWRITE_VERSION,
+        "precision": precision,
+        "parametrized_rotation_count": int(scanned),
+        "rewritten_rotation_count": int(rewritten),
+        "opcodes": sorted(_PARAMETRIZED_ROTATION_OPS),
     }
 
 
@@ -775,6 +886,7 @@ def _python_inline_ir(
     *,
     function_name: str = "main",
 ) -> dict[str, Any]:
+    started = time.perf_counter()
     with input_ir_path.open("r", encoding="utf-8") as f:
         data = json.load(f)
 
@@ -802,12 +914,30 @@ def _python_inline_ir(
     if function_name not in functions or target_item is None:
         raise ValueError(f"Circuit '{function_name}' not found in {input_ir_path}")
 
-    inlined: list[dict[str, Any]] = []
-
     def map_qubit(qubit_map: Sequence[int], value: Any) -> int:
         return int(qubit_map[int(value)])
 
-    def unroll(name: str, qubit_map: Sequence[int], stack: tuple[str, ...]) -> None:
+    def mapped_instruction(inst: Mapping[str, Any], qubit_map: Sequence[int]) -> dict[str, Any]:
+        opcode = str(inst.get("opcode"))
+        new_inst = dict(inst)
+        if opcode in _INLINE_ONE_QUBIT_OPS:
+            new_inst["q"] = map_qubit(qubit_map, new_inst["q"])
+        elif opcode in _INLINE_TWO_QUBIT_OPS:
+            new_inst["q0"] = map_qubit(qubit_map, new_inst["q0"])
+            new_inst["q1"] = map_qubit(qubit_map, new_inst["q1"])
+        elif opcode in _INLINE_THREE_QUBIT_OPS:
+            new_inst["q0"] = map_qubit(qubit_map, new_inst["q0"])
+            new_inst["q1"] = map_qubit(qubit_map, new_inst["q1"])
+            new_inst["q2"] = map_qubit(qubit_map, new_inst["q2"])
+        else:
+            raise ValueError(f"Unsupported opcode '{opcode}'")
+        return new_inst
+
+    def iter_unrolled(
+        name: str,
+        qubit_map: Sequence[int],
+        stack: tuple[str, ...],
+    ) -> Any:
         if name in stack:
             raise ValueError("Recursive Call cycle detected: " + " -> ".join((*stack, name)))
         function = functions.get(name)
@@ -823,33 +953,117 @@ def _python_inline_ir(
                 if not isinstance(callee, str) or not isinstance(operate, list):
                     raise ValueError(f"Invalid Call in {name}")
                 child_map = [map_qubit(qubit_map, q) for q in operate]
-                unroll(callee, child_map, (*stack, name))
+                yield from iter_unrolled(callee, child_map, (*stack, name))
                 continue
             if opcode in _INLINE_IGNORED_OPS:
                 continue
-            new_inst = dict(inst)
-            if opcode in _INLINE_ONE_QUBIT_OPS:
-                new_inst["q"] = map_qubit(qubit_map, new_inst["q"])
-            elif opcode in _INLINE_TWO_QUBIT_OPS:
-                new_inst["q0"] = map_qubit(qubit_map, new_inst["q0"])
-                new_inst["q1"] = map_qubit(qubit_map, new_inst["q1"])
-            elif opcode in _INLINE_THREE_QUBIT_OPS:
-                new_inst["q0"] = map_qubit(qubit_map, new_inst["q0"])
-                new_inst["q1"] = map_qubit(qubit_map, new_inst["q1"])
-                new_inst["q2"] = map_qubit(qubit_map, new_inst["q2"])
-            else:
-                raise ValueError(f"Unsupported opcode '{opcode}'")
-            inlined.append(new_inst)
+            yield mapped_instruction(inst, qubit_map)
+
+    def write_json_field(
+        f: Any,
+        key: str,
+        value: Any,
+        *,
+        first: bool,
+    ) -> bool:
+        if not first:
+            f.write(",")
+        json.dump(str(key), f, ensure_ascii=True, separators=(",", ":"))
+        f.write(":")
+        json.dump(value, f, ensure_ascii=True, separators=(",", ":"))
+        return False
+
+    def write_streamed_ir(
+        *,
+        tmp_path: Path,
+        recorder: _InstructionStreamRecorder,
+    ) -> None:
+        target = dict(target_item or {})
+        bb_list = target.get("bb_list")
+        if not isinstance(bb_list, list) or len(bb_list) != 1:
+            raise ValueError(f"Python inliner only supports one basic block: {function_name}")
+        target_bb = dict(bb_list[0])
+        num_qubits = int(functions[function_name]["num_qubits"])
+
+        with tmp_path.open("w", encoding="utf-8") as f:
+            f.write("{")
+            first_top = True
+            for key, value in data.items():
+                if key == "circuit_list":
+                    continue
+                first_top = write_json_field(f, str(key), value, first=first_top)
+
+            if not first_top:
+                f.write(",")
+            json.dump("circuit_list", f, ensure_ascii=True, separators=(",", ":"))
+            f.write(":[{")
+
+            first_circuit = True
+            for key, value in target.items():
+                if key == "bb_list":
+                    continue
+                first_circuit = write_json_field(
+                    f,
+                    str(key),
+                    value,
+                    first=first_circuit,
+                )
+
+            if not first_circuit:
+                f.write(",")
+            json.dump("bb_list", f, ensure_ascii=True, separators=(",", ":"))
+            f.write(":[{")
+
+            first_bb = True
+            for key, value in target_bb.items():
+                if key == "inst_list":
+                    continue
+                first_bb = write_json_field(f, str(key), value, first=first_bb)
+
+            if not first_bb:
+                f.write(",")
+            json.dump("inst_list", f, ensure_ascii=True, separators=(",", ":"))
+            f.write(":[")
+
+            first_inst = True
+            for inst in iter_unrolled(function_name, list(range(num_qubits)), ()):
+                if not first_inst:
+                    f.write(",")
+                json.dump(inst, f, ensure_ascii=True, separators=(",", ":"))
+                recorder.observe(inst)
+                first_inst = False
+
+            return_inst = {"opcode": "Return"}
+            if not first_inst:
+                f.write(",")
+            json.dump(return_inst, f, ensure_ascii=True, separators=(",", ":"))
+            recorder.observe(return_inst)
+            f.write("]}]}]}")
 
     num_qubits = int(functions[function_name]["num_qubits"])
-    unroll(function_name, list(range(num_qubits)), ())
-    inlined.append({"opcode": "Return"})
-    target_item["bb_list"][0]["inst_list"] = inlined
-    data["circuit_list"] = [target_item]
+    recorder = _InstructionStreamRecorder(num_qubits=num_qubits)
     output_ir_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_ir_path.open("w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=True, separators=(",", ":"))
-    return {"instruction_count": int(len(inlined))}
+    tmp_path = output_ir_path.with_name(f"{output_ir_path.name}.tmp")
+    try:
+        write_streamed_ir(tmp_path=tmp_path, recorder=recorder)
+        os.replace(tmp_path, output_ir_path)
+    except Exception:
+        try:
+            tmp_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+
+    stream_summary = recorder.summary()
+    return {
+        "version": _PYTHON_INLINE_IR_VERSION,
+        "input_path": str(input_ir_path),
+        "output_path": str(output_ir_path),
+        "function_name": function_name,
+        "elapsed_seconds": float(time.perf_counter() - started),
+        "instruction_count": int(stream_summary["emitted_instruction_count"]),
+        "instruction_stream": stream_summary,
+    }
 
 
 def _run_rz_call_cached_opt(
@@ -860,7 +1074,7 @@ def _run_rz_call_cached_opt(
     opt_path: Path,
     rz_metadata: Mapping[str, Any],
     rotation_precision: float,
-) -> None:
+) -> dict[str, Any]:
     helpers = [
         dict(item)
         for item in rz_metadata.get("helpers", [])
@@ -877,7 +1091,7 @@ def _run_rz_call_cached_opt(
             runtime_root=runtime_root,
             rotation_precision=rotation_precision,
         )
-        return
+        return {"mode": "qret_opt_without_rz_helpers"}
 
     cache_dir = runtime_root / "rz_call_cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -931,7 +1145,15 @@ def _run_rz_call_cached_opt(
         runtime_root=runtime_root,
         rotation_precision=rotation_precision,
     )
-    _python_inline_ir(main_pre_inline, opt_path, function_name="main")
+    inline_summary = _python_inline_ir(main_pre_inline, opt_path, function_name="main")
+    with (runtime_root / "python_inline_summary.json").open("w", encoding="utf-8") as f:
+        json.dump(inline_summary, f, ensure_ascii=True, indent=2)
+    return {
+        "mode": "rz_call_cached_streaming_python_inline",
+        "helper_count": int(len(helpers)),
+        "main_pre_inline_path": str(main_pre_inline),
+        "inline_summary": inline_summary,
+    }
 
 
 def compile_pipeline_yaml(
@@ -973,6 +1195,37 @@ def compile_pipeline_yaml(
             "",
         ]
     )
+    return "\n".join(lines)
+
+
+def mapping_pipeline_yaml(
+    *,
+    opt_path: Path,
+    mapping_state_path: Path,
+    mapping_compile_info_path: Path,
+    architecture: SurfaceCodeArchitecture,
+) -> str:
+    topology_path = Path(architecture.topology_path).expanduser().resolve()
+    lines = [
+        "source: IR",
+        f"input: {opt_path}",
+        "function: main",
+        "target: SC_LS_FIXED_V0",
+        f"output: {mapping_state_path}",
+        f"sc_ls_fixed_v0_topology: {topology_path}",
+        f"sc_ls_fixed_v0_machine_type: {architecture.machine_type}",
+        f"sc_ls_fixed_v0_magic_generation_period: {int(architecture.magic_generation_period)}",
+        f"sc_ls_fixed_v0_maximum_magic_state_stock: {int(architecture.maximum_magic_state_stock)}",
+        f"sc_ls_fixed_v0_entanglement_generation_period: {int(architecture.entanglement_generation_period)}",
+        f"sc_ls_fixed_v0_maximum_entangled_state_stock: {int(architecture.maximum_entangled_state_stock)}",
+        f"sc_ls_fixed_v0_reaction_time: {int(architecture.reaction_time)}",
+        f"sc_ls_fixed_v0_dump_compile_info_to_json: {mapping_compile_info_path}",
+        "sc_ls_fixed_v0_pass:",
+        "  - sc_ls_fixed_v0::init_compile_info",
+        "  - sc_ls_fixed_v0::mapping",
+        "  - sc_ls_fixed_v0::dump_compile_info",
+        "",
+    ]
     return "\n".join(lines)
 
 
@@ -1034,6 +1287,9 @@ def _step_artifact_cache_key(
         "qasm_decompose_reps": int(SURFACE_CODE_QASM_DECOMPOSE_REPS),
         "rz_call_cache": bool(SURFACE_CODE_RZ_CALL_CACHE),
         "rz_call_cache_round_digits": SURFACE_CODE_RZ_CALL_CACHE_ROUND_DIGITS,
+        "ir_rotation_precision_rewrite": _IR_ROTATION_PRECISION_REWRITE_VERSION,
+        "ir_stream_summary": _IR_STREAM_SUMMARY_VERSION,
+        "python_inline_ir": _PYTHON_INLINE_IR_VERSION,
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()[:16]
@@ -1155,8 +1411,12 @@ def prepare_grouped_surface_code_step_artifact(
         runtime_root=runtime_root,
         rotation_precision=rot_precision,
     )
+    rz_metadata["ir_rotation_precision"] = _rewrite_ir_rotation_precision(
+        ir_path,
+        rotation_precision=rot_precision,
+    )
     if rz_metadata.get("enabled"):
-        _run_rz_call_cached_opt(
+        rz_metadata["cached_opt"] = _run_rz_call_cached_opt(
             qret_path=qret_path,
             runtime_root=runtime_root,
             ir_path=ir_path,
@@ -1183,6 +1443,13 @@ def prepare_grouped_surface_code_step_artifact(
         )
 
     summary = summarize_optimized_ir(opt_path)
+    if isinstance(summary.get("instruction_stream"), Mapping):
+        with (runtime_root / "step_instruction_stream_summary.json").open(
+            "w",
+            encoding="utf-8",
+        ) as f:
+            json.dump(summary["instruction_stream"], f, ensure_ascii=True, indent=2)
+        rz_metadata["optimized_ir_stream"] = dict(summary["instruction_stream"])
     if int(summary.get("unresolved_call_count", 0)) != 0:
         raise ValueError(
             "Optimized IR still contains Call instructions; "
@@ -1260,6 +1527,163 @@ def surface_code_compile_cache_key(
     return hashlib.sha256(encoded).hexdigest()[:16]
 
 
+def _single_int(values: Any) -> int | None:
+    if not isinstance(values, list) or not values:
+        return None
+    return int(values[0])
+
+
+def _coord_list(value: Any) -> list[int] | None:
+    if not isinstance(value, list):
+        return None
+    return [int(item) for item in value]
+
+
+def _extract_mapping_result(
+    *,
+    mapping_state_path: Path,
+    mapping_result_path: Path,
+    artifact: SurfaceCodeStepArtifact,
+    architecture: SurfaceCodeArchitecture,
+) -> None:
+    with mapping_state_path.open("r", encoding="utf-8") as f:
+        state = json.load(f)
+
+    logical_qubits: list[dict[str, Any]] = []
+    magic_factories: list[dict[str, Any]] = []
+    entanglement_factories: list[dict[str, Any]] = []
+    for inst in state.get("program", []):
+        if not isinstance(inst, Mapping):
+            continue
+        inst_type = str(inst.get("type"))
+        coord = _coord_list(inst.get("dest"))
+        metadata = inst.get("metadata") if isinstance(inst.get("metadata"), Mapping) else {}
+        entry = {
+            "coord": coord,
+            "beat": metadata.get("beat"),
+            "z": metadata.get("z"),
+            "raw": inst.get("raw"),
+        }
+        if inst_type == "ALLOCATE":
+            logical_qubit = _single_int(inst.get("qtarget"))
+            if logical_qubit is None:
+                continue
+            logical_qubits.append(
+                {
+                    "logical_qubit": logical_qubit,
+                    "dir": inst.get("dir"),
+                    **entry,
+                }
+            )
+        elif inst_type == "ALLOCATE_MAGIC_FACTORY":
+            symbol = _single_int(inst.get("mtarget"))
+            if symbol is None:
+                continue
+            magic_factories.append({"symbol": symbol, **entry})
+        elif inst_type == "ALLOCATE_ENTANGLEMENT_FACTORY":
+            symbol = _single_int(inst.get("etarget"))
+            if symbol is None:
+                symbol = _single_int(inst.get("ehtarget"))
+            if symbol is None:
+                continue
+            entanglement_factories.append({"symbol": symbol, **entry})
+
+    logical_qubits.sort(key=lambda item: int(item["logical_qubit"]))
+    magic_factories.sort(key=lambda item: int(item["symbol"]))
+    entanglement_factories.sort(key=lambda item: int(item["symbol"]))
+
+    topology_path = Path(architecture.topology_path).expanduser().resolve()
+    payload = {
+        "format": "quration_sc_ls_fixed_v0_mapping",
+        "schema_version": "0.1",
+        "ham_name": artifact.ham_name,
+        "molecule": artifact.molecule,
+        "pf_label": artifact.pf_label,
+        "num_logical_qubits": int(artifact.num_logical_qubits),
+        "optimized_ir_hash": artifact.optimized_ir_hash,
+        "compile_mode": architecture.compile_mode,
+        "topology_path": str(topology_path),
+        "topology_hash": file_sha256(topology_path),
+        "machine_type": architecture.machine_type,
+        "magic_generation_period": int(architecture.magic_generation_period),
+        "maximum_magic_state_stock": int(architecture.maximum_magic_state_stock),
+        "entanglement_generation_period": int(architecture.entanglement_generation_period),
+        "maximum_entangled_state_stock": int(architecture.maximum_entangled_state_stock),
+        "reaction_time": int(architecture.reaction_time),
+        "logical_qubit_mapping": logical_qubits,
+        "magic_factory_mapping": magic_factories,
+        "entanglement_factory_mapping": entanglement_factories,
+        "logical_qubit_mapping_count": int(len(logical_qubits)),
+        "magic_factory_mapping_count": int(len(magic_factories)),
+        "entanglement_factory_mapping_count": int(len(entanglement_factories)),
+    }
+    with mapping_result_path.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=True, indent=2)
+
+
+def save_surface_code_mapping_result(
+    *,
+    artifact: SurfaceCodeStepArtifact,
+    architecture: SurfaceCodeArchitecture,
+    runtime_root: Path,
+    reuse_cache: bool = True,
+) -> dict[str, Any]:
+    if not _compile_uses_topology(architecture.compile_mode):
+        return {
+            "mapping_result_json": None,
+            "mapping_result_hash": None,
+            "mapping_result_unavailable_reason": "requires_topology_compile_mode",
+        }
+
+    mapping_result_path = runtime_root / "mapping.json"
+    if reuse_cache and mapping_result_path.exists():
+        return {
+            "mapping_result_json": str(mapping_result_path),
+            "mapping_result_hash": file_sha256(mapping_result_path),
+            "mapping_result_unavailable_reason": None,
+        }
+
+    qret_path = Path(architecture.qret_path).expanduser().resolve()
+    mapping_yaml_path = runtime_root / "mapping.yaml"
+    mapping_state_path = runtime_root / "mapping_state.tmp.json"
+    mapping_compile_info_path = runtime_root / "mapping_compile_info.json"
+    mapping_yaml_path.write_text(
+        mapping_pipeline_yaml(
+            opt_path=artifact.optimized_ir_path,
+            mapping_state_path=mapping_state_path,
+            mapping_compile_info_path=mapping_compile_info_path,
+            architecture=architecture,
+        ),
+        encoding="utf-8",
+    )
+    _run_qret(
+        [
+            str(qret_path),
+            "compile",
+            "--pipeline",
+            str(mapping_yaml_path),
+            "--verbose",
+        ],
+        runtime_root=runtime_root,
+        rotation_precision=artifact.rotation_precision,
+    )
+    _extract_mapping_result(
+        mapping_state_path=mapping_state_path,
+        mapping_result_path=mapping_result_path,
+        artifact=artifact,
+        architecture=architecture,
+    )
+    try:
+        mapping_state_path.unlink()
+    except FileNotFoundError:
+        pass
+    return {
+        "mapping_result_json": str(mapping_result_path),
+        "mapping_result_hash": file_sha256(mapping_result_path),
+        "mapping_result_unavailable_reason": None,
+    }
+
+
 def _compile_runtime_root(
     artifact: SurfaceCodeStepArtifact,
     architecture: SurfaceCodeArchitecture,
@@ -1321,6 +1745,12 @@ def compile_prepared_surface_code_step_artifact(
         )
     elapsed = float(time.perf_counter() - started)
 
+    mapping_metadata = save_surface_code_mapping_result(
+        artifact=artifact,
+        architecture=architecture,
+        runtime_root=runtime_root,
+        reuse_cache=reuse_cache,
+    )
     metrics = surface_code_step_metrics_from_compile_info_json(compile_info_path)
     cache_key = surface_code_compile_cache_key(artifact, architecture)
     metrics.update(
@@ -1344,6 +1774,7 @@ def compile_prepared_surface_code_step_artifact(
             "topology_hash": file_sha256(topology_path)
             if _compile_uses_topology(architecture.compile_mode)
             else None,
+            **mapping_metadata,
             "step_rz_count": int(artifact.step_rz_count),
             "step_rz_layer": artifact.step_rz_layer,
             "step_magic_state_count": int(artifact.step_magic_state_count),
@@ -1363,6 +1794,9 @@ def compile_prepared_surface_code_step_artifact(
         "compiler_executable_path",
         "compiler_executable_hash",
         "topology_hash",
+        "mapping_result_json",
+        "mapping_result_hash",
+        "mapping_result_unavailable_reason",
         "step_rz_count",
         "step_rz_layer",
         "step_magic_state_count",
@@ -1416,7 +1850,16 @@ def normalize_surface_code_step_metrics(
             )
     if "execution_time_sec" in metrics:
         out["execution_time_sec"] = float(metrics["execution_time_sec"])
-    for key in ("source", "compile_info_json", "compile_mode", "generator", "cache_key"):
+    for key in (
+        "source",
+        "compile_info_json",
+        "compile_mode",
+        "generator",
+        "cache_key",
+        "mapping_result_json",
+        "mapping_result_hash",
+        "mapping_result_unavailable_reason",
+    ):
         if metrics.get(key) is not None:
             out[key] = str(metrics[key])
     for key in ("target_error", "step_time", "rotation_precision"):

@@ -55,6 +55,9 @@ RESULT_FIELDS = [
     "topology_name",
     "topology_path",
     "topology_hash",
+    "mapping_result_json",
+    "mapping_result_hash",
+    "mapping_result_unavailable_reason",
     "machine_type",
     "magic_generation_period",
     "resolved_maximum_magic_state_stock",
@@ -71,8 +74,8 @@ RESULT_FIELDS = [
     "runtime_without_topology_unavailable_reason",
     "runtime_with_topology",
     "runtime_with_topology_unavailable_reason",
-    "routing_overhead",
-    "routing_overhead_unavailable_reason",
+    "runtime_difference_vs_topology_free",
+    "runtime_difference_vs_topology_free_unavailable_reason",
     "chip_cells",
     "chip_cells_unavailable_reason",
     "qubit_volume",
@@ -93,8 +96,8 @@ RESULT_FIELDS = [
     "total_runtime_without_topology_unavailable_reason",
     "total_runtime_with_topology",
     "total_runtime_with_topology_unavailable_reason",
-    "total_routing_overhead",
-    "total_routing_overhead_unavailable_reason",
+    "total_runtime_difference_vs_topology_free",
+    "total_runtime_difference_vs_topology_free_unavailable_reason",
     "total_qubit_volume",
     "total_qubit_volume_unavailable_reason",
     "error_type",
@@ -334,10 +337,10 @@ def _add_qpe_total_resource_fields(row: dict[str, Any]) -> None:
             "total_runtime_with_topology_unavailable_reason",
         ),
         (
-            "routing_overhead",
-            "routing_overhead_unavailable_reason",
-            "total_routing_overhead",
-            "total_routing_overhead_unavailable_reason",
+            "runtime_difference_vs_topology_free",
+            "runtime_difference_vs_topology_free_unavailable_reason",
+            "total_runtime_difference_vs_topology_free",
+            "total_runtime_difference_vs_topology_free_unavailable_reason",
         ),
         (
             "qubit_volume",
@@ -409,13 +412,21 @@ def _compile_info_row(
         row[f"{out_key}_unavailable_reason"] = reason
 
     if row["runtime_with_topology"] is None or row["runtime_without_topology"] is None:
-        row["routing_overhead"] = None
-        row["routing_overhead_unavailable_reason"] = "runtime_metric_unavailable"
+        row["runtime_difference_vs_topology_free"] = None
+        row["runtime_difference_vs_topology_free_unavailable_reason"] = (
+            "runtime_metric_unavailable"
+        )
     else:
-        row["routing_overhead"] = int(row["runtime_with_topology"]) - int(
+        row["runtime_difference_vs_topology_free"] = int(row["runtime_with_topology"]) - int(
             row["runtime_without_topology"]
         )
-        row["routing_overhead_unavailable_reason"] = None
+        row["runtime_difference_vs_topology_free_unavailable_reason"] = None
+
+    row["mapping_result_json"] = metrics.get("mapping_result_json")
+    row["mapping_result_hash"] = metrics.get("mapping_result_hash")
+    row["mapping_result_unavailable_reason"] = metrics.get(
+        "mapping_result_unavailable_reason"
+    )
 
     failure_value, failure_reason = _first_existing_metric(
         raw,
@@ -759,7 +770,7 @@ def _write_markdown_report(rows: list[dict[str, Any]], markdown_path: Path) -> N
                         "runtime topo",
                         "runtime vs baseline",
                         "runtime no topo",
-                        "topo - no topo",
+                        "runtime diff vs no topo",
                         "qubit volume",
                         "qv vs baseline",
                         "cells",
@@ -787,8 +798,10 @@ def _write_markdown_report(rows: list[dict[str, Any]], markdown_path: Path) -> N
                                 row.get("runtime_without_topology_unavailable_reason"),
                             ),
                             _format_report_cell(
-                                row.get("routing_overhead"),
-                                row.get("routing_overhead_unavailable_reason"),
+                                row.get("runtime_difference_vs_topology_free"),
+                                row.get(
+                                    "runtime_difference_vs_topology_free_unavailable_reason"
+                                ),
                             ),
                             _format_report_cell(
                                 row.get("qubit_volume"),
