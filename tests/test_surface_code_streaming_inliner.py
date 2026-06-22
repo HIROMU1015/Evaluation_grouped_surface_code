@@ -436,3 +436,130 @@ def test_prepare_cache_hit_preserves_cold_stage_metrics(
     assert cache_hit_metrics["status"] == "cache_hit"
     assert cache_hit_metrics["cold_run_stage_metrics_exists"] is True
     assert cache_hit_metrics["cold_run_stage_metrics_path"] == str(cold_metrics_path)
+
+
+def test_independent_rz_helper_cache_generate_hit_and_corrupt_invalidate(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    cache_root = tmp_path / "cache"
+    qret_path = tmp_path / "qret"
+    qret_path.write_text("#!/bin/sh\n", encoding="utf-8")
+    full_ir = {
+        "metadata": {"format": "test", "created_at": "first"},
+        "name": "fixture",
+        "circuit_list": [
+            {
+                "name": "__helper()",
+                "entry_point": "entry",
+                "argument": {
+                    "num_qubits": 1,
+                    "qubits": {"arg": 1},
+                    "num_registers": 0,
+                },
+                "num_tmp_registers": 0,
+                "bb_list": [
+                    {
+                        "name": "entry",
+                        "inst_list": [
+                            {
+                                "opcode": "RZ",
+                                "q": 0,
+                                "theta": {"value": 0.125, "precision": 1.0e-5},
+                            },
+                            {"opcode": "Return"},
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    helper = {
+        "function_name": "__helper()",
+        "theta": "0.125",
+        "key": "0.125",
+    }
+    calls: list[dict[str, Any]] = []
+
+    def fake_run_qret(
+        cmd: Any,
+        *,
+        runtime_root: Path,
+        rotation_precision: float | None = None,
+        stage_recorder: Any = None,
+        stage_name: str | None = None,
+        stage_details: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        del cmd, runtime_root, rotation_precision, stage_recorder, stage_name
+        assert stage_details is not None
+        input_path = Path(str(stage_details["input_path"]))
+        output_path = Path(str(stage_details["output_path"]))
+        with input_path.open("r", encoding="utf-8") as f:
+            payload = json.load(f)
+        payload["circuit_list"][0]["bb_list"][0]["inst_list"] = [
+            {"opcode": "H", "q": 0},
+            {"opcode": "T", "q": 0},
+            {"opcode": "Return"},
+        ]
+        sc._atomic_write_json(output_path, payload, indent=None)
+        calls.append({"output_path": str(output_path)})
+        return {
+            "returncode": 0,
+            "gnu_time_used": False,
+            "stdout_bytes": 0,
+            "stderr_bytes": 0,
+        }
+
+    monkeypatch.setattr(sc, "SURFACE_CODE_CACHE_DIR", cache_root)
+    monkeypatch.setattr(sc, "_run_qret", fake_run_qret)
+
+    first_circuit, first_meta = sc._optimize_rz_helper_independent_cached(
+        qret_path=qret_path,
+        runtime_root=tmp_path,
+        full_ir_data=full_ir,
+        helper=helper,
+        helper_index=0,
+        rotation_precision=1.0e-5,
+        qret_hash=sc.file_sha256(qret_path),
+        helper_passes=sc._rz_helper_passes(),
+        stage_recorder=None,
+    )
+    assert first_meta["cache_status"] == "miss"
+    assert sc._helper_circuit_summary(first_circuit)["t_count"] == 1
+    assert len(calls) == 1
+
+    full_ir["metadata"]["created_at"] = "second"
+    full_ir["circuit_list"][0]["name"] = "__helper_renamed()"
+    renamed_helper = dict(helper)
+    renamed_helper["function_name"] = "__helper_renamed()"
+    second_circuit, second_meta = sc._optimize_rz_helper_independent_cached(
+        qret_path=qret_path,
+        runtime_root=tmp_path,
+        full_ir_data=full_ir,
+        helper=renamed_helper,
+        helper_index=0,
+        rotation_precision=1.0e-5,
+        qret_hash=sc.file_sha256(qret_path),
+        helper_passes=sc._rz_helper_passes(),
+        stage_recorder=None,
+    )
+    assert second_meta["cache_status"] == "hit"
+    assert second_circuit["name"] == "__helper_renamed()"
+    assert len(calls) == 1
+
+    output_path = Path(str(first_meta["cache_dir"])) / "helper_opt.json"
+    output_path.write_text("{broken", encoding="utf-8")
+    _, third_meta = sc._optimize_rz_helper_independent_cached(
+        qret_path=qret_path,
+        runtime_root=tmp_path,
+        full_ir_data=full_ir,
+        helper=renamed_helper,
+        helper_index=0,
+        rotation_precision=1.0e-5,
+        qret_hash=sc.file_sha256(qret_path),
+        helper_passes=sc._rz_helper_passes(),
+        stage_recorder=None,
+    )
+    assert third_meta["cache_status"] == "miss"
+    assert str(third_meta["invalid_reason"]).startswith("invalid:")
+    assert len(calls) == 2

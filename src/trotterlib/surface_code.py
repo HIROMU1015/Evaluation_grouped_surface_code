@@ -44,6 +44,7 @@ from .config import (
     SURFACE_CODE_REACTION_TIME,
     SURFACE_CODE_RZ_CALL_CACHE,
     SURFACE_CODE_RZ_CALL_CACHE_ROUND_DIGITS,
+    SURFACE_CODE_RZ_HELPER_OPT_MODE,
     SURFACE_CODE_SAVE_MAPPING_RESULT,
     SURFACE_CODE_ROTATION_ERROR_BUDGET_FRACTION,
     SURFACE_CODE_ROTATION_PRECISION_FLOOR,
@@ -895,6 +896,8 @@ _RZ_QASM_LINE_RE = re.compile(
 _IR_ROTATION_PRECISION_REWRITE_VERSION = "ir_param_rotation_precision_v1"
 _IR_STREAM_SUMMARY_VERSION = "ir_instruction_stream_summary_v1"
 _PYTHON_INLINE_IR_VERSION = "python_streaming_inline_ir_v1"
+_RZ_HELPER_INDEPENDENT_CACHE_VERSION = "rz_helper_independent_cache_v2"
+_RZ_HELPER_OPT_MODES = {"legacy_full_ir", "independent_helper"}
 _PARAMETRIZED_ROTATION_OPS = {"RX", "RY", "RZ"}
 
 
@@ -1360,6 +1363,386 @@ def _python_inline_ir(
     }
 
 
+def _rz_helper_opt_mode() -> str:
+    mode = str(SURFACE_CODE_RZ_HELPER_OPT_MODE)
+    if mode not in _RZ_HELPER_OPT_MODES:
+        raise ValueError(
+            f"Unsupported SURFACE_CODE_RZ_HELPER_OPT_MODE={mode!r}; "
+            f"expected one of {sorted(_RZ_HELPER_OPT_MODES)}"
+        )
+    return mode
+
+
+def _rz_helper_passes() -> list[str]:
+    return [
+        "ir::decompose_inst",
+        "ir::ignore_global_phase",
+        "ir::delete_consecutive_same_pauli",
+        "ir::delete_opt_hint",
+    ]
+
+
+def _rz_main_cleanup_passes() -> list[str]:
+    return [
+        "ir::static_condition_pruning",
+        "ir::ignore_global_phase",
+        "ir::delete_consecutive_same_pauli",
+        "ir::delete_opt_hint",
+    ]
+
+
+def _canonical_json_hash(value: Any) -> str:
+    encoded = json.dumps(
+        _canonical_json_value(value),
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _ir_circuit_by_name(data: Mapping[str, Any], function_name: str) -> Mapping[str, Any]:
+    for circuit in data.get("circuit_list", []):
+        if isinstance(circuit, Mapping) and circuit.get("name") == function_name:
+            return circuit
+    raise KeyError(f"Circuit '{function_name}' not found")
+
+
+def _single_circuit_ir(data: Mapping[str, Any], function_name: str) -> dict[str, Any]:
+    target = _ir_circuit_by_name(data, function_name)
+    small = {key: value for key, value in data.items() if key != "circuit_list"}
+    small["circuit_list"] = [target]
+    return small
+
+
+def _helper_input_ir_cache_value(helper_input_ir: Mapping[str, Any]) -> Any:
+    value = _canonical_json_value(helper_input_ir)
+    if isinstance(value, dict):
+        metadata = value.get("metadata")
+        if isinstance(metadata, dict):
+            stable_metadata = dict(metadata)
+            stable_metadata.pop("created_at", None)
+            value["metadata"] = stable_metadata
+        circuit_list = value.get("circuit_list")
+        if (
+            isinstance(circuit_list, list)
+            and len(circuit_list) == 1
+            and isinstance(circuit_list[0], dict)
+        ):
+            stable_circuit = dict(circuit_list[0])
+            stable_circuit["name"] = "__rz_helper_cache_entry__()"
+            value["circuit_list"] = [stable_circuit]
+    return value
+
+
+def _write_compact_json_atomic(path: Path, payload: Any) -> None:
+    _atomic_write_json(path, payload, indent=None)
+
+
+def _load_ir_json(path: Path) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError(f"Invalid IR JSON: {path}")
+    return data
+
+
+def _helper_circuit_summary(circuit: Mapping[str, Any]) -> dict[str, Any]:
+    argument = circuit.get("argument")
+    if not isinstance(argument, Mapping):
+        raise ValueError(f"Missing argument for helper circuit {circuit.get('name')}")
+    bb_list = circuit.get("bb_list")
+    if not isinstance(bb_list, list) or len(bb_list) != 1:
+        raise ValueError(f"Expected one basic block for helper circuit {circuit.get('name')}")
+    inst_list = bb_list[0].get("inst_list", [])
+    if not isinstance(inst_list, list):
+        raise ValueError(f"Invalid inst_list for helper circuit {circuit.get('name')}")
+    recorder = _InstructionStreamRecorder(
+        num_qubits=int(argument.get("num_qubits", 0))
+    )
+    for inst in inst_list:
+        if isinstance(inst, Mapping):
+            recorder.observe(inst)
+    stream = recorder.summary()
+    opcode_count = dict(stream["opcode_count"])
+    t_count = int(opcode_count.get("T", 0)) + int(opcode_count.get("TDag", 0))
+    return {
+        "instruction_stream": stream,
+        "normalized_instruction_stream_hash": stream[
+            "normalized_instruction_stream_hash"
+        ],
+        "opcode_count": opcode_count,
+        "emitted_instruction_count": int(stream["emitted_instruction_count"]),
+        "scheduled_instruction_count": int(stream["scheduled_instruction_count"]),
+        "t_count": t_count,
+        "gate_depth": int(stream["gate_depth"]),
+        "step_magic_state_count": int(stream["step_magic_state_count"]),
+        "step_magic_state_depth": int(stream["step_magic_state_depth"]),
+        "peak_magic_layer": int(stream["peak_magic_layer"]),
+    }
+
+
+def _helper_output_summary(path: Path, function_name: str) -> dict[str, Any]:
+    data = _load_ir_json(path)
+    circuit = _ir_circuit_by_name(data, function_name)
+    return _helper_circuit_summary(circuit)
+
+
+def _single_ir_circuit(data: Mapping[str, Any]) -> Mapping[str, Any]:
+    circuits = [
+        circuit
+        for circuit in data.get("circuit_list", [])
+        if isinstance(circuit, Mapping)
+    ]
+    if len(circuits) != 1:
+        raise ValueError(f"Expected one circuit, found {len(circuits)}")
+    return circuits[0]
+
+
+def _renamed_helper_circuit(
+    circuit: Mapping[str, Any],
+    function_name: str,
+) -> dict[str, Any]:
+    renamed = dict(circuit)
+    renamed["name"] = function_name
+    return renamed
+
+
+def _replace_ir_circuits(
+    data: Mapping[str, Any],
+    replacements: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    out = {key: value for key, value in data.items() if key != "circuit_list"}
+    circuits: list[Any] = []
+    for circuit in data.get("circuit_list", []):
+        if isinstance(circuit, Mapping) and isinstance(circuit.get("name"), str):
+            replacement = replacements.get(str(circuit["name"]))
+            circuits.append(dict(replacement) if replacement is not None else circuit)
+        else:
+            circuits.append(circuit)
+    out["circuit_list"] = circuits
+    return out
+
+
+def _gridsynth_cache_identity() -> dict[str, Any]:
+    path = Path(SURFACE_CODE_GRIDSYNTH_PATH).expanduser().resolve()
+    return {
+        "path": str(path),
+        "hash": file_sha256(path) if path.exists() else None,
+        "exists": path.exists(),
+    }
+
+
+def _rz_helper_cache_payload(
+    *,
+    helper_input_hash: str,
+    helper: Mapping[str, Any],
+    rotation_precision: float,
+    qret_hash: str,
+    helper_passes: Sequence[str],
+) -> dict[str, Any]:
+    return {
+        "schema_version": _RZ_HELPER_INDEPENDENT_CACHE_VERSION,
+        "helper_input_ir_hash": str(helper_input_hash),
+        "theta": helper.get("theta"),
+        "rotation_precision": float(rotation_precision),
+        "qret_hash": str(qret_hash),
+        "gridsynth": _gridsynth_cache_identity(),
+        "passes": list(helper_passes),
+        "ignore_global_phase": "ir::ignore_global_phase" in set(helper_passes),
+    }
+
+
+def _rz_helper_cache_key(payload: Mapping[str, Any]) -> str:
+    return _canonical_json_hash(payload)
+
+
+def _rz_helper_cache_root(cache_key: str) -> Path:
+    return (
+        SURFACE_CODE_CACHE_DIR
+        / "gr"
+        / "rz_helper_independent_cache"
+        / str(cache_key)[:2]
+        / str(cache_key)
+    )
+
+
+def _load_valid_rz_helper_cache(
+    *,
+    cache_dir: Path,
+    cache_key: str,
+    function_name: str,
+) -> tuple[Mapping[str, Any], dict[str, Any], str | None]:
+    metadata_path = cache_dir / "metadata.json"
+    output_path = cache_dir / "helper_opt.json"
+    if not metadata_path.exists() or not output_path.exists():
+        return {}, {}, "missing"
+    try:
+        metadata = _load_ir_json(metadata_path)
+        if metadata.get("cache_key") != cache_key:
+            return {}, {}, "cache_key_mismatch"
+        cached_summary = metadata.get("output_summary")
+        if not isinstance(cached_summary, Mapping):
+            return {}, {}, "missing_output_summary"
+        output = _load_ir_json(output_path)
+        try:
+            circuit = _ir_circuit_by_name(output, function_name)
+        except KeyError:
+            circuit = _single_ir_circuit(output)
+        actual_summary = _helper_circuit_summary(circuit)
+        if _canonical_json_hash(cached_summary) != _canonical_json_hash(actual_summary):
+            return {}, {}, "output_summary_mismatch"
+        return _renamed_helper_circuit(circuit, function_name), dict(metadata), None
+    except Exception as exc:
+        return {}, {}, f"invalid:{type(exc).__name__}"
+
+
+def _optimize_rz_helper_independent_cached(
+    *,
+    qret_path: Path,
+    runtime_root: Path,
+    full_ir_data: Mapping[str, Any],
+    helper: Mapping[str, Any],
+    helper_index: int,
+    rotation_precision: float,
+    qret_hash: str,
+    helper_passes: Sequence[str],
+    stage_recorder: _StageMetricsRecorder | None,
+) -> tuple[Mapping[str, Any], dict[str, Any]]:
+    function_name = str(helper["function_name"])
+    helper_input_ir = _single_circuit_ir(full_ir_data, function_name)
+    helper_input_hash = _canonical_json_hash(
+        _helper_input_ir_cache_value(helper_input_ir)
+    )
+    payload = _rz_helper_cache_payload(
+        helper_input_hash=helper_input_hash,
+        helper=helper,
+        rotation_precision=rotation_precision,
+        qret_hash=qret_hash,
+        helper_passes=helper_passes,
+    )
+    cache_key = _rz_helper_cache_key(payload)
+    cache_dir = _rz_helper_cache_root(cache_key)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    cached_circuit: Mapping[str, Any]
+    cached_metadata: dict[str, Any]
+    invalid_reason: str | None
+    with (
+        stage_recorder.stage(
+            f"rz_helper_independent_cache_lookup_{helper_index:04d}",
+            helper_index=int(helper_index),
+            helper_function_name=function_name,
+            helper_key=helper.get("key"),
+            helper_theta=helper.get("theta"),
+            cache_key=cache_key,
+            cache_dir=str(cache_dir),
+        )
+        if stage_recorder is not None
+        else _null_stage()
+    ) as span:
+        cached_circuit, cached_metadata, invalid_reason = _load_valid_rz_helper_cache(
+            cache_dir=cache_dir,
+            cache_key=cache_key,
+            function_name=function_name,
+        )
+        hit = invalid_reason is None
+        span.add_result(
+            cache_status="hit" if hit else "miss",
+            invalid_reason=invalid_reason,
+        )
+    if invalid_reason is None:
+        run_metadata = {
+            "helper_index": int(helper_index),
+            "function_name": function_name,
+            "cache_key": cache_key,
+            "cache_status": "hit",
+            "cache_dir": str(cache_dir),
+            "output_summary": dict(cached_metadata.get("output_summary", {})),
+        }
+        return cached_circuit, run_metadata
+
+    input_path = cache_dir / "helper_input.json"
+    output_path = cache_dir / "helper_opt.json"
+    metadata_path = cache_dir / "metadata.json"
+    output_tmp = _atomic_temp_path(output_path)
+    yaml_tmp = _atomic_temp_path(cache_dir / "helper_opt.yaml")
+    try:
+        try:
+            output_tmp.unlink()
+        except FileNotFoundError:
+            pass
+        _write_compact_json_atomic(input_path, helper_input_ir)
+        yaml_tmp.write_text(
+            opt_pipeline_yaml(
+                ir_path=input_path,
+                opt_path=output_tmp,
+                passes=helper_passes,
+                entry_name=function_name,
+            ),
+            encoding="utf-8",
+        )
+        qret_metrics = _run_qret(
+            [str(qret_path), "opt", "--pipeline", str(yaml_tmp), "--verbose"],
+            runtime_root=cache_dir,
+            rotation_precision=rotation_precision,
+            stage_recorder=stage_recorder,
+            stage_name=f"qret_opt_rz_helper_independent_{helper_index:04d}",
+            stage_details={
+                "helper_index": int(helper_index),
+                "helper_function_name": function_name,
+                "helper_key": helper.get("key"),
+                "helper_theta": helper.get("theta"),
+                "cache_key": cache_key,
+                "cache_status": "miss",
+                "invalid_reason": invalid_reason,
+                "input_path": str(input_path),
+                "output_path": str(output_tmp),
+                "pipeline_path": str(yaml_tmp),
+            },
+        )
+        output_summary = _helper_output_summary(output_tmp, function_name)
+        os.replace(output_tmp, output_path)
+        metadata = {
+            "schema_version": _RZ_HELPER_INDEPENDENT_CACHE_VERSION,
+            "cache_key": cache_key,
+            "cache_payload": payload,
+            "cache_status": "created",
+            "created_unix_seconds": time.time(),
+            "helper_index": int(helper_index),
+            "function_name": function_name,
+            "input_path": str(input_path),
+            "output_path": str(output_path),
+            "input_size_bytes": _file_size_bytes(input_path),
+            "output_size_bytes": _file_size_bytes(output_path),
+            "output_summary": output_summary,
+            "qret_metrics": qret_metrics,
+        }
+        _atomic_write_json(metadata_path, metadata)
+    finally:
+        for tmp_path in (output_tmp, yaml_tmp):
+            try:
+                tmp_path.unlink()
+            except FileNotFoundError:
+                pass
+
+    output_data = _load_ir_json(output_path)
+    circuit = _ir_circuit_by_name(output_data, function_name)
+    run_metadata = {
+        "helper_index": int(helper_index),
+        "function_name": function_name,
+        "cache_key": cache_key,
+        "cache_status": "miss",
+        "invalid_reason": invalid_reason,
+        "cache_dir": str(cache_dir),
+        "input_size_bytes": _file_size_bytes(input_path),
+        "output_size_bytes": _file_size_bytes(output_path),
+        "output_summary": output_summary,
+        "qret_metrics": qret_metrics,
+    }
+    return circuit, run_metadata
+
+
 def _run_rz_call_cached_opt(
     *,
     qret_path: Path,
@@ -1393,7 +1776,10 @@ def _run_rz_call_cached_opt(
                 "pipeline_path": str(opt_yaml_path),
             },
         )
-        return {"mode": "qret_opt_without_rz_helpers"}
+        return {
+            "mode": "qret_opt_without_rz_helpers",
+            "helper_opt_mode": _rz_helper_opt_mode(),
+        }
 
     cache_dir = runtime_root / "rz_call_cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -1407,41 +1793,91 @@ def _run_rz_call_cached_opt(
         span.add_result(output_size_bytes=_file_size_bytes(metadata_path))
 
     current_input = ir_path
-    helper_passes = [
-        "ir::decompose_inst",
-        "ir::ignore_global_phase",
-        "ir::delete_consecutive_same_pauli",
-        "ir::delete_opt_hint",
-    ]
-    for index, helper in enumerate(helpers):
-        pass_output = cache_dir / f"rz_helper_{index:04d}.json"
-        pass_yaml = cache_dir / f"rz_helper_{index:04d}.yaml"
-        pass_yaml.write_text(
-            opt_pipeline_yaml(
-                ir_path=current_input,
-                opt_path=pass_output,
-                passes=helper_passes,
-                entry_name=str(helper["function_name"]),
-            ),
-            encoding="utf-8",
-        )
-        _run_qret(
-            [str(qret_path), "opt", "--pipeline", str(pass_yaml), "--verbose"],
-            runtime_root=runtime_root,
-            rotation_precision=rotation_precision,
-            stage_recorder=stage_recorder,
-            stage_name=f"qret_opt_rz_helper_{index:04d}",
-            stage_details={
-                "helper_index": int(index),
-                "helper_function_name": str(helper["function_name"]),
-                "helper_key": helper.get("key"),
-                "helper_theta": helper.get("theta"),
-                "input_path": str(current_input),
-                "output_path": str(pass_output),
-                "pipeline_path": str(pass_yaml),
-            },
-        )
-        current_input = pass_output
+    helper_passes = _rz_helper_passes()
+    helper_opt_mode = _rz_helper_opt_mode()
+    qret_hash = file_sha256(qret_path)
+    helper_cache_results: list[dict[str, Any]] = []
+    if helper_opt_mode == "legacy_full_ir":
+        for index, helper in enumerate(helpers):
+            pass_output = cache_dir / f"rz_helper_{index:04d}.json"
+            pass_yaml = cache_dir / f"rz_helper_{index:04d}.yaml"
+            pass_yaml.write_text(
+                opt_pipeline_yaml(
+                    ir_path=current_input,
+                    opt_path=pass_output,
+                    passes=helper_passes,
+                    entry_name=str(helper["function_name"]),
+                ),
+                encoding="utf-8",
+            )
+            qret_metrics = _run_qret(
+                [str(qret_path), "opt", "--pipeline", str(pass_yaml), "--verbose"],
+                runtime_root=runtime_root,
+                rotation_precision=rotation_precision,
+                stage_recorder=stage_recorder,
+                stage_name=f"qret_opt_rz_helper_{index:04d}",
+                stage_details={
+                    "helper_index": int(index),
+                    "helper_function_name": str(helper["function_name"]),
+                    "helper_key": helper.get("key"),
+                    "helper_theta": helper.get("theta"),
+                    "helper_opt_mode": helper_opt_mode,
+                    "input_path": str(current_input),
+                    "output_path": str(pass_output),
+                    "pipeline_path": str(pass_yaml),
+                },
+            )
+            helper_cache_results.append(
+                {
+                    "helper_index": int(index),
+                    "function_name": str(helper["function_name"]),
+                    "cache_status": "legacy_full_ir",
+                    "qret_metrics": qret_metrics,
+                }
+            )
+            current_input = pass_output
+    else:
+        with (
+            stage_recorder.stage("load_rz_helper_full_ir", input_path=str(ir_path))
+            if stage_recorder is not None
+            else _null_stage()
+        ) as span:
+            full_ir_data = _load_ir_json(ir_path)
+            span.add_result(
+                input_size_bytes=_file_size_bytes(ir_path),
+                circuit_count=len(full_ir_data.get("circuit_list", [])),
+            )
+        replacements: dict[str, Mapping[str, Any]] = {}
+        for index, helper in enumerate(helpers):
+            helper_circuit, helper_result = _optimize_rz_helper_independent_cached(
+                qret_path=qret_path,
+                runtime_root=runtime_root,
+                full_ir_data=full_ir_data,
+                helper=helper,
+                helper_index=index,
+                rotation_precision=rotation_precision,
+                qret_hash=qret_hash,
+                helper_passes=helper_passes,
+                stage_recorder=stage_recorder,
+            )
+            replacements[str(helper["function_name"])] = helper_circuit
+            helper_cache_results.append(helper_result)
+        with (
+            stage_recorder.stage(
+                "merge_independent_rz_helpers",
+                input_path=str(ir_path),
+                output_path=str(cache_dir / "helpers_merged.json"),
+            )
+            if stage_recorder is not None
+            else _null_stage()
+        ) as span:
+            current_input = cache_dir / "helpers_merged.json"
+            merged_data = _replace_ir_circuits(full_ir_data, replacements)
+            _write_compact_json_atomic(current_input, merged_data)
+            span.add_result(
+                helper_replacement_count=len(replacements),
+                output_size_bytes=_file_size_bytes(current_input),
+            )
 
     main_pre_inline = cache_dir / "main_before_python_inline.json"
     main_yaml = cache_dir / "main_cleanup.yaml"
@@ -1449,12 +1885,7 @@ def _run_rz_call_cached_opt(
         opt_pipeline_yaml(
             ir_path=current_input,
             opt_path=main_pre_inline,
-            passes=[
-                "ir::static_condition_pruning",
-                "ir::ignore_global_phase",
-                "ir::delete_consecutive_same_pauli",
-                "ir::delete_opt_hint",
-            ],
+            passes=_rz_main_cleanup_passes(),
             entry_name="main",
         ),
         encoding="utf-8",
@@ -1469,6 +1900,7 @@ def _run_rz_call_cached_opt(
             "input_path": str(current_input),
             "output_path": str(main_pre_inline),
             "pipeline_path": str(main_yaml),
+            "helper_opt_mode": helper_opt_mode,
         },
     )
     with (
@@ -1506,7 +1938,22 @@ def _run_rz_call_cached_opt(
         span.add_result(output_size_bytes=_file_size_bytes(inline_summary_path))
     return {
         "mode": "rz_call_cached_streaming_python_inline",
+        "helper_opt_mode": helper_opt_mode,
         "helper_count": int(len(helpers)),
+        "helper_cache": {
+            "hit_count": sum(
+                1 for item in helper_cache_results if item.get("cache_status") == "hit"
+            ),
+            "miss_count": sum(
+                1 for item in helper_cache_results if item.get("cache_status") == "miss"
+            ),
+            "legacy_full_ir_count": sum(
+                1
+                for item in helper_cache_results
+                if item.get("cache_status") == "legacy_full_ir"
+            ),
+            "helpers": helper_cache_results,
+        },
         "main_pre_inline_path": str(main_pre_inline),
         "inline_summary": inline_summary,
     }
@@ -1643,6 +2090,8 @@ def _step_artifact_cache_key(
         "qasm_decompose_reps": int(SURFACE_CODE_QASM_DECOMPOSE_REPS),
         "rz_call_cache": bool(SURFACE_CODE_RZ_CALL_CACHE),
         "rz_call_cache_round_digits": SURFACE_CODE_RZ_CALL_CACHE_ROUND_DIGITS,
+        "rz_helper_opt_mode": _rz_helper_opt_mode(),
+        "rz_helper_independent_cache": _RZ_HELPER_INDEPENDENT_CACHE_VERSION,
         "ir_rotation_precision_rewrite": _IR_ROTATION_PRECISION_REWRITE_VERSION,
         "ir_stream_summary": _IR_STREAM_SUMMARY_VERSION,
         "python_inline_ir": _PYTHON_INLINE_IR_VERSION,
@@ -1753,6 +2202,7 @@ def prepare_grouped_surface_code_step_artifact(
             "qret_path": str(qret_path),
             "qret_hash": qret_hash,
             "rz_call_cache_enabled": bool(SURFACE_CODE_RZ_CALL_CACHE),
+            "rz_helper_opt_mode": _rz_helper_opt_mode(),
         },
     )
 
