@@ -175,13 +175,16 @@ def _run_parallel_integral_cache_worker(
     try:
         sc.SURFACE_CODE_CACHE_DIR = Path(cache_root)
         sc.SURFACE_CODE_INTEGRAL_CACHE_ENABLED = True
-        constant, one_body, two_body = sc._surface_code_integrals(4, distance=1.0)
+        resolved = sc._resolve_surface_code_integrals(4, distance=1.0)
         result_queue.put(
             {
                 "ok": True,
-                "constant": float(constant),
-                "one_body_shape": list(np.asarray(one_body).shape),
-                "two_body_shape": list(np.asarray(two_body).shape),
+                "constant": float(resolved.constant),
+                "one_body_shape": list(np.asarray(resolved.one_body).shape),
+                "two_body_shape": list(np.asarray(resolved.two_body).shape),
+                "cache_status": resolved.cache_status,
+                "filled_by_other_process": resolved.filled_by_other_process,
+                "integral_value_hash": resolved.integral_value_hash,
             }
         )
     except BaseException as exc:
@@ -591,6 +594,11 @@ def test_prepare_cache_hit_preserves_cold_stage_metrics(
     )
     sc._atomic_write_json(runtime_root / "step_artifact.json", artifact.to_dict())
     monkeypatch.setattr(sc, "_step_artifact_runtime_root", lambda *_, **__: runtime_root)
+    monkeypatch.setattr(
+        sc,
+        "_resolve_surface_code_integrals",
+        lambda *_, **__: _fake_resolved_integrals(1.0),
+    )
 
     cached = sc.prepare_grouped_surface_code_step_artifact(
         artifact.ham_name,
@@ -625,6 +633,279 @@ def _integral_cache_entry_dirs(cache_root: Path) -> list[Path]:
     if not root.exists():
         return []
     return sorted(path for path in root.glob("*/*") if path.is_dir())
+
+
+def _fixture_integral_payload(
+    *,
+    distance: float = 1.0,
+    basis: str = "sto-3g",
+    pyscf_version: str = "pyscf-test-1",
+) -> dict[str, Any]:
+    geometry = [
+        ("H", (0.0, 0.0, -1.5 * distance)),
+        ("H", (0.0, 0.0, -0.5 * distance)),
+        ("H", (0.0, 0.0, 0.5 * distance)),
+        ("H", (0.0, 0.0, 1.5 * distance)),
+    ]
+    return sc._surface_code_integral_cache_payload(
+        chain_length=4,
+        geometry=geometry,
+        distance=distance,
+        basis=basis,
+        charge=0,
+        multiplicity=1,
+        pyscf_version=pyscf_version,
+    )
+
+
+def _write_integral_cache_entry(
+    cache_root: Path,
+    *,
+    constant: Any | None = None,
+    one_body: np.ndarray | None = None,
+    two_body: np.ndarray | None = None,
+    payload: Mapping[str, Any] | None = None,
+) -> tuple[Path, str, dict[str, Any]]:
+    constant = np.float64(1.25) if constant is None else constant
+    one_body = (
+        np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float64)
+        if one_body is None
+        else one_body
+    )
+    two_body = (
+        np.arange(16, dtype=np.float64).reshape(2, 2, 2, 2)
+        if two_body is None
+        else two_body
+    )
+    payload = dict(payload or _fixture_integral_payload())
+    cache_key = sc._surface_code_integral_cache_key(payload)
+    cache_dir = cache_root / "gr" / "integral_cache" / cache_key[:2] / cache_key
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    npz_path = cache_dir / "integrals.npz"
+    sc._write_surface_code_integral_npz_atomic(
+        npz_path,
+        constant=constant,
+        one_body=one_body,
+        two_body=two_body,
+    )
+    _, _, integral_value_hash = sc._checked_surface_code_integral_arrays(
+        constant=constant,
+        one_body=one_body,
+        two_body=two_body,
+    )
+    metadata = sc._surface_code_integral_cache_metadata(
+        cache_key=cache_key,
+        payload=payload,
+        npz_path=npz_path,
+        constant=constant,
+        one_body=one_body,
+        two_body=two_body,
+        integral_value_hash=integral_value_hash,
+        cache_status="created",
+    )
+    sc._atomic_write_json(cache_dir / "metadata.json", metadata)
+    return cache_dir, cache_key, metadata
+
+
+def _rewrite_integral_npz_and_metadata(
+    cache_dir: Path,
+    metadata: dict[str, Any],
+    *,
+    constant: Any,
+    one_body: np.ndarray,
+    two_body: np.ndarray,
+    update_integral_hash: bool = True,
+) -> dict[str, Any]:
+    npz_path = cache_dir / "integrals.npz"
+    sc._write_surface_code_integral_npz_atomic(
+        npz_path,
+        constant=constant,
+        one_body=one_body,
+        two_body=two_body,
+    )
+    metadata = dict(metadata)
+    metadata["npz_sha256"] = sc.file_sha256(npz_path)
+    metadata["arrays"] = sc._surface_code_integral_cache_array_metadata(
+        constant=constant,
+        one_body=one_body,
+        two_body=two_body,
+    )
+    if update_integral_hash:
+        metadata["integral_value_hash"] = sc._surface_code_integral_value_hash(
+            constant=constant,
+            one_body=one_body,
+            two_body=two_body,
+        )
+    sc._atomic_write_json(cache_dir / "metadata.json", metadata)
+    return metadata
+
+
+def _load_integral_cache_invalid_reason(cache_dir: Path, cache_key: str) -> str | None:
+    _, _, _, _, invalid_reason = sc._load_valid_surface_code_integral_cache(
+        cache_dir=cache_dir,
+        cache_key=cache_key,
+    )
+    return invalid_reason
+
+
+def _fake_resolved_integrals(value: float = 1.0) -> sc._ResolvedSurfaceCodeIntegrals:
+    one_body = np.array([[value]], dtype=np.float64)
+    two_body = np.array([[[[value]]]], dtype=np.float64)
+    integral_value_hash = sc._surface_code_integral_value_hash(
+        constant=np.float64(value),
+        one_body=one_body,
+        two_body=two_body,
+    )
+    return sc._ResolvedSurfaceCodeIntegrals(
+        constant=np.float64(value),
+        one_body=one_body,
+        two_body=two_body,
+        cache_enabled=True,
+        schema_version=sc._SURFACE_CODE_INTEGRAL_CACHE_VERSION,
+        cache_key=f"cache-key-{value}",
+        integral_value_hash=integral_value_hash,
+        cache_status="hit",
+        filled_by_other_process=False,
+        initial_invalid_reason=None,
+        locked_invalid_reason=None,
+        cache_dir=Path(f"/tmp/cache-key-{value}"),
+        npz_path=Path(f"/tmp/cache-key-{value}/integrals.npz"),
+        npz_sha256=f"npz-{value}",
+    )
+
+
+def test_surface_code_integral_value_hash_is_bit_exact() -> None:
+    constant = np.float64(1.25)
+    one_body = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float64)
+    two_body = np.arange(16, dtype=np.float64).reshape(2, 2, 2, 2)
+    base_hash = sc._surface_code_integral_value_hash(
+        constant=constant,
+        one_body=one_body,
+        two_body=two_body,
+    )
+
+    assert base_hash == sc._surface_code_integral_value_hash(
+        constant=np.array(1.25, dtype=np.float64),
+        one_body=one_body.copy(),
+        two_body=two_body.copy(),
+    )
+    changed_value = two_body.copy()
+    changed_value.reshape(-1)[0] = np.nextafter(changed_value.reshape(-1)[0], 1.0)
+    assert base_hash != sc._surface_code_integral_value_hash(
+        constant=constant,
+        one_body=one_body,
+        two_body=changed_value,
+    )
+    assert base_hash != sc._surface_code_integral_value_hash(
+        constant=constant,
+        one_body=one_body.astype(np.float32),
+        two_body=two_body,
+    )
+    assert base_hash != sc._surface_code_integral_value_hash(
+        constant=constant,
+        one_body=one_body.reshape(1, 4),
+        two_body=two_body,
+    )
+    assert base_hash == sc._surface_code_integral_value_hash(
+        constant=constant,
+        one_body=np.array(one_body, order="F"),
+        two_body=np.array(two_body, order="F"),
+    )
+
+
+def test_surface_code_integral_cache_validation_reasons(tmp_path: Path) -> None:
+    cache_root = tmp_path / "cache"
+
+    cache_dir, cache_key, metadata = _write_integral_cache_entry(cache_root)
+    broken = dict(metadata)
+    broken["cache_payload"] = dict(broken["cache_payload"])
+    broken["cache_payload"]["distance"] = 2.0
+    sc._atomic_write_json(cache_dir / "metadata.json", broken)
+    assert _load_integral_cache_invalid_reason(cache_dir, cache_key) == (
+        "cache_payload_mismatch"
+    )
+
+    cache_dir, cache_key, metadata = _write_integral_cache_entry(cache_root)
+    extra_npz_path = cache_dir / "integrals.npz"
+    with extra_npz_path.open("wb") as f:
+        np.savez(
+            f,
+            constant=np.array(1.0),
+            one_body=np.eye(2),
+            two_body=np.ones((2, 2, 2, 2)),
+            extra=np.array([1.0]),
+        )
+    metadata["npz_sha256"] = sc.file_sha256(extra_npz_path)
+    sc._atomic_write_json(cache_dir / "metadata.json", metadata)
+    assert _load_integral_cache_invalid_reason(cache_dir, cache_key) == (
+        "npz_keys_mismatch"
+    )
+
+    cache_dir, cache_key, metadata = _write_integral_cache_entry(cache_root)
+    metadata["arrays"]["one_body"]["shape"] = [1, 4]
+    sc._atomic_write_json(cache_dir / "metadata.json", metadata)
+    assert _load_integral_cache_invalid_reason(cache_dir, cache_key) == (
+        "one_body_shape_mismatch"
+    )
+
+    cache_dir, cache_key, metadata = _write_integral_cache_entry(cache_root)
+    metadata["arrays"]["one_body"]["dtype"] = "<f4"
+    sc._atomic_write_json(cache_dir / "metadata.json", metadata)
+    assert _load_integral_cache_invalid_reason(cache_dir, cache_key) == (
+        "one_body_dtype_mismatch"
+    )
+
+    cache_dir, cache_key, metadata = _write_integral_cache_entry(cache_root)
+    metadata["arrays"]["one_body"]["nbytes"] += 1
+    sc._atomic_write_json(cache_dir / "metadata.json", metadata)
+    assert _load_integral_cache_invalid_reason(cache_dir, cache_key) == (
+        "one_body_nbytes_mismatch"
+    )
+
+    cache_dir, cache_key, metadata = _write_integral_cache_entry(cache_root)
+    metadata["integral_value_hash"] = "bad"
+    sc._atomic_write_json(cache_dir / "metadata.json", metadata)
+    assert _load_integral_cache_invalid_reason(cache_dir, cache_key) == (
+        "integral_value_hash_mismatch"
+    )
+
+    cache_dir, cache_key, metadata = _write_integral_cache_entry(cache_root)
+    nonfinite_one = np.eye(2, dtype=np.float64)
+    nonfinite_one[0, 0] = np.inf
+    _rewrite_integral_npz_and_metadata(
+        cache_dir,
+        metadata,
+        constant=np.float64(1.0),
+        one_body=nonfinite_one,
+        two_body=np.ones((2, 2, 2, 2), dtype=np.float64),
+    )
+    assert _load_integral_cache_invalid_reason(cache_dir, cache_key) == (
+        "nonfinite_one_body"
+    )
+
+    cache_dir, cache_key, metadata = _write_integral_cache_entry(cache_root)
+    _rewrite_integral_npz_and_metadata(
+        cache_dir,
+        metadata,
+        constant=np.float64(1.0),
+        one_body=np.ones((2, 3), dtype=np.float64),
+        two_body=np.ones((2, 2, 2, 2), dtype=np.float64),
+    )
+    assert _load_integral_cache_invalid_reason(cache_dir, cache_key) == (
+        "one_body_not_square"
+    )
+
+    cache_dir, cache_key, metadata = _write_integral_cache_entry(cache_root)
+    _rewrite_integral_npz_and_metadata(
+        cache_dir,
+        metadata,
+        constant=np.float64(1.0),
+        one_body=np.eye(2, dtype=np.float64),
+        two_body=np.ones((2, 2, 2, 1), dtype=np.float64),
+    )
+    assert _load_integral_cache_invalid_reason(cache_dir, cache_key) == (
+        "two_body_dimension_mismatch"
+    )
 
 
 def test_surface_code_integral_cache_miss_hit_and_exact_values(
@@ -685,16 +966,23 @@ def test_surface_code_integral_cache_miss_hit_and_exact_values(
     metadata = json.loads((entry_dirs[0] / "metadata.json").read_text(encoding="utf-8"))
     assert metadata["schema_version"] == sc._SURFACE_CODE_INTEGRAL_CACHE_VERSION
     assert metadata["pyscf_version"] == "pyscf-test-1"
-    assert metadata["arrays"]["constant"] == {"shape": [], "dtype": "float64"}
+    assert metadata["arrays"]["constant"] == {
+        "shape": [],
+        "dtype": "<f8",
+        "nbytes": 8,
+    }
     assert metadata["arrays"]["one_body"] == {
         "shape": [2, 2],
-        "dtype": "float64",
+        "dtype": "<f8",
+        "nbytes": 32,
     }
     assert metadata["arrays"]["two_body"] == {
         "shape": [2, 2, 2, 2],
-        "dtype": "float64",
+        "dtype": "<f8",
+        "nbytes": 128,
     }
     assert isinstance(metadata["npz_sha256"], str)
+    assert isinstance(metadata["integral_value_hash"], str)
     assert "exact cache entry" in metadata["reproducibility_note"]
 
 
@@ -811,9 +1099,196 @@ def test_surface_code_integral_cache_disabled_recomputes(
     monkeypatch.setattr(sc, "_pyscf_version", lambda: "pyscf-test-1")
     monkeypatch.setattr(sc, "_compute_surface_code_integrals_uncached", fake_compute)
 
-    sc._surface_code_integrals(4, distance=1.0)
-    sc._surface_code_integrals(4, distance=1.0)
+    first = sc._resolve_surface_code_integrals(4, distance=1.0)
+    second = sc._resolve_surface_code_integrals(4, distance=1.0)
     assert len(calls) == 2
+    assert first.cache_status == "disabled"
+    assert second.cache_status == "disabled"
+    assert first.integral_value_hash != second.integral_value_hash
+    assert first.cache_key == second.cache_key
+    assert _integral_cache_entry_dirs(tmp_path / "cache") == []
+
+
+def test_surface_code_integral_cache_compute_failure_does_not_commit(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    cache_root = tmp_path / "cache"
+
+    def fail_compute(chain_length: int, *, distance: float) -> tuple[Any, Any, Any]:
+        del chain_length, distance
+        raise RuntimeError("PySCF RHF did not converge: fixture")
+
+    monkeypatch.setattr(sc, "SURFACE_CODE_CACHE_DIR", cache_root)
+    monkeypatch.setattr(sc, "SURFACE_CODE_INTEGRAL_CACHE_ENABLED", True)
+    monkeypatch.setattr(sc, "_pyscf_version", lambda: "pyscf-test-1")
+    monkeypatch.setattr(sc, "_compute_surface_code_integrals_uncached", fail_compute)
+
+    try:
+        sc._resolve_surface_code_integrals(4, distance=1.0)
+    except RuntimeError as exc:
+        assert "did not converge" in str(exc)
+    else:
+        raise AssertionError("SCF failure must propagate")
+
+    for entry_dir in _integral_cache_entry_dirs(cache_root):
+        assert not (entry_dir / "integrals.npz").exists()
+        assert not (entry_dir / "metadata.json").exists()
+        assert not list(entry_dir.glob("*.tmp"))
+        assert not list(entry_dir.glob(".*.tmp"))
+
+
+def test_step_artifact_cache_key_depends_on_integral_identity() -> None:
+    base = {
+        "ham_name": "H4_sto-3g_singlet_distance_100_charge_0_grouping",
+        "pf_label": "4th(new_2)",
+        "target_error": 1.0e-4,
+        "step_time": 1.0,
+        "rotation_precision": 1.0e-5,
+        "qret_hash": "qret",
+        "integral_cache_enabled": True,
+        "integral_cache_schema_version": sc._SURFACE_CODE_INTEGRAL_CACHE_VERSION,
+        "integral_cache_key": "integral-key-a",
+        "integral_value_hash": "value-hash-a",
+    }
+    base_key = sc._step_artifact_cache_key(**base)
+    for changed in (
+        {"integral_cache_enabled": False},
+        {"integral_cache_schema_version": "surface_code_integral_cache_v_next"},
+        {"integral_cache_key": "integral-key-b"},
+        {"integral_value_hash": "value-hash-b"},
+    ):
+        payload = dict(base)
+        payload.update(changed)
+        assert sc._step_artifact_cache_key(**payload) != base_key
+
+    same_identity = dict(base)
+    assert sc._step_artifact_cache_key(**same_identity) == base_key
+
+
+def test_stale_prepared_artifact_is_not_reused_for_new_integral_value(
+    tmp_path: Path,
+) -> None:
+    common = {
+        "ham_name": "H4_sto-3g_singlet_distance_100_charge_0_grouping",
+        "pf_label": "4th(new_2)",
+        "target_error": 1.0e-4,
+        "step_time": 1.0,
+        "rotation_precision": 1.0e-5,
+        "qret_hash": "qret",
+        "integral_cache_enabled": True,
+        "integral_cache_schema_version": sc._SURFACE_CODE_INTEGRAL_CACHE_VERSION,
+        "integral_cache_key": "same-integral-cache-key",
+    }
+    original_cache_root = sc.SURFACE_CODE_CACHE_DIR
+    sc.SURFACE_CODE_CACHE_DIR = tmp_path / "cache"
+    try:
+        root_a = sc._step_artifact_runtime_root(
+            **common,
+            integral_value_hash="value-a",
+        )
+        root_b = sc._step_artifact_runtime_root(
+            **common,
+            integral_value_hash="value-b",
+        )
+    finally:
+        sc.SURFACE_CODE_CACHE_DIR = original_cache_root
+    assert root_a != root_b
+
+    root_a.mkdir(parents=True)
+    qret_path = tmp_path / "qret"
+    qret_path.write_text("#!/bin/sh\n", encoding="utf-8")
+    qasm_path = root_a / "step.qasm"
+    ir_path = root_a / "step_ir.json"
+    opt_path = root_a / "step_opt.json"
+    qasm_path.write_text("OPENQASM 2.0;\n", encoding="utf-8")
+    ir_path.write_text("{}", encoding="utf-8")
+    opt_path.write_text("{}", encoding="utf-8")
+    artifact = sc.SurfaceCodeStepArtifact(
+        ham_name=common["ham_name"],
+        molecule="H4",
+        num_logical_qubits=8,
+        pf_label=common["pf_label"],
+        target_error=common["target_error"],
+        step_time=common["step_time"],
+        rotation_precision=common["rotation_precision"],
+        runtime_root=root_a,
+        qasm_path=qasm_path,
+        ir_path=ir_path,
+        optimized_ir_path=opt_path,
+        qasm_hash=sc.file_sha256(qasm_path),
+        optimized_ir_hash=sc.file_sha256(opt_path),
+        qret_path=qret_path,
+        qret_hash=sc.file_sha256(qret_path),
+        step_rz_count=0,
+        step_rz_layer=None,
+        step_magic_state_count=0,
+        step_magic_state_depth=0,
+        peak_magic_layer=0,
+        instruction_count=0,
+        gate_depth=0,
+        rz_call_cache={},
+        integral_cache={"integral_value_hash": "value-a"},
+    )
+    sc._atomic_write_json(root_a / "step_artifact.json", artifact.to_dict())
+
+    assert sc.load_prepared_surface_code_step_artifact(root_a) is not None
+    assert sc.load_prepared_surface_code_step_artifact(root_b) is None
+
+
+def test_surface_code_integral_stage_metrics_miss_and_hit(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    calls: list[int] = []
+
+    def fake_compute(chain_length: int, *, distance: float) -> tuple[Any, Any, Any]:
+        del chain_length, distance
+        calls.append(len(calls) + 1)
+        return (
+            np.float64(1.0),
+            np.eye(2, dtype=np.float64),
+            np.ones((2, 2, 2, 2), dtype=np.float64),
+        )
+
+    monkeypatch.setattr(sc, "SURFACE_CODE_CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(sc, "SURFACE_CODE_INTEGRAL_CACHE_ENABLED", True)
+    monkeypatch.setattr(sc, "_pyscf_version", lambda: "pyscf-test-1")
+    monkeypatch.setattr(sc, "_compute_surface_code_integrals_uncached", fake_compute)
+
+    miss_recorder = sc._StageMetricsRecorder(
+        scope="integral_stage_test",
+        metadata={"run": "miss"},
+    )
+    sc._resolve_surface_code_integrals(
+        4,
+        distance=1.0,
+        stage_recorder=miss_recorder,
+    )
+    miss_stages = miss_recorder.summary(status="ok")["stages"]
+    miss_names = [stage["name"] for stage in miss_stages]
+    assert "integral_cache_lookup" in miss_names
+    assert "integral_cache_lock_wait_and_relookup" in miss_names
+    assert "integral_scf_and_transform" in miss_names
+    assert "integral_cache_write" in miss_names
+    assert "build_step_circuit" not in miss_names
+
+    hit_recorder = sc._StageMetricsRecorder(
+        scope="integral_stage_test",
+        metadata={"run": "hit"},
+    )
+    sc._resolve_surface_code_integrals(
+        4,
+        distance=1.0,
+        stage_recorder=hit_recorder,
+    )
+    hit_stages = hit_recorder.summary(status="ok")["stages"]
+    hit_names = [stage["name"] for stage in hit_stages]
+    assert hit_names == ["integral_cache_lookup"]
+    assert hit_stages[0]["result"]["cache_status"] == "hit"
+    assert "integral_scf_and_transform" not in hit_names
+    assert "integral_cache_write" not in hit_names
+    assert calls == [1]
 
 
 def test_surface_code_integral_cache_lock_prevents_parallel_generation(
@@ -867,6 +1342,9 @@ def test_surface_code_integral_cache_lock_prevents_parallel_generation(
     assert all(item["ok"] for item in results)
     assert runs_path.read_text(encoding="utf-8").splitlines() == ["run"]
     assert [item["one_body_shape"] for item in results] == [[2, 2], [2, 2]]
+    assert sorted(item["cache_status"] for item in results) == ["hit", "miss"]
+    assert sum(1 for item in results if item["filled_by_other_process"]) == 1
+    assert len({item["integral_value_hash"] for item in results}) == 1
 
 
 def test_independent_rz_helper_cache_generate_hit_and_corrupt_invalidate(

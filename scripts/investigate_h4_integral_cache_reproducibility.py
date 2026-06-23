@@ -166,6 +166,10 @@ def patched_prepared_runtime_root(label: str):
         step_time: float,
         rotation_precision: float,
         qret_hash: str,
+        integral_cache_enabled: bool,
+        integral_cache_schema_version: str,
+        integral_cache_key: str,
+        integral_value_hash: str,
     ) -> Path:
         base = original(
             ham_name,
@@ -174,6 +178,10 @@ def patched_prepared_runtime_root(label: str):
             step_time=step_time,
             rotation_precision=rotation_precision,
             qret_hash=qret_hash,
+            integral_cache_enabled=integral_cache_enabled,
+            integral_cache_schema_version=integral_cache_schema_version,
+            integral_cache_key=integral_cache_key,
+            integral_value_hash=integral_value_hash,
         )
         prepared_root = sc.SURFACE_CODE_CACHE_DIR / "gr" / "prepared_step"
         try:

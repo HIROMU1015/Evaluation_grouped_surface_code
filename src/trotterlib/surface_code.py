@@ -129,6 +129,7 @@ class SurfaceCodeStepArtifact:
     instruction_count: int
     gate_depth: int
     rz_call_cache: dict[str, Any]
+    integral_cache: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -155,6 +156,7 @@ class SurfaceCodeStepArtifact:
             "instruction_count": int(self.instruction_count),
             "gate_depth": int(self.gate_depth),
             "rz_call_cache": dict(self.rz_call_cache),
+            "integral_cache": dict(self.integral_cache),
         }
 
 
@@ -185,7 +187,38 @@ def surface_code_step_artifact_from_dict(payload: Mapping[str, Any]) -> SurfaceC
         instruction_count=int(payload["instruction_count"]),
         gate_depth=int(payload["gate_depth"]),
         rz_call_cache=dict(payload.get("rz_call_cache") or {}),
+        integral_cache=dict(payload.get("integral_cache") or {}),
     )
+
+
+@dataclass(frozen=True)
+class _ResolvedSurfaceCodeIntegrals:
+    constant: Any
+    one_body: np.ndarray
+    two_body: np.ndarray
+    cache_enabled: bool
+    schema_version: str
+    cache_key: str
+    integral_value_hash: str
+    cache_status: str
+    filled_by_other_process: bool
+    initial_invalid_reason: str | None
+    locked_invalid_reason: str | None
+    cache_dir: Path
+    npz_path: Path
+    npz_sha256: str | None
+
+    def provenance(self) -> dict[str, Any]:
+        return {
+            "enabled": bool(self.cache_enabled),
+            "schema_version": self.schema_version,
+            "cache_key": self.cache_key,
+            "integral_value_hash": self.integral_value_hash,
+            "cache_status": self.cache_status,
+            "filled_by_other_process": bool(self.filled_by_other_process),
+            "npz_sha256": self.npz_sha256,
+            "cache_dir": str(self.cache_dir),
+        }
 
 
 def load_prepared_surface_code_step_artifact(
@@ -274,7 +307,7 @@ class _FileLock:
 _PREPARE_STAGE_METRICS_VERSION = "surface_code_prepare_stage_metrics_v1"
 _PREPARE_STAGE_METRICS_FILENAME = "prepare_stage_metrics.json"
 _PREPARE_STAGE_CACHE_HIT_METRICS_FILENAME = "prepare_stage_cache_hit_metrics.json"
-_SURFACE_CODE_INTEGRAL_CACHE_VERSION = "surface_code_integral_cache_v1"
+_SURFACE_CODE_INTEGRAL_CACHE_VERSION = "surface_code_integral_cache_v2"
 _GNU_TIME_MAXRSS_RE = re.compile(
     r"Maximum resident set size \(kbytes\):\s*(?P<rss>\d+)"
 )
@@ -667,11 +700,48 @@ def _surface_code_integral_cache_root(cache_key: str) -> Path:
     )
 
 
+_INTEGRAL_ARRAY_ORDER = ("constant", "one_body", "two_body")
+
+
+def _surface_code_integral_value_hash(
+    *,
+    constant: Any,
+    one_body: Any,
+    two_body: Any,
+) -> str:
+    digest = hashlib.sha256()
+    arrays = {
+        "constant": np.asarray(constant),
+        "one_body": np.asarray(one_body),
+        "two_body": np.asarray(two_body),
+    }
+    for name in _INTEGRAL_ARRAY_ORDER:
+        array = arrays[name]
+        contiguous = np.ascontiguousarray(array)
+        raw = contiguous.tobytes(order="C")
+        header = json.dumps(
+            {
+                "name": name,
+                "dtype": array.dtype.str,
+                "shape": list(array.shape),
+                "nbytes": int(len(raw)),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        digest.update(len(header).to_bytes(8, "big"))
+        digest.update(header)
+        digest.update(len(raw).to_bytes(8, "big"))
+        digest.update(raw)
+    return digest.hexdigest()
+
+
 def _np_array_metadata(value: Any) -> dict[str, Any]:
     array = np.asarray(value)
     return {
         "shape": list(array.shape),
-        "dtype": str(array.dtype),
+        "dtype": array.dtype.str,
+        "nbytes": int(array.nbytes),
     }
 
 
@@ -686,6 +756,90 @@ def _surface_code_integral_cache_array_metadata(
         "one_body": _np_array_metadata(one_body),
         "two_body": _np_array_metadata(two_body),
     }
+
+
+def _validate_surface_code_integral_arrays(
+    *,
+    constant: Any,
+    one_body: Any,
+    two_body: Any,
+    expected_arrays: Mapping[str, Any] | None = None,
+    expected_integral_value_hash: str | None = None,
+) -> tuple[dict[str, np.ndarray], dict[str, dict[str, Any]], str, str | None]:
+    arrays = {
+        "constant": np.asarray(constant),
+        "one_body": np.asarray(one_body),
+        "two_body": np.asarray(two_body),
+    }
+    metadata = _surface_code_integral_cache_array_metadata(
+        constant=arrays["constant"],
+        one_body=arrays["one_body"],
+        two_body=arrays["two_body"],
+    )
+    if expected_arrays is not None:
+        if not isinstance(expected_arrays, Mapping):
+            return arrays, metadata, "", "missing_array_metadata"
+        for name in _INTEGRAL_ARRAY_ORDER:
+            expected = expected_arrays.get(name)
+            if not isinstance(expected, Mapping):
+                return arrays, metadata, "", f"missing_{name}_metadata"
+            actual = metadata[name]
+            if list(actual["shape"]) != list(expected.get("shape", [])):
+                return arrays, metadata, "", f"{name}_shape_mismatch"
+            if str(actual["dtype"]) != str(expected.get("dtype")):
+                return arrays, metadata, "", f"{name}_dtype_mismatch"
+            if int(actual["nbytes"]) != int(expected.get("nbytes", -1)):
+                return arrays, metadata, "", f"{name}_nbytes_mismatch"
+
+    if list(arrays["constant"].shape) != []:
+        return arrays, metadata, "", "constant_shape_mismatch"
+    if arrays["one_body"].ndim != 2:
+        return arrays, metadata, "", "one_body_shape_mismatch"
+    if arrays["one_body"].shape[0] != arrays["one_body"].shape[1]:
+        return arrays, metadata, "", "one_body_not_square"
+    n_orb = int(arrays["one_body"].shape[0])
+    if arrays["two_body"].shape != (n_orb, n_orb, n_orb, n_orb):
+        return arrays, metadata, "", "two_body_dimension_mismatch"
+
+    try:
+        if not bool(np.isfinite(arrays["constant"]).all()):
+            return arrays, metadata, "", "nonfinite_constant"
+        if not bool(np.isfinite(arrays["one_body"]).all()):
+            return arrays, metadata, "", "nonfinite_one_body"
+        if not bool(np.isfinite(arrays["two_body"]).all()):
+            return arrays, metadata, "", "nonfinite_two_body"
+    except TypeError as exc:
+        return arrays, metadata, "", f"invalid:{type(exc).__name__}"
+
+    integral_value_hash = _surface_code_integral_value_hash(
+        constant=arrays["constant"],
+        one_body=arrays["one_body"],
+        two_body=arrays["two_body"],
+    )
+    if (
+        expected_integral_value_hash is not None
+        and integral_value_hash != str(expected_integral_value_hash)
+    ):
+        return arrays, metadata, integral_value_hash, "integral_value_hash_mismatch"
+    return arrays, metadata, integral_value_hash, None
+
+
+def _checked_surface_code_integral_arrays(
+    *,
+    constant: Any,
+    one_body: Any,
+    two_body: Any,
+) -> tuple[dict[str, np.ndarray], dict[str, dict[str, Any]], str]:
+    arrays, metadata, integral_value_hash, invalid_reason = (
+        _validate_surface_code_integral_arrays(
+            constant=constant,
+            one_body=one_body,
+            two_body=two_body,
+        )
+    )
+    if invalid_reason is not None:
+        raise ValueError(f"Invalid surface-code integrals: {invalid_reason}")
+    return arrays, metadata, integral_value_hash
 
 
 def _write_surface_code_integral_npz_atomic(
@@ -725,10 +879,17 @@ def _load_valid_surface_code_integral_cache(
     try:
         with metadata_path.open("r", encoding="utf-8") as f:
             metadata = json.load(f)
+        if not isinstance(metadata, Mapping):
+            return None, None, None, {}, "metadata_not_object"
         if metadata.get("schema_version") != _SURFACE_CODE_INTEGRAL_CACHE_VERSION:
             return None, None, None, {}, "schema_version_mismatch"
         if metadata.get("cache_key") != cache_key:
             return None, None, None, {}, "cache_key_mismatch"
+        cache_payload = metadata.get("cache_payload")
+        if not isinstance(cache_payload, Mapping):
+            return None, None, None, {}, "cache_payload_mismatch"
+        if _surface_code_integral_cache_key(cache_payload) != cache_key:
+            return None, None, None, {}, "cache_payload_mismatch"
         expected_hash = metadata.get("npz_sha256")
         if not isinstance(expected_hash, str):
             return None, None, None, {}, "missing_npz_sha256"
@@ -739,19 +900,28 @@ def _load_valid_surface_code_integral_cache(
         if not isinstance(expected_arrays, Mapping):
             return None, None, None, {}, "missing_array_metadata"
         with np.load(npz_path, allow_pickle=False) as data:
+            if set(data.files) != set(_INTEGRAL_ARRAY_ORDER):
+                return None, None, None, {}, "npz_keys_mismatch"
             arrays = {
                 "constant": np.array(data["constant"], copy=True),
                 "one_body": np.array(data["one_body"], copy=True),
                 "two_body": np.array(data["two_body"], copy=True),
             }
-        for name, array in arrays.items():
-            expected = expected_arrays.get(name)
-            if not isinstance(expected, Mapping):
-                return None, None, None, {}, f"missing_{name}_metadata"
-            if list(array.shape) != list(expected.get("shape", [])):
-                return None, None, None, {}, f"{name}_shape_mismatch"
-            if str(array.dtype) != str(expected.get("dtype")):
-                return None, None, None, {}, f"{name}_dtype_mismatch"
+        expected_integral_value_hash = metadata.get("integral_value_hash")
+        if not isinstance(expected_integral_value_hash, str):
+            return None, None, None, {}, "missing_integral_value_hash"
+        _, _, integral_value_hash, invalid_reason = (
+            _validate_surface_code_integral_arrays(
+                constant=arrays["constant"],
+                one_body=arrays["one_body"],
+                two_body=arrays["two_body"],
+                expected_arrays=expected_arrays,
+                expected_integral_value_hash=expected_integral_value_hash,
+            )
+        )
+        if invalid_reason is not None:
+            return None, None, None, {}, invalid_reason
+        metadata["integral_value_hash"] = integral_value_hash
         return (
             arrays["constant"][()],
             arrays["one_body"],
@@ -771,8 +941,14 @@ def _surface_code_integral_cache_metadata(
     constant: Any,
     one_body: Any,
     two_body: Any,
+    integral_value_hash: str,
     cache_status: str,
 ) -> dict[str, Any]:
+    arrays = _surface_code_integral_cache_array_metadata(
+        constant=constant,
+        one_body=one_body,
+        two_body=two_body,
+    )
     return {
         "schema_version": _SURFACE_CODE_INTEGRAL_CACHE_VERSION,
         "cache_key": cache_key,
@@ -780,11 +956,8 @@ def _surface_code_integral_cache_metadata(
         "cache_status": cache_status,
         "created_unix_seconds": time.time(),
         "pyscf_version": str(payload.get("pyscf_version")),
-        "arrays": _surface_code_integral_cache_array_metadata(
-            constant=constant,
-            one_body=one_body,
-            two_body=two_body,
-        ),
+        "integral_value_hash": str(integral_value_hash),
+        "arrays": arrays,
         "npz_path": str(npz_path),
         "npz_sha256": file_sha256(npz_path),
         "npz_size_bytes": _file_size_bytes(npz_path),
@@ -818,6 +991,11 @@ def _compute_surface_code_integrals_uncached(
     mf = scf.RHF(mol)
     mf.verbose = 0
     mf.kernel()
+    if not bool(getattr(mf, "converged", False)):
+        raise RuntimeError(
+            "PySCF RHF did not converge: "
+            f"chain_length={chain_length}, distance={distance}"
+        )
     constant = float(mf.energy_nuc())
     mo_coeff = mf.mo_coeff
     h_core = mf.get_hcore()
@@ -825,15 +1003,20 @@ def _compute_surface_code_integrals_uncached(
     eri_mo = pyscf.ao2mo.kernel(mf.mol, mo_coeff)
     eri_mo = pyscf.ao2mo.restore(1, eri_mo, mo_coeff.shape[0])
     two_body = np.asarray(eri_mo.transpose(0, 2, 3, 1), order="C")
+    _checked_surface_code_integral_arrays(
+        constant=constant,
+        one_body=one_body,
+        two_body=two_body,
+    )
     return constant, one_body, two_body
 
 
-def _surface_code_integrals(
+def _resolve_surface_code_integrals(
     chain_length: int,
     *,
     distance: float,
     stage_recorder: _StageMetricsRecorder | None = None,
-) -> tuple[Any, Any, Any]:
+) -> _ResolvedSurfaceCodeIntegrals:
     from .chemistry_hamiltonian import geo
 
     geometry, multiplicity, charge = geo(chain_length, distance)
@@ -848,7 +1031,6 @@ def _surface_code_integrals(
     )
     cache_key = _surface_code_integral_cache_key(payload)
     cache_dir = _surface_code_integral_cache_root(cache_key)
-    cache_dir.mkdir(parents=True, exist_ok=True)
     npz_path = cache_dir / "integrals.npz"
     metadata_path = cache_dir / "metadata.json"
     lock_path = cache_dir / "cache.lock"
@@ -864,7 +1046,13 @@ def _surface_code_integrals(
             if stage_recorder is not None
             else _null_stage()
         ) as span:
-            span.add_result(cache_status="disabled", invalid_reason="disabled")
+            span.add_result(
+                cache_status="disabled",
+                invalid_reason="disabled",
+                integral_value_hash=None,
+                npz_sha256=None,
+                arrays=None,
+            )
         with (
             stage_recorder.stage(
                 "integral_scf_and_transform",
@@ -879,16 +1067,38 @@ def _surface_code_integrals(
                 chain_length,
                 distance=distance,
             )
-            span.add_result(
-                cache_status="disabled",
-                arrays=_surface_code_integral_cache_array_metadata(
+            arrays, array_metadata, integral_value_hash = (
+                _checked_surface_code_integral_arrays(
                     constant=constant,
                     one_body=one_body,
                     two_body=two_body,
-                ),
+                )
             )
-        return constant, one_body, two_body
+            span.add_result(
+                cache_status="disabled",
+                converged=True,
+                pyscf_version=payload["pyscf_version"],
+                arrays=array_metadata,
+                integral_value_hash=integral_value_hash,
+            )
+        return _ResolvedSurfaceCodeIntegrals(
+            constant=arrays["constant"][()],
+            one_body=arrays["one_body"],
+            two_body=arrays["two_body"],
+            cache_enabled=False,
+            schema_version=_SURFACE_CODE_INTEGRAL_CACHE_VERSION,
+            cache_key=cache_key,
+            integral_value_hash=integral_value_hash,
+            cache_status="disabled",
+            filled_by_other_process=False,
+            initial_invalid_reason="disabled",
+            locked_invalid_reason=None,
+            cache_dir=cache_dir,
+            npz_path=npz_path,
+            npz_sha256=None,
+        )
 
+    cache_dir.mkdir(parents=True, exist_ok=True)
     constant: Any
     one_body: np.ndarray | None
     two_body: np.ndarray | None
@@ -917,11 +1127,28 @@ def _surface_code_integrals(
             cache_status="hit" if hit else "miss",
             invalid_reason=invalid_reason,
             npz_size_bytes=_file_size_bytes(npz_path),
+            integral_value_hash=cached_metadata.get("integral_value_hash"),
+            npz_sha256=cached_metadata.get("npz_sha256"),
             arrays=cached_metadata.get("arrays"),
         )
     if invalid_reason is None:
         assert one_body is not None and two_body is not None
-        return constant, one_body, two_body
+        return _ResolvedSurfaceCodeIntegrals(
+            constant=constant,
+            one_body=one_body,
+            two_body=two_body,
+            cache_enabled=True,
+            schema_version=_SURFACE_CODE_INTEGRAL_CACHE_VERSION,
+            cache_key=cache_key,
+            integral_value_hash=str(cached_metadata["integral_value_hash"]),
+            cache_status="hit",
+            filled_by_other_process=False,
+            initial_invalid_reason=None,
+            locked_invalid_reason=None,
+            cache_dir=cache_dir,
+            npz_path=npz_path,
+            npz_sha256=str(cached_metadata.get("npz_sha256")),
+        )
 
     with (
         stage_recorder.stage(
@@ -935,7 +1162,9 @@ def _surface_code_integrals(
         if stage_recorder is not None
         else _null_stage()
     ) as lock_span:
+        lock_wait_started = time.perf_counter()
         with _FileLock(lock_path):
+            lock_wait_seconds = float(time.perf_counter() - lock_wait_started)
             constant, one_body, two_body, cached_metadata, locked_invalid_reason = (
                 _load_valid_surface_code_integral_cache(
                     cache_dir=cache_dir,
@@ -948,13 +1177,34 @@ def _surface_code_integrals(
                     cache_status="hit",
                     filled_by_other_process=True,
                     invalid_reason=None,
+                    locked_invalid_reason=None,
+                    lock_wait_seconds=lock_wait_seconds,
+                    integral_value_hash=cached_metadata.get("integral_value_hash"),
+                    npz_sha256=cached_metadata.get("npz_sha256"),
                     npz_size_bytes=_file_size_bytes(npz_path),
                     arrays=cached_metadata.get("arrays"),
                 )
-                return constant, one_body, two_body
+                return _ResolvedSurfaceCodeIntegrals(
+                    constant=constant,
+                    one_body=one_body,
+                    two_body=two_body,
+                    cache_enabled=True,
+                    schema_version=_SURFACE_CODE_INTEGRAL_CACHE_VERSION,
+                    cache_key=cache_key,
+                    integral_value_hash=str(cached_metadata["integral_value_hash"]),
+                    cache_status="hit",
+                    filled_by_other_process=True,
+                    initial_invalid_reason=invalid_reason,
+                    locked_invalid_reason=None,
+                    cache_dir=cache_dir,
+                    npz_path=npz_path,
+                    npz_sha256=str(cached_metadata.get("npz_sha256")),
+                )
             lock_span.add_result(
                 cache_status="miss",
                 invalid_reason=locked_invalid_reason,
+                locked_invalid_reason=locked_invalid_reason,
+                lock_wait_seconds=lock_wait_seconds,
             )
 
             with (
@@ -972,12 +1222,20 @@ def _surface_code_integrals(
                     chain_length,
                     distance=distance,
                 )
-                scf_span.add_result(
-                    arrays=_surface_code_integral_cache_array_metadata(
+                arrays, array_metadata, integral_value_hash = (
+                    _checked_surface_code_integral_arrays(
                         constant=constant,
                         one_body=one_body,
                         two_body=two_body,
-                    ),
+                    )
+                )
+                scf_span.add_result(
+                    chain_length=int(chain_length),
+                    distance=float(distance),
+                    pyscf_version=payload["pyscf_version"],
+                    converged=True,
+                    arrays=array_metadata,
+                    integral_value_hash=integral_value_hash,
                 )
 
             with (
@@ -993,36 +1251,70 @@ def _surface_code_integrals(
             ) as write_span:
                 _write_surface_code_integral_npz_atomic(
                     npz_path,
-                    constant=constant,
-                    one_body=one_body,
-                    two_body=two_body,
+                    constant=arrays["constant"],
+                    one_body=arrays["one_body"],
+                    two_body=arrays["two_body"],
                 )
                 metadata = _surface_code_integral_cache_metadata(
                     cache_key=cache_key,
                     payload=payload,
                     npz_path=npz_path,
-                    constant=constant,
-                    one_body=one_body,
-                    two_body=two_body,
+                    constant=arrays["constant"],
+                    one_body=arrays["one_body"],
+                    two_body=arrays["two_body"],
+                    integral_value_hash=integral_value_hash,
                     cache_status="created",
                 )
                 _atomic_write_json(metadata_path, metadata)
                 write_span.add_result(
                     cache_status="created",
+                    integral_value_hash=integral_value_hash,
+                    npz_sha256=metadata.get("npz_sha256"),
                     npz_size_bytes=_file_size_bytes(npz_path),
                     metadata_size_bytes=_file_size_bytes(metadata_path),
                     arrays=metadata["arrays"],
                 )
 
-    return constant, one_body, two_body
+    return _ResolvedSurfaceCodeIntegrals(
+        constant=arrays["constant"][()],
+        one_body=arrays["one_body"],
+        two_body=arrays["two_body"],
+        cache_enabled=True,
+        schema_version=_SURFACE_CODE_INTEGRAL_CACHE_VERSION,
+        cache_key=cache_key,
+        integral_value_hash=integral_value_hash,
+        cache_status="miss",
+        filled_by_other_process=False,
+        initial_invalid_reason=invalid_reason,
+        locked_invalid_reason=locked_invalid_reason,
+        cache_dir=cache_dir,
+        npz_path=npz_path,
+        npz_sha256=str(metadata.get("npz_sha256")),
+    )
 
 
-def build_grouped_surface_code_step_circuit(
+def _surface_code_integrals(
+    chain_length: int,
+    *,
+    distance: float,
+    stage_recorder: _StageMetricsRecorder | None = None,
+) -> tuple[Any, Any, Any]:
+    resolved = _resolve_surface_code_integrals(
+        chain_length,
+        distance=distance,
+        stage_recorder=stage_recorder,
+    )
+    return resolved.constant, resolved.one_body, resolved.two_body
+
+
+def _build_grouped_surface_code_step_circuit_from_integrals(
     ham_name: str,
     pf_label: PFLabel,
     *,
     step_time: float,
-    stage_recorder: _StageMetricsRecorder | None = None,
+    constant: Any,
+    one_body: Any,
+    two_body: Any,
 ) -> Any:
     from openfermion import InteractionOperator
     from openfermion.chem.molecular_data import spinorb_from_spatial
@@ -1034,11 +1326,6 @@ def build_grouped_surface_code_step_circuit(
     from .qiskit_time_evolution_pyscf import _build_grouped_jw_list
 
     chain_length = _parse_hchain_length(ham_name)
-    constant, one_body, two_body = _surface_code_integrals(
-        chain_length,
-        distance=_parse_distance(ham_name),
-        stage_recorder=stage_recorder,
-    )
 
     if chain_length in (2, 3):
         h1s, h2s = spinorb_from_spatial(one_body, two_body * 0.5)
@@ -1062,6 +1349,29 @@ def build_grouped_surface_code_step_circuit(
     )
     qc.global_phase = 0.0
     return qc
+
+
+def build_grouped_surface_code_step_circuit(
+    ham_name: str,
+    pf_label: PFLabel,
+    *,
+    step_time: float,
+    stage_recorder: _StageMetricsRecorder | None = None,
+) -> Any:
+    chain_length = _parse_hchain_length(ham_name)
+    resolved = _resolve_surface_code_integrals(
+        chain_length,
+        distance=_parse_distance(ham_name),
+        stage_recorder=stage_recorder,
+    )
+    return _build_grouped_surface_code_step_circuit_from_integrals(
+        ham_name,
+        pf_label,
+        step_time=step_time,
+        constant=resolved.constant,
+        one_body=resolved.one_body,
+        two_body=resolved.two_body,
+    )
 
 
 def _prepare_runtime_env(
@@ -2563,6 +2873,10 @@ def _step_artifact_cache_key(
     step_time: float,
     rotation_precision: float,
     qret_hash: str,
+    integral_cache_enabled: bool,
+    integral_cache_schema_version: str,
+    integral_cache_key: str,
+    integral_value_hash: str,
 ) -> str:
     payload = {
         "ham_name": ham_name,
@@ -2571,14 +2885,16 @@ def _step_artifact_cache_key(
         "step_time": float(step_time),
         "rotation_precision": float(rotation_precision),
         "qret_hash": qret_hash,
+        "integral_cache_enabled": bool(integral_cache_enabled),
+        "integral_cache_schema_version": str(integral_cache_schema_version),
+        "integral_cache_key": str(integral_cache_key),
+        "integral_value_hash": str(integral_value_hash),
         "qasm_basis_gates": list(SURFACE_CODE_QASM_BASIS_GATES),
         "qasm_decompose_reps": int(SURFACE_CODE_QASM_DECOMPOSE_REPS),
         "rz_call_cache": bool(SURFACE_CODE_RZ_CALL_CACHE),
         "rz_call_cache_round_digits": SURFACE_CODE_RZ_CALL_CACHE_ROUND_DIGITS,
         "rz_helper_opt_mode": _rz_helper_opt_mode(),
         "rz_helper_independent_cache": _RZ_HELPER_INDEPENDENT_CACHE_VERSION,
-        "integral_cache_enabled": bool(SURFACE_CODE_INTEGRAL_CACHE_ENABLED),
-        "integral_cache_schema_version": _SURFACE_CODE_INTEGRAL_CACHE_VERSION,
         "ir_rotation_precision_rewrite": _IR_ROTATION_PRECISION_REWRITE_VERSION,
         "ir_metadata_normalization": _IR_METADATA_NORMALIZATION_VERSION,
         "ir_stream_summary": _IR_STREAM_SUMMARY_VERSION,
@@ -2596,6 +2912,10 @@ def _step_artifact_runtime_root(
     step_time: float,
     rotation_precision: float,
     qret_hash: str,
+    integral_cache_enabled: bool,
+    integral_cache_schema_version: str,
+    integral_cache_key: str,
+    integral_value_hash: str,
 ) -> Path:
     safe_ham = _safe_path_component(ham_name)
     safe_pf = _safe_path_component(str(pf_label))
@@ -2611,6 +2931,10 @@ def _step_artifact_runtime_root(
             step_time=step_time,
             rotation_precision=rotation_precision,
             qret_hash=qret_hash,
+            integral_cache_enabled=integral_cache_enabled,
+            integral_cache_schema_version=integral_cache_schema_version,
+            integral_cache_key=integral_cache_key,
+            integral_value_hash=integral_value_hash,
         )
     )
 
@@ -2652,33 +2976,6 @@ def prepare_grouped_surface_code_step_artifact(
     if not qret_path.exists():
         raise FileNotFoundError(f"quration binary not found: {qret_path}")
     qret_hash = file_sha256(qret_path)
-    runtime_root = _step_artifact_runtime_root(
-        ham_name,
-        pf_label,
-        target_error=target_error,
-        step_time=step_t,
-        rotation_precision=rot_precision,
-        qret_hash=qret_hash,
-    )
-    runtime_root.mkdir(parents=True, exist_ok=True)
-
-    qasm_path = runtime_root / "step.qasm"
-    ir_path = runtime_root / "step_ir.json"
-    opt_path = runtime_root / "step_opt.json"
-    stage_metrics_path = runtime_root / _PREPARE_STAGE_METRICS_FILENAME
-    stage_cache_hit_metrics_path = (
-        runtime_root / _PREPARE_STAGE_CACHE_HIT_METRICS_FILENAME
-    )
-    stage_files = {
-        "qasm": qasm_path,
-        "ir": ir_path,
-        "optimized_ir": opt_path,
-        "python_inline_summary": runtime_root / "python_inline_summary.json",
-        "step_instruction_stream_summary": (
-            runtime_root / "step_instruction_stream_summary.json"
-        ),
-        "step_artifact": runtime_root / "step_artifact.json",
-    }
     stage_recorder = _StageMetricsRecorder(
         scope="prepare_grouped_surface_code_step_artifact",
         metadata={
@@ -2695,8 +2992,47 @@ def prepare_grouped_surface_code_step_artifact(
             "integral_cache_schema_version": _SURFACE_CODE_INTEGRAL_CACHE_VERSION,
         },
     )
+    stage_metrics_path: Path | None = None
+    stage_files: dict[str, Path] = {}
 
     try:
+        resolved_integrals = _resolve_surface_code_integrals(
+            _parse_hchain_length(ham_name),
+            distance=_parse_distance(ham_name),
+            stage_recorder=stage_recorder,
+        )
+        runtime_root = _step_artifact_runtime_root(
+            ham_name,
+            pf_label,
+            target_error=target_error,
+            step_time=step_t,
+            rotation_precision=rot_precision,
+            qret_hash=qret_hash,
+            integral_cache_enabled=resolved_integrals.cache_enabled,
+            integral_cache_schema_version=resolved_integrals.schema_version,
+            integral_cache_key=resolved_integrals.cache_key,
+            integral_value_hash=resolved_integrals.integral_value_hash,
+        )
+        runtime_root.mkdir(parents=True, exist_ok=True)
+
+        qasm_path = runtime_root / "step.qasm"
+        ir_path = runtime_root / "step_ir.json"
+        opt_path = runtime_root / "step_opt.json"
+        stage_metrics_path = runtime_root / _PREPARE_STAGE_METRICS_FILENAME
+        stage_cache_hit_metrics_path = (
+            runtime_root / _PREPARE_STAGE_CACHE_HIT_METRICS_FILENAME
+        )
+        stage_files = {
+            "qasm": qasm_path,
+            "ir": ir_path,
+            "optimized_ir": opt_path,
+            "python_inline_summary": runtime_root / "python_inline_summary.json",
+            "step_instruction_stream_summary": (
+                runtime_root / "step_instruction_stream_summary.json"
+            ),
+            "step_artifact": runtime_root / "step_artifact.json",
+        }
+
         with stage_recorder.stage("cache_lookup") as span:
             cached_artifact = load_prepared_surface_code_step_artifact(runtime_root)
             span.add_result(cache_hit=cached_artifact is not None)
@@ -2713,11 +3049,13 @@ def prepare_grouped_surface_code_step_artifact(
             return cached_artifact
 
         with stage_recorder.stage("build_step_circuit") as span:
-            qc = build_grouped_surface_code_step_circuit(
+            qc = _build_grouped_surface_code_step_circuit_from_integrals(
                 ham_name,
                 pf_label,
                 step_time=step_t,
-                stage_recorder=stage_recorder,
+                constant=resolved_integrals.constant,
+                one_body=resolved_integrals.one_body,
+                two_body=resolved_integrals.two_body,
             )
             span.add_result(circuit_type=type(qc).__name__)
 
@@ -2890,6 +3228,7 @@ def prepare_grouped_surface_code_step_artifact(
             instruction_count=int(summary["instruction_count"]),
             gate_depth=int(summary["gate_depth"]),
             rz_call_cache=dict(rz_metadata),
+            integral_cache=resolved_integrals.provenance(),
         )
         with stage_recorder.stage("write_step_artifact") as span:
             artifact_path = runtime_root / "step_artifact.json"
@@ -2907,14 +3246,15 @@ def prepare_grouped_surface_code_step_artifact(
         )
         return artifact
     except Exception:
-        try:
-            stage_recorder.write(
-                stage_metrics_path,
-                status="failed",
-                files=stage_files,
-            )
-        except Exception:
-            pass
+        if stage_metrics_path is not None:
+            try:
+                stage_recorder.write(
+                    stage_metrics_path,
+                    status="failed",
+                    files=stage_files,
+                )
+            except Exception:
+                pass
         raise
 
 
