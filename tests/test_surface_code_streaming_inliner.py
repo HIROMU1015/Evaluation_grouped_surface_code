@@ -6,6 +6,8 @@ import time
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+import numpy as np
+
 from trotterlib import surface_code as sc
 
 
@@ -159,6 +161,27 @@ def _run_parallel_rz_helper_cache_worker(
                     False,
                 ),
                 "circuit_name": circuit["name"],
+            }
+        )
+    except BaseException as exc:
+        result_queue.put({"ok": False, "error": repr(exc)})
+        raise
+
+
+def _run_parallel_integral_cache_worker(
+    cache_root: str,
+    result_queue: Any,
+) -> None:
+    try:
+        sc.SURFACE_CODE_CACHE_DIR = Path(cache_root)
+        sc.SURFACE_CODE_INTEGRAL_CACHE_ENABLED = True
+        constant, one_body, two_body = sc._surface_code_integrals(4, distance=1.0)
+        result_queue.put(
+            {
+                "ok": True,
+                "constant": float(constant),
+                "one_body_shape": list(np.asarray(one_body).shape),
+                "two_body_shape": list(np.asarray(two_body).shape),
             }
         )
     except BaseException as exc:
@@ -438,6 +461,50 @@ def test_stage_metrics_recorder_writes_valid_json(tmp_path: Path) -> None:
     assert payload["file_sizes_bytes"]["payload"] == 2
 
 
+def test_ir_rotation_rewrite_normalizes_parse_timestamp(tmp_path: Path) -> None:
+    ir_path = tmp_path / "step_ir.json"
+    sc._atomic_write_json(
+        ir_path,
+        {
+            "metadata": {
+                "format": "IR",
+                "schema_version": "0.1",
+                "created_at": "2026-06-23T12:34:56",
+            },
+            "name": "OpenQASM2",
+            "circuit_list": [
+                {
+                    "name": "main",
+                    "argument": {"num_qubits": 1},
+                    "bb_list": [
+                        {
+                            "name": "entry",
+                            "inst_list": [
+                                {
+                                    "opcode": "RZ",
+                                    "q": 0,
+                                    "theta": {"value": 0.25, "precision": 1.0e-3},
+                                },
+                                {"opcode": "Return"},
+                            ],
+                        }
+                    ],
+                }
+            ],
+        },
+        indent=None,
+    )
+
+    result = sc._rewrite_ir_rotation_precision(ir_path, rotation_precision=1.0e-5)
+    payload = json.loads(ir_path.read_text(encoding="utf-8"))
+
+    assert result["metadata_created_at_normalized"] is True
+    assert payload["metadata"]["created_at"] == "1970-01-01T00:00:00"
+    assert payload["circuit_list"][0]["bb_list"][0]["inst_list"][0]["theta"][
+        "precision"
+    ] == 1.0e-5
+
+
 def test_run_qret_records_stage_metrics_for_subprocess(tmp_path: Path) -> None:
     script_path = tmp_path / "fake_qret.sh"
     output_path = tmp_path / "out.json"
@@ -543,6 +610,263 @@ def test_prepare_cache_hit_preserves_cold_stage_metrics(
     assert cache_hit_metrics["status"] == "cache_hit"
     assert cache_hit_metrics["cold_run_stage_metrics_exists"] is True
     assert cache_hit_metrics["cold_run_stage_metrics_path"] == str(cold_metrics_path)
+
+
+def _integral_lookup_results(recorder: sc._StageMetricsRecorder) -> list[dict[str, Any]]:
+    return [
+        dict(stage.get("result", {}))
+        for stage in recorder.summary(status="ok").get("stages", [])
+        if stage.get("name") == "integral_cache_lookup"
+    ]
+
+
+def _integral_cache_entry_dirs(cache_root: Path) -> list[Path]:
+    root = cache_root / "gr" / "integral_cache"
+    if not root.exists():
+        return []
+    return sorted(path for path in root.glob("*/*") if path.is_dir())
+
+
+def test_surface_code_integral_cache_miss_hit_and_exact_values(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    cache_root = tmp_path / "cache"
+    calls: list[tuple[int, float]] = []
+    constant = np.float64(1.25)
+    one_body = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float64)
+    two_body = np.arange(16, dtype=np.float64).reshape(2, 2, 2, 2)
+
+    def fake_compute(chain_length: int, *, distance: float) -> tuple[Any, Any, Any]:
+        calls.append((int(chain_length), float(distance)))
+        return constant, one_body.copy(), two_body.copy()
+
+    monkeypatch.setattr(sc, "SURFACE_CODE_CACHE_DIR", cache_root)
+    monkeypatch.setattr(sc, "SURFACE_CODE_INTEGRAL_CACHE_ENABLED", True)
+    monkeypatch.setattr(sc, "_pyscf_version", lambda: "pyscf-test-1")
+    monkeypatch.setattr(sc, "_compute_surface_code_integrals_uncached", fake_compute)
+
+    first_recorder = sc._StageMetricsRecorder(
+        scope="integral_cache_test",
+        metadata={"run": 1},
+    )
+    first_constant, first_one_body, first_two_body = sc._surface_code_integrals(
+        4,
+        distance=1.0,
+        stage_recorder=first_recorder,
+    )
+    assert _integral_lookup_results(first_recorder)[0]["cache_status"] == "miss"
+    assert calls == [(4, 1.0)]
+
+    second_recorder = sc._StageMetricsRecorder(
+        scope="integral_cache_test",
+        metadata={"run": 2},
+    )
+    second_constant, second_one_body, second_two_body = sc._surface_code_integrals(
+        4,
+        distance=1.0,
+        stage_recorder=second_recorder,
+    )
+    assert _integral_lookup_results(second_recorder)[0]["cache_status"] == "hit"
+    assert calls == [(4, 1.0)]
+
+    assert np.array_equal(np.asarray(second_constant), np.asarray(first_constant))
+    assert np.array_equal(second_one_body, first_one_body)
+    assert np.array_equal(second_two_body, first_two_body)
+    assert np.asarray(second_constant).dtype == np.asarray(first_constant).dtype
+    assert second_one_body.dtype == first_one_body.dtype
+    assert second_two_body.dtype == first_two_body.dtype
+    assert np.asarray(second_constant).shape == np.asarray(first_constant).shape
+    assert second_one_body.shape == first_one_body.shape
+    assert second_two_body.shape == first_two_body.shape
+
+    entry_dirs = _integral_cache_entry_dirs(cache_root)
+    assert len(entry_dirs) == 1
+    metadata = json.loads((entry_dirs[0] / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["schema_version"] == sc._SURFACE_CODE_INTEGRAL_CACHE_VERSION
+    assert metadata["pyscf_version"] == "pyscf-test-1"
+    assert metadata["arrays"]["constant"] == {"shape": [], "dtype": "float64"}
+    assert metadata["arrays"]["one_body"] == {
+        "shape": [2, 2],
+        "dtype": "float64",
+    }
+    assert metadata["arrays"]["two_body"] == {
+        "shape": [2, 2, 2, 2],
+        "dtype": "float64",
+    }
+    assert isinstance(metadata["npz_sha256"], str)
+    assert "exact cache entry" in metadata["reproducibility_note"]
+
+
+def test_surface_code_integral_cache_corrupt_entries_regenerate(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    cache_root = tmp_path / "cache"
+    calls: list[int] = []
+
+    def fake_compute(chain_length: int, *, distance: float) -> tuple[Any, Any, Any]:
+        calls.append(len(calls) + 1)
+        value = float(len(calls))
+        return (
+            np.float64(value),
+            np.full((2, 2), value, dtype=np.float64),
+            np.full((2, 2, 2, 2), value, dtype=np.float64),
+        )
+
+    monkeypatch.setattr(sc, "SURFACE_CODE_CACHE_DIR", cache_root)
+    monkeypatch.setattr(sc, "SURFACE_CODE_INTEGRAL_CACHE_ENABLED", True)
+    monkeypatch.setattr(sc, "_pyscf_version", lambda: "pyscf-test-1")
+    monkeypatch.setattr(sc, "_compute_surface_code_integrals_uncached", fake_compute)
+
+    sc._surface_code_integrals(4, distance=1.0)
+    entry_dir = _integral_cache_entry_dirs(cache_root)[0]
+
+    (entry_dir / "integrals.npz").write_bytes(b"broken")
+    npz_recorder = sc._StageMetricsRecorder(
+        scope="integral_cache_test",
+        metadata={"case": "npz_corrupt"},
+    )
+    sc._surface_code_integrals(4, distance=1.0, stage_recorder=npz_recorder)
+    npz_lookup = _integral_lookup_results(npz_recorder)[0]
+    assert npz_lookup["cache_status"] == "miss"
+    assert npz_lookup["invalid_reason"] == "npz_hash_mismatch"
+    assert len(calls) == 2
+
+    (entry_dir / "metadata.json").write_text("{broken", encoding="utf-8")
+    metadata_recorder = sc._StageMetricsRecorder(
+        scope="integral_cache_test",
+        metadata={"case": "metadata_corrupt"},
+    )
+    sc._surface_code_integrals(4, distance=1.0, stage_recorder=metadata_recorder)
+    metadata_lookup = _integral_lookup_results(metadata_recorder)[0]
+    assert metadata_lookup["cache_status"] == "miss"
+    assert str(metadata_lookup["invalid_reason"]).startswith("invalid:")
+    assert len(calls) == 3
+
+
+def test_surface_code_integral_cache_key_conditions_miss(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    cache_root = tmp_path / "cache"
+    calls: list[tuple[int, float, str, str]] = []
+
+    def fake_compute(chain_length: int, *, distance: float) -> tuple[Any, Any, Any]:
+        calls.append(
+            (
+                int(chain_length),
+                float(distance),
+                str(sc.DEFAULT_BASIS),
+                str(sc._pyscf_version()),
+            )
+        )
+        value = float(len(calls))
+        return (
+            np.float64(value),
+            np.eye(2, dtype=np.float64) * value,
+            np.ones((2, 2, 2, 2), dtype=np.float64) * value,
+        )
+
+    version = {"value": "pyscf-test-1"}
+    monkeypatch.setattr(sc, "SURFACE_CODE_CACHE_DIR", cache_root)
+    monkeypatch.setattr(sc, "SURFACE_CODE_INTEGRAL_CACHE_ENABLED", True)
+    monkeypatch.setattr(sc, "_pyscf_version", lambda: version["value"])
+    monkeypatch.setattr(sc, "_compute_surface_code_integrals_uncached", fake_compute)
+
+    sc._surface_code_integrals(4, distance=1.0)
+    sc._surface_code_integrals(4, distance=1.0)
+    assert len(calls) == 1
+
+    sc._surface_code_integrals(4, distance=1.1)
+    assert len(calls) == 2
+
+    monkeypatch.setattr(sc, "DEFAULT_BASIS", "6-31g")
+    sc._surface_code_integrals(4, distance=1.0)
+    assert len(calls) == 3
+
+    version["value"] = "pyscf-test-2"
+    sc._surface_code_integrals(4, distance=1.0)
+    assert len(calls) == 4
+
+
+def test_surface_code_integral_cache_disabled_recomputes(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    calls: list[int] = []
+
+    def fake_compute(chain_length: int, *, distance: float) -> tuple[Any, Any, Any]:
+        del chain_length, distance
+        calls.append(len(calls) + 1)
+        value = float(len(calls))
+        return (
+            np.float64(value),
+            np.array([[value]], dtype=np.float64),
+            np.array([[[[value]]]], dtype=np.float64),
+        )
+
+    monkeypatch.setattr(sc, "SURFACE_CODE_CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(sc, "SURFACE_CODE_INTEGRAL_CACHE_ENABLED", False)
+    monkeypatch.setattr(sc, "_pyscf_version", lambda: "pyscf-test-1")
+    monkeypatch.setattr(sc, "_compute_surface_code_integrals_uncached", fake_compute)
+
+    sc._surface_code_integrals(4, distance=1.0)
+    sc._surface_code_integrals(4, distance=1.0)
+    assert len(calls) == 2
+
+
+def test_surface_code_integral_cache_lock_prevents_parallel_generation(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    started_path = tmp_path / "integral_started"
+    runs_path = tmp_path / "integral_runs.txt"
+
+    def fake_compute(chain_length: int, *, distance: float) -> tuple[Any, Any, Any]:
+        del chain_length, distance
+        started_path.write_text("started", encoding="utf-8")
+        time.sleep(0.6)
+        with runs_path.open("a", encoding="utf-8") as f:
+            f.write("run\n")
+        return (
+            np.float64(1.0),
+            np.eye(2, dtype=np.float64),
+            np.ones((2, 2, 2, 2), dtype=np.float64),
+        )
+
+    monkeypatch.setattr(sc, "_pyscf_version", lambda: "pyscf-test-1")
+    monkeypatch.setattr(sc, "_compute_surface_code_integrals_uncached", fake_compute)
+
+    ctx = mp.get_context("fork")
+    result_queue = ctx.Queue()
+    cache_root = tmp_path / "cache"
+    first = ctx.Process(
+        target=_run_parallel_integral_cache_worker,
+        args=(str(cache_root), result_queue),
+    )
+    first.start()
+    deadline = time.monotonic() + 5.0
+    while not started_path.exists() and time.monotonic() < deadline:
+        if first.exitcode is not None:
+            break
+        time.sleep(0.01)
+    assert started_path.exists()
+
+    second = ctx.Process(
+        target=_run_parallel_integral_cache_worker,
+        args=(str(cache_root), result_queue),
+    )
+    second.start()
+    first.join(10)
+    second.join(10)
+    assert first.exitcode == 0
+    assert second.exitcode == 0
+
+    results = [result_queue.get(timeout=2), result_queue.get(timeout=2)]
+    assert all(item["ok"] for item in results)
+    assert runs_path.read_text(encoding="utf-8").splitlines() == ["run"]
+    assert [item["one_body_shape"] for item in results] == [[2, 2], [2, 2]]
 
 
 def test_independent_rz_helper_cache_generate_hit_and_corrupt_invalidate(
