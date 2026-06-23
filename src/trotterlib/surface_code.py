@@ -703,11 +703,43 @@ def _surface_code_integral_cache_root(cache_key: str) -> Path:
 _INTEGRAL_ARRAY_ORDER = ("constant", "one_body", "two_body")
 
 
+def _update_sha256_with_array_c_order_bytes(
+    digest: Any,
+    array: np.ndarray,
+    *,
+    chunk_bytes: int = 1024 * 1024,
+) -> None:
+    if int(chunk_bytes) <= 0:
+        raise ValueError(f"chunk_bytes must be positive: {chunk_bytes}")
+    array = np.asarray(array)
+    if int(array.nbytes) == 0:
+        return
+    if array.flags.c_contiguous:
+        byte_view = memoryview(array).cast("B")
+        for offset in range(0, len(byte_view), int(chunk_bytes)):
+            digest.update(byte_view[offset : offset + int(chunk_bytes)])
+        return
+
+    itemsize = int(array.dtype.itemsize)
+    buffersize = max(1, int(chunk_bytes) // max(1, itemsize))
+    iterator = np.nditer(
+        array,
+        flags=["external_loop", "buffered", "zerosize_ok"],
+        op_flags=["readonly"],
+        order="C",
+        buffersize=buffersize,
+    )
+    for chunk in iterator:
+        chunk_view = memoryview(np.ascontiguousarray(chunk)).cast("B")
+        digest.update(chunk_view)
+
+
 def _surface_code_integral_value_hash(
     *,
     constant: Any,
     one_body: Any,
     two_body: Any,
+    chunk_bytes: int = 1024 * 1024,
 ) -> str:
     digest = hashlib.sha256()
     arrays = {
@@ -717,22 +749,24 @@ def _surface_code_integral_value_hash(
     }
     for name in _INTEGRAL_ARRAY_ORDER:
         array = arrays[name]
-        contiguous = np.ascontiguousarray(array)
-        raw = contiguous.tobytes(order="C")
         header = json.dumps(
             {
                 "name": name,
                 "dtype": array.dtype.str,
                 "shape": list(array.shape),
-                "nbytes": int(len(raw)),
+                "nbytes": int(array.nbytes),
             },
             sort_keys=True,
             separators=(",", ":"),
         ).encode("utf-8")
         digest.update(len(header).to_bytes(8, "big"))
         digest.update(header)
-        digest.update(len(raw).to_bytes(8, "big"))
-        digest.update(raw)
+        digest.update(int(array.nbytes).to_bytes(8, "big"))
+        _update_sha256_with_array_c_order_bytes(
+            digest,
+            array,
+            chunk_bytes=chunk_bytes,
+        )
     return digest.hexdigest()
 
 
@@ -903,9 +937,9 @@ def _load_valid_surface_code_integral_cache(
             if set(data.files) != set(_INTEGRAL_ARRAY_ORDER):
                 return None, None, None, {}, "npz_keys_mismatch"
             arrays = {
-                "constant": np.array(data["constant"], copy=True),
-                "one_body": np.array(data["one_body"], copy=True),
-                "two_body": np.array(data["two_body"], copy=True),
+                "constant": data["constant"],
+                "one_body": data["one_body"],
+                "two_body": data["two_body"],
             }
         expected_integral_value_hash = metadata.get("integral_value_hash")
         if not isinstance(expected_integral_value_hash, str):
@@ -1003,11 +1037,6 @@ def _compute_surface_code_integrals_uncached(
     eri_mo = pyscf.ao2mo.kernel(mf.mol, mo_coeff)
     eri_mo = pyscf.ao2mo.restore(1, eri_mo, mo_coeff.shape[0])
     two_body = np.asarray(eri_mo.transpose(0, 2, 3, 1), order="C")
-    _checked_surface_code_integral_arrays(
-        constant=constant,
-        one_body=one_body,
-        two_body=two_body,
-    )
     return constant, one_body, two_body
 
 
