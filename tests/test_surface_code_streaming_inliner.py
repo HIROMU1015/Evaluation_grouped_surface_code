@@ -105,6 +105,13 @@ def _rz_helper_fixture_metadata(function_name: str = "__helper()") -> dict[str, 
     }
 
 
+def _rz_helper_batch_fixture_ir() -> dict[str, Any]:
+    ir = _rz_helper_cache_fixture_ir("__helper_a()")
+    helper_b = _rz_helper_cache_fixture_ir("__helper_b()")["circuit_list"][0]
+    ir["circuit_list"].append(helper_b)
+    return ir
+
+
 def _rz_helper_e2e_fixture_ir() -> dict[str, Any]:
     return {
         "metadata": {"format": "test", "created_at": "first"},
@@ -2101,6 +2108,180 @@ def test_independent_rz_helper_cache_generate_hit_and_corrupt_invalidate(
     assert third_meta["cache_status"] == "miss"
     assert str(third_meta["invalid_reason"]).startswith("invalid:")
     assert len(calls) == 2
+
+
+def test_rz_helper_batch_size_validation(monkeypatch: Any) -> None:
+    monkeypatch.setattr(sc, "SURFACE_CODE_RZ_HELPER_BATCH_SIZE", "4")
+    assert sc._rz_helper_batch_size() == 4
+    monkeypatch.setattr(sc, "SURFACE_CODE_RZ_HELPER_BATCH_SIZE", 0)
+    with pytest.raises(ValueError):
+        sc._rz_helper_batch_size()
+    monkeypatch.setattr(sc, "SURFACE_CODE_RZ_HELPER_BATCH_SIZE", "bad")
+    with pytest.raises(ValueError):
+        sc._rz_helper_batch_size()
+
+
+def test_independent_rz_helper_batch_generates_cache_and_hits(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    cache_root = tmp_path / "cache"
+    qret_path = tmp_path / "qret"
+    qret_path.write_text("#!/bin/sh\n", encoding="utf-8")
+    full_ir = _rz_helper_batch_fixture_ir()
+    helpers = [
+        _rz_helper_fixture_metadata("__helper_a()"),
+        _rz_helper_fixture_metadata("__helper_b()"),
+    ]
+    helpers[1]["theta"] = "0.25"
+    helpers[1]["key"] = "0.25"
+    qret_calls: list[dict[str, Any]] = []
+
+    def fake_run_qret(
+        cmd: Any,
+        *,
+        runtime_root: Path,
+        rotation_precision: float | None = None,
+        stage_recorder: Any = None,
+        stage_name: str | None = None,
+        stage_details: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        del cmd, runtime_root, rotation_precision, stage_recorder
+        assert stage_name == "qret_opt_rz_helper_batch_0000"
+        assert stage_details is not None
+        input_path = Path(str(stage_details["input_path"]))
+        output_path = Path(str(stage_details["output_path"]))
+        with input_path.open("r", encoding="utf-8") as f:
+            payload = json.load(f)
+        assert [item["name"] for item in payload["circuit_list"]] == [
+            "__helper_a()",
+            "__helper_b()",
+        ]
+        for circuit in payload["circuit_list"]:
+            circuit["bb_list"][0]["inst_list"] = [
+                {"opcode": "H", "q": 0},
+                {"opcode": "T", "q": 0},
+                {"opcode": "Return"},
+            ]
+        sc._atomic_write_json(output_path, payload, indent=None)
+        qret_calls.append(
+            {
+                "stage_name": stage_name,
+                "function_names": list(stage_details["function_names"]),
+            }
+        )
+        return {
+            "returncode": 0,
+            "gnu_time_used": False,
+            "stdout_bytes": 0,
+            "stderr_bytes": 0,
+        }
+
+    monkeypatch.setattr(sc, "SURFACE_CODE_CACHE_DIR", cache_root)
+    monkeypatch.setattr(sc, "_run_qret", fake_run_qret)
+    qret_hash = sc.file_sha256(qret_path)
+
+    replacements, first_results = sc._optimize_rz_helpers_independent_cached_batch(
+        qret_path=qret_path,
+        runtime_root=tmp_path,
+        full_ir_data=full_ir,
+        helpers=helpers,
+        rotation_precision=1.0e-5,
+        qret_hash=qret_hash,
+        helper_passes=sc._rz_helper_passes(),
+        batch_size=2,
+        stage_recorder=None,
+    )
+    assert sorted(replacements) == ["__helper_a()", "__helper_b()"]
+    assert [item["cache_status"] for item in first_results] == ["miss", "miss"]
+    assert len(qret_calls) == 1
+    assert qret_calls[0]["function_names"] == ["__helper_a()", "__helper_b()"]
+
+    replacements, second_results = sc._optimize_rz_helpers_independent_cached_batch(
+        qret_path=qret_path,
+        runtime_root=tmp_path,
+        full_ir_data=full_ir,
+        helpers=helpers,
+        rotation_precision=1.0e-5,
+        qret_hash=qret_hash,
+        helper_passes=sc._rz_helper_passes(),
+        batch_size=2,
+        stage_recorder=None,
+    )
+    assert sorted(replacements) == ["__helper_a()", "__helper_b()"]
+    assert [item["cache_status"] for item in second_results] == ["hit", "hit"]
+    assert len(qret_calls) == 1
+
+
+def test_run_rz_call_cached_opt_batch_size_one_uses_legacy_single_helper_path(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    qret_path = tmp_path / "qret"
+    qret_path.write_text("#!/bin/sh\n", encoding="utf-8")
+    runtime_root = tmp_path / "runtime"
+    runtime_root.mkdir()
+    ir_path = runtime_root / "step_ir.json"
+    opt_path = runtime_root / "step_opt.json"
+    sc._atomic_write_json(ir_path, _rz_helper_e2e_fixture_ir(), indent=None)
+    rz_metadata = {"enabled": True, "helpers": [_rz_helper_fixture_metadata()]}
+    calls: list[str] = []
+
+    def fake_optimize_helper(**kwargs: Any) -> tuple[Mapping[str, Any], dict[str, Any]]:
+        calls.append(str(kwargs["helper"]["function_name"]))
+        return _override_circuit(
+            "__helper()",
+            num_qubits=1,
+            inst_list=[{"opcode": "T", "q": 0}, {"opcode": "Return"}],
+        ), {
+            "helper_index": int(kwargs["helper_index"]),
+            "function_name": kwargs["helper"]["function_name"],
+            "cache_status": "miss",
+        }
+
+    def fake_batch(**_: Any) -> tuple[dict[str, Mapping[str, Any]], list[dict[str, Any]]]:
+        raise AssertionError("batch path should not run when batch size is 1")
+
+    def fake_run_qret(
+        cmd: Any,
+        *,
+        runtime_root: Path,
+        rotation_precision: float | None = None,
+        stage_recorder: Any = None,
+        stage_name: str | None = None,
+        stage_details: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        del cmd, runtime_root, rotation_precision, stage_recorder
+        assert stage_name == "qret_opt_main_cleanup"
+        assert stage_details is not None
+        Path(str(stage_details["output_path"])).write_text(
+            Path(str(stage_details["input_path"])).read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        return {
+            "returncode": 0,
+            "gnu_time_used": False,
+            "stdout_bytes": 0,
+            "stderr_bytes": 0,
+        }
+
+    monkeypatch.setattr(sc, "SURFACE_CODE_RZ_HELPER_OPT_MODE", "independent_helper")
+    monkeypatch.setattr(sc, "SURFACE_CODE_RZ_HELPER_BATCH_SIZE", 1)
+    monkeypatch.setattr(sc, "_optimize_rz_helper_independent_cached", fake_optimize_helper)
+    monkeypatch.setattr(sc, "_optimize_rz_helpers_independent_cached_batch", fake_batch)
+    monkeypatch.setattr(sc, "_run_qret", fake_run_qret)
+
+    result = sc._run_rz_call_cached_opt(
+        qret_path=qret_path,
+        runtime_root=runtime_root,
+        ir_path=ir_path,
+        opt_path=opt_path,
+        rz_metadata=rz_metadata,
+        rotation_precision=1.0e-5,
+        stage_recorder=None,
+    )
+    assert calls == ["__helper()"]
+    assert result["helper_batch_size"] == 1
 
 
 def test_independent_rz_helper_cache_lock_prevents_parallel_generation(

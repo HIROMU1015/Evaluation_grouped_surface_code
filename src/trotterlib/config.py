@@ -35,6 +35,17 @@ def _unique_paths(paths: Iterable[Path]) -> tuple[Path, ...]:
     return tuple(out)
 
 
+def _positive_int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name, str(default)).strip()
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer >= 1: {raw!r}") from exc
+    if value < 1:
+        raise ValueError(f"{name} must be an integer >= 1: {raw!r}")
+    return value
+
+
 _env_root = os.environ.get("TROTTER_PROJECT_ROOT")
 PROJECT_ROOT = (
     Path(_env_root).expanduser().resolve()
@@ -163,6 +174,10 @@ SURFACE_CODE_COMPILE_SKIP_REDUNDANT_IR_PREPROCESS = True
 SURFACE_CODE_SAVE_MAPPING_RESULT = False
 SURFACE_CODE_RZ_CALL_CACHE = True
 SURFACE_CODE_RZ_HELPER_OPT_MODE = "independent_helper"
+SURFACE_CODE_RZ_HELPER_BATCH_SIZE = _positive_int_env(
+    "SURFACE_CODE_RZ_HELPER_BATCH_SIZE",
+    1,
+)
 SURFACE_CODE_RZ_CALL_CACHE_ROUND_DIGITS = None
 SURFACE_CODE_INTEGRAL_CACHE_ENABLED = (
     os.environ.get("SURFACE_CODE_INTEGRAL_CACHE_ENABLED", "1").strip().lower()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import math
@@ -45,6 +46,7 @@ from .config import (
     SURFACE_CODE_REACTION_TIME,
     SURFACE_CODE_RZ_CALL_CACHE,
     SURFACE_CODE_RZ_CALL_CACHE_ROUND_DIGITS,
+    SURFACE_CODE_RZ_HELPER_BATCH_SIZE,
     SURFACE_CODE_RZ_HELPER_OPT_MODE,
     SURFACE_CODE_SAVE_MAPPING_RESULT,
     SURFACE_CODE_ROTATION_ERROR_BUDGET_FRACTION,
@@ -1921,6 +1923,30 @@ def opt_pipeline_yaml(
     )
 
 
+def opt_pipeline_yaml_functions(
+    *,
+    ir_path: Path,
+    opt_path: Path,
+    passes: Sequence[str],
+    entry_names: Sequence[str],
+) -> str:
+    names = [str(name) for name in entry_names]
+    if not names:
+        raise ValueError("entry_names must be non-empty")
+    effective_passes = list(passes)
+    return "\n".join(
+        [
+            f"input: {ir_path}",
+            "functions:",
+            *[f"- {json.dumps(name, ensure_ascii=True)}" for name in names],
+            f"output: {opt_path}",
+            "pass:",
+            *[f"- {name}" for name in effective_passes],
+            "",
+        ]
+    )
+
+
 _INLINE_ONE_QUBIT_OPS = {"I", "X", "Y", "Z", "H", "S", "SDag", "T", "TDag"}
 _INLINE_TWO_QUBIT_OPS = {"CX", "CY", "CZ"}
 _INLINE_THREE_QUBIT_OPS = {"CCX", "CCY", "CCZ"}
@@ -2748,6 +2774,20 @@ def _rz_helper_opt_mode() -> str:
     return mode
 
 
+def _rz_helper_batch_size() -> int:
+    try:
+        batch_size = int(SURFACE_CODE_RZ_HELPER_BATCH_SIZE)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "SURFACE_CODE_RZ_HELPER_BATCH_SIZE must be an integer >= 1"
+        ) from exc
+    if batch_size < 1:
+        raise ValueError(
+            "SURFACE_CODE_RZ_HELPER_BATCH_SIZE must be an integer >= 1"
+        )
+    return batch_size
+
+
 def _rz_helper_passes() -> list[str]:
     return [
         "ir::decompose_inst",
@@ -2940,6 +2980,105 @@ def _rz_helper_cache_root(cache_key: str) -> Path:
         / str(cache_key)[:2]
         / str(cache_key)
     )
+
+
+@dataclass(frozen=True)
+class _RZHelperDescriptor:
+    helper_index: int
+    function_name: str
+    helper: Mapping[str, Any]
+    helper_input_ir: Mapping[str, Any]
+    helper_input_hash: str
+    cache_payload: Mapping[str, Any]
+    cache_key: str
+    cache_dir: Path
+
+    @property
+    def input_path(self) -> Path:
+        return self.cache_dir / "helper_input.json"
+
+    @property
+    def output_path(self) -> Path:
+        return self.cache_dir / "helper_opt.json"
+
+    @property
+    def metadata_path(self) -> Path:
+        return self.cache_dir / "metadata.json"
+
+    @property
+    def lock_path(self) -> Path:
+        return self.cache_dir / "cache.lock"
+
+
+def _rz_helper_descriptor(
+    *,
+    full_ir_data: Mapping[str, Any],
+    helper: Mapping[str, Any],
+    helper_index: int,
+    rotation_precision: float,
+    qret_hash: str,
+    helper_passes: Sequence[str],
+) -> _RZHelperDescriptor:
+    function_name = str(helper["function_name"])
+    helper_input_ir = _single_circuit_ir(full_ir_data, function_name)
+    helper_input_hash = _canonical_json_hash(
+        _helper_input_ir_cache_value(helper_input_ir)
+    )
+    payload = _rz_helper_cache_payload(
+        helper_input_hash=helper_input_hash,
+        helper=helper,
+        rotation_precision=rotation_precision,
+        qret_hash=qret_hash,
+        helper_passes=helper_passes,
+    )
+    cache_key = _rz_helper_cache_key(payload)
+    cache_dir = _rz_helper_cache_root(cache_key)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return _RZHelperDescriptor(
+        helper_index=int(helper_index),
+        function_name=function_name,
+        helper=helper,
+        helper_input_ir=helper_input_ir,
+        helper_input_hash=helper_input_hash,
+        cache_payload=payload,
+        cache_key=cache_key,
+        cache_dir=cache_dir,
+    )
+
+
+def _single_helper_output_ir(
+    batch_output_ir: Mapping[str, Any],
+    circuit: Mapping[str, Any],
+) -> dict[str, Any]:
+    out = {key: value for key, value in batch_output_ir.items() if key != "circuit_list"}
+    out["circuit_list"] = [circuit]
+    return out
+
+
+def _batch_helper_input_ir(
+    full_ir_data: Mapping[str, Any],
+    descriptors: Sequence[_RZHelperDescriptor],
+) -> dict[str, Any]:
+    out = {key: value for key, value in full_ir_data.items() if key != "circuit_list"}
+    circuits: list[Any] = []
+    for descriptor in descriptors:
+        circuit_list = descriptor.helper_input_ir.get("circuit_list", [])
+        if not isinstance(circuit_list, list) or len(circuit_list) != 1:
+            raise ValueError(
+                f"Invalid helper input IR for {descriptor.function_name}"
+            )
+        circuits.append(circuit_list[0])
+    out["circuit_list"] = circuits
+    return out
+
+
+def _chunked_sequence(
+    items: Sequence[_RZHelperDescriptor],
+    size: int,
+) -> list[list[_RZHelperDescriptor]]:
+    if size < 1:
+        raise ValueError("chunk size must be >= 1")
+    return [list(items[index : index + size]) for index in range(0, len(items), size)]
 
 
 def _load_valid_rz_helper_cache(
@@ -3181,6 +3320,371 @@ def _optimize_rz_helper_independent_cached(
     return circuit, run_metadata
 
 
+def _optimize_rz_helpers_independent_cached_batch(
+    *,
+    qret_path: Path,
+    runtime_root: Path,
+    full_ir_data: Mapping[str, Any],
+    helpers: Sequence[Mapping[str, Any]],
+    rotation_precision: float,
+    qret_hash: str,
+    helper_passes: Sequence[str],
+    batch_size: int,
+    stage_recorder: _StageMetricsRecorder | None,
+) -> tuple[dict[str, Mapping[str, Any]], list[dict[str, Any]]]:
+    configured_batch_size = int(batch_size)
+    if configured_batch_size < 1:
+        raise ValueError("batch_size must be >= 1")
+
+    descriptors = [
+        _rz_helper_descriptor(
+            full_ir_data=full_ir_data,
+            helper=helper,
+            helper_index=index,
+            rotation_precision=rotation_precision,
+            qret_hash=qret_hash,
+            helper_passes=helper_passes,
+        )
+        for index, helper in enumerate(helpers)
+    ]
+    replacements: dict[str, Mapping[str, Any]] = {}
+    helper_results: list[dict[str, Any] | None] = [None] * len(descriptors)
+    initial_misses: list[tuple[_RZHelperDescriptor, str | None]] = []
+
+    for descriptor in descriptors:
+        cached_circuit: Mapping[str, Any]
+        cached_metadata: dict[str, Any]
+        invalid_reason: str | None
+        with (
+            stage_recorder.stage(
+                f"rz_helper_independent_cache_lookup_{descriptor.helper_index:04d}",
+                helper_index=int(descriptor.helper_index),
+                helper_function_name=descriptor.function_name,
+                helper_key=descriptor.helper.get("key"),
+                helper_theta=descriptor.helper.get("theta"),
+                cache_key=descriptor.cache_key,
+                cache_dir=str(descriptor.cache_dir),
+            )
+            if stage_recorder is not None
+            else _null_stage()
+        ) as span:
+            cached_circuit, cached_metadata, invalid_reason = (
+                _load_valid_rz_helper_cache(
+                    cache_dir=descriptor.cache_dir,
+                    cache_key=descriptor.cache_key,
+                    function_name=descriptor.function_name,
+                )
+            )
+            hit = invalid_reason is None
+            span.add_result(
+                cache_status="hit" if hit else "miss",
+                invalid_reason=invalid_reason,
+            )
+        if invalid_reason is None:
+            replacements[descriptor.function_name] = cached_circuit
+            helper_results[descriptor.helper_index] = _rz_helper_cache_hit_metadata(
+                helper_index=descriptor.helper_index,
+                function_name=descriptor.function_name,
+                cache_key=descriptor.cache_key,
+                cache_dir=descriptor.cache_dir,
+                cached_metadata=cached_metadata,
+            )
+        else:
+            initial_misses.append((descriptor, invalid_reason))
+
+    unique_misses: list[_RZHelperDescriptor] = []
+    seen_cache_keys: set[str] = set()
+    duplicate_misses = 0
+    for descriptor, _ in initial_misses:
+        if descriptor.cache_key in seen_cache_keys:
+            duplicate_misses += 1
+            continue
+        seen_cache_keys.add(descriptor.cache_key)
+        unique_misses.append(descriptor)
+
+    batches = _chunked_sequence(unique_misses, configured_batch_size)
+    with (
+        stage_recorder.stage(
+            "rz_helper_batch_plan",
+            configured_batch_size=configured_batch_size,
+            helper_count=len(descriptors),
+            initial_miss_count=len(initial_misses),
+            unique_miss_count=len(unique_misses),
+            duplicate_cache_key_miss_count=duplicate_misses,
+            batch_count=len(batches),
+        )
+        if stage_recorder is not None
+        else _null_stage()
+    ) as span:
+        span.add_result(
+            initial_hit_count=len(descriptors) - len(initial_misses),
+            planned_qret_invocation_count=len(batches),
+        )
+
+    batch_runtime = runtime_root / "rz_call_cache" / "helper_batches"
+    batch_runtime.mkdir(parents=True, exist_ok=True)
+    for batch_index, batch in enumerate(batches):
+        lock_stack = contextlib.ExitStack()
+        still_miss: list[tuple[_RZHelperDescriptor, str | None]] = []
+        filled_by_other = 0
+        try:
+            with (
+                stage_recorder.stage(
+                    f"rz_helper_batch_lock_{batch_index:04d}",
+                    batch_index=int(batch_index),
+                    configured_batch_size=configured_batch_size,
+                    planned_helper_count=len(batch),
+                    function_names=[item.function_name for item in batch],
+                    cache_keys=[item.cache_key for item in batch],
+                )
+                if stage_recorder is not None
+                else _null_stage()
+            ) as lock_span:
+                for descriptor in sorted(batch, key=lambda item: item.cache_key):
+                    lock_stack.enter_context(_FileLock(descriptor.lock_path))
+                for descriptor in batch:
+                    cached_circuit, cached_metadata, locked_invalid_reason = (
+                        _load_valid_rz_helper_cache(
+                            cache_dir=descriptor.cache_dir,
+                            cache_key=descriptor.cache_key,
+                            function_name=descriptor.function_name,
+                        )
+                    )
+                    if locked_invalid_reason is None:
+                        replacements[descriptor.function_name] = cached_circuit
+                        helper_results[descriptor.helper_index] = (
+                            _rz_helper_cache_hit_metadata(
+                                helper_index=descriptor.helper_index,
+                                function_name=descriptor.function_name,
+                                cache_key=descriptor.cache_key,
+                                cache_dir=descriptor.cache_dir,
+                                cached_metadata=cached_metadata,
+                                filled_by_other_process=True,
+                            )
+                        )
+                        filled_by_other += 1
+                    else:
+                        still_miss.append((descriptor, locked_invalid_reason))
+                lock_span.add_result(
+                    lock_acquired_count=len(batch),
+                    filled_by_other_process_count=filled_by_other,
+                    still_miss_count=len(still_miss),
+                )
+
+            if not still_miss:
+                continue
+
+            still_descriptors = [item[0] for item in still_miss]
+            for descriptor in still_descriptors:
+                _write_compact_json_atomic(
+                    descriptor.input_path,
+                    descriptor.helper_input_ir,
+                )
+
+            batch_input = _atomic_temp_path(
+                batch_runtime / f"rz_helper_batch_{batch_index:04d}_input.json"
+            )
+            batch_output = _atomic_temp_path(
+                batch_runtime / f"rz_helper_batch_{batch_index:04d}_output.json"
+            )
+            batch_yaml = _atomic_temp_path(
+                batch_runtime / f"rz_helper_batch_{batch_index:04d}.yaml"
+            )
+            try:
+                batch_input.write_text(
+                    json.dumps(
+                        _batch_helper_input_ir(full_ir_data, still_descriptors),
+                        ensure_ascii=True,
+                        separators=(",", ":"),
+                    ),
+                    encoding="utf-8",
+                )
+                batch_yaml.write_text(
+                    opt_pipeline_yaml_functions(
+                        ir_path=batch_input,
+                        opt_path=batch_output,
+                        passes=helper_passes,
+                        entry_names=[
+                            descriptor.function_name
+                            for descriptor in still_descriptors
+                        ],
+                    ),
+                    encoding="utf-8",
+                )
+                qret_metrics = _run_qret(
+                    [str(qret_path), "opt", "--pipeline", str(batch_yaml), "--verbose"],
+                    runtime_root=batch_runtime,
+                    rotation_precision=rotation_precision,
+                    stage_recorder=stage_recorder,
+                    stage_name=f"qret_opt_rz_helper_batch_{batch_index:04d}",
+                    stage_details={
+                        "batch_index": int(batch_index),
+                        "configured_batch_size": configured_batch_size,
+                        "planned_helper_count": len(batch),
+                        "still_miss_count": len(still_descriptors),
+                        "function_names": [
+                            descriptor.function_name
+                            for descriptor in still_descriptors
+                        ],
+                        "cache_keys": [
+                            descriptor.cache_key for descriptor in still_descriptors
+                        ],
+                        "input_path": str(batch_input),
+                        "output_path": str(batch_output),
+                        "pipeline_path": str(batch_yaml),
+                        "input_size_bytes": _file_size_bytes(batch_input),
+                    },
+                )
+                with (
+                    stage_recorder.stage(
+                        f"rz_helper_batch_validate_{batch_index:04d}",
+                        batch_index=int(batch_index),
+                        function_names=[
+                            descriptor.function_name
+                            for descriptor in still_descriptors
+                        ],
+                    )
+                    if stage_recorder is not None
+                    else _null_stage()
+                ) as validate_span:
+                    batch_output_ir = _load_ir_json(batch_output)
+                    validated: list[
+                        tuple[
+                            _RZHelperDescriptor,
+                            Mapping[str, Any],
+                            dict[str, Any],
+                            dict[str, Any],
+                            str | None,
+                        ]
+                    ] = []
+                    for descriptor, locked_invalid_reason in still_miss:
+                        circuit = _ir_circuit_by_name(
+                            batch_output_ir,
+                            descriptor.function_name,
+                        )
+                        output_summary = _helper_circuit_summary(circuit)
+                        single_output = _single_helper_output_ir(
+                            batch_output_ir,
+                            circuit,
+                        )
+                        validated.append(
+                            (
+                                descriptor,
+                                circuit,
+                                single_output,
+                                output_summary,
+                                locked_invalid_reason,
+                            )
+                        )
+                    validate_span.add_result(
+                        validated_count=len(validated),
+                        output_size_bytes=_file_size_bytes(batch_output),
+                    )
+
+                with (
+                    stage_recorder.stage(
+                        f"rz_helper_batch_commit_{batch_index:04d}",
+                        batch_index=int(batch_index),
+                        function_names=[
+                            descriptor.function_name
+                            for descriptor in still_descriptors
+                        ],
+                    )
+                    if stage_recorder is not None
+                    else _null_stage()
+                ) as commit_span:
+                    for (
+                        descriptor,
+                        circuit,
+                        single_output,
+                        output_summary,
+                        locked_invalid_reason,
+                    ) in validated:
+                        _write_compact_json_atomic(
+                            descriptor.output_path,
+                            single_output,
+                        )
+                        metadata = {
+                            "schema_version": _RZ_HELPER_INDEPENDENT_CACHE_VERSION,
+                            "cache_key": descriptor.cache_key,
+                            "cache_payload": dict(descriptor.cache_payload),
+                            "cache_status": "created",
+                            "created_unix_seconds": time.time(),
+                            "helper_index": int(descriptor.helper_index),
+                            "function_name": descriptor.function_name,
+                            "input_path": str(descriptor.input_path),
+                            "output_path": str(descriptor.output_path),
+                            "input_size_bytes": _file_size_bytes(
+                                descriptor.input_path
+                            ),
+                            "output_size_bytes": _file_size_bytes(
+                                descriptor.output_path
+                            ),
+                            "output_summary": output_summary,
+                            "qret_metrics": qret_metrics,
+                            "batch": {
+                                "batch_index": int(batch_index),
+                                "configured_batch_size": configured_batch_size,
+                                "still_miss_count": len(still_descriptors),
+                            },
+                        }
+                        _atomic_write_json(descriptor.metadata_path, metadata)
+                        replacements[descriptor.function_name] = circuit
+                        helper_results[descriptor.helper_index] = {
+                            "helper_index": int(descriptor.helper_index),
+                            "function_name": descriptor.function_name,
+                            "cache_key": descriptor.cache_key,
+                            "cache_status": "miss",
+                            "invalid_reason": locked_invalid_reason,
+                            "cache_dir": str(descriptor.cache_dir),
+                            "input_size_bytes": _file_size_bytes(
+                                descriptor.input_path
+                            ),
+                            "output_size_bytes": _file_size_bytes(
+                                descriptor.output_path
+                            ),
+                            "output_summary": output_summary,
+                            "qret_metrics": qret_metrics,
+                            "batch_index": int(batch_index),
+                            "configured_batch_size": configured_batch_size,
+                        }
+                    commit_span.add_result(committed_count=len(validated))
+            finally:
+                for tmp_path in (batch_input, batch_output, batch_yaml):
+                    try:
+                        tmp_path.unlink()
+                    except FileNotFoundError:
+                        pass
+        finally:
+            lock_stack.close()
+
+    for descriptor in descriptors:
+        if helper_results[descriptor.helper_index] is not None:
+            continue
+        cached_circuit, cached_metadata, invalid_reason = _load_valid_rz_helper_cache(
+            cache_dir=descriptor.cache_dir,
+            cache_key=descriptor.cache_key,
+            function_name=descriptor.function_name,
+        )
+        if invalid_reason is not None:
+            raise RuntimeError(
+                f"RZ helper cache entry was not generated for "
+                f"{descriptor.function_name}: {invalid_reason}"
+            )
+        replacements[descriptor.function_name] = cached_circuit
+        metadata = _rz_helper_cache_hit_metadata(
+            helper_index=descriptor.helper_index,
+            function_name=descriptor.function_name,
+            cache_key=descriptor.cache_key,
+            cache_dir=descriptor.cache_dir,
+            cached_metadata=cached_metadata,
+        )
+        metadata["duplicate_cache_key"] = True
+        helper_results[descriptor.helper_index] = metadata
+
+    return replacements, [dict(item) for item in helper_results if item is not None]
+
+
 def _run_rz_call_cached_opt(
     *,
     qret_path: Path,
@@ -3289,20 +3793,36 @@ def _run_rz_call_cached_opt(
                 circuit_count=len(full_ir_data.get("circuit_list", [])),
             )
         replacements: dict[str, Mapping[str, Any]] = {}
-        for index, helper in enumerate(helpers):
-            helper_circuit, helper_result = _optimize_rz_helper_independent_cached(
-                qret_path=qret_path,
-                runtime_root=runtime_root,
-                full_ir_data=full_ir_data,
-                helper=helper,
-                helper_index=index,
-                rotation_precision=rotation_precision,
-                qret_hash=qret_hash,
-                helper_passes=helper_passes,
-                stage_recorder=stage_recorder,
+        helper_batch_size = _rz_helper_batch_size()
+        if helper_batch_size == 1:
+            for index, helper in enumerate(helpers):
+                helper_circuit, helper_result = _optimize_rz_helper_independent_cached(
+                    qret_path=qret_path,
+                    runtime_root=runtime_root,
+                    full_ir_data=full_ir_data,
+                    helper=helper,
+                    helper_index=index,
+                    rotation_precision=rotation_precision,
+                    qret_hash=qret_hash,
+                    helper_passes=helper_passes,
+                    stage_recorder=stage_recorder,
+                )
+                replacements[str(helper["function_name"])] = helper_circuit
+                helper_cache_results.append(helper_result)
+        else:
+            replacements, helper_cache_results = (
+                _optimize_rz_helpers_independent_cached_batch(
+                    qret_path=qret_path,
+                    runtime_root=runtime_root,
+                    full_ir_data=full_ir_data,
+                    helpers=helpers,
+                    rotation_precision=rotation_precision,
+                    qret_hash=qret_hash,
+                    helper_passes=helper_passes,
+                    batch_size=helper_batch_size,
+                    stage_recorder=stage_recorder,
+                )
             )
-            replacements[str(helper["function_name"])] = helper_circuit
-            helper_cache_results.append(helper_result)
         circuit_overrides = replacements
         with (
             stage_recorder.stage(
@@ -3318,6 +3838,7 @@ def _run_rz_call_cached_opt(
                 source_ir_size_bytes=_file_size_bytes(ir_path),
                 old_merged_ir_generated=False,
                 integration_mode=helper_integration_mode,
+                helper_batch_size=helper_batch_size,
             )
         del full_ir_data
         try:
@@ -3396,6 +3917,11 @@ def _run_rz_call_cached_opt(
         "helper_opt_mode": helper_opt_mode,
         "helper_integration_mode": helper_integration_mode,
         "helper_count": int(len(helpers)),
+        "helper_batch_size": (
+            _rz_helper_batch_size()
+            if helper_opt_mode == "independent_helper"
+            else None
+        ),
         "helper_cache": {
             "hit_count": sum(
                 1 for item in helper_cache_results if item.get("cache_status") == "hit"
@@ -3649,6 +4175,7 @@ def prepare_grouped_surface_code_step_artifact(
             "qret_hash": qret_hash,
             "rz_call_cache_enabled": bool(SURFACE_CODE_RZ_CALL_CACHE),
             "rz_helper_opt_mode": _rz_helper_opt_mode(),
+            "rz_helper_batch_size": _rz_helper_batch_size(),
             "integral_cache_enabled": bool(SURFACE_CODE_INTEGRAL_CACHE_ENABLED),
             "integral_cache_schema_version": _SURFACE_CODE_INTEGRAL_CACHE_VERSION,
         },
