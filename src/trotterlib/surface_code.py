@@ -1933,8 +1933,18 @@ def _python_inline_ir(
     *,
     function_name: str = "main",
     circuit_overrides: Mapping[str, Mapping[str, Any]] | None = None,
+    incremental_input: bool = False,
 ) -> dict[str, Any]:
     started = time.perf_counter()
+    if incremental_input:
+        return _python_inline_ir_incremental(
+            input_ir_path,
+            output_ir_path,
+            function_name=function_name,
+            circuit_overrides=circuit_overrides,
+            started=started,
+        )
+
     with input_ir_path.open("r", encoding="utf-8") as f:
         data = json.load(f)
 
@@ -1999,11 +2009,9 @@ def _python_inline_ir(
                 key: value for key, value in bb_list[0].items() if key != "inst_list"
             }
 
-    unknown_overrides = sorted(set(overrides) - input_function_names)
-    if unknown_overrides:
-        raise ValueError(
-            "Override references unknown circuit(s): " + ", ".join(unknown_overrides)
-        )
+    for name, circuit in overrides.items():
+        if name not in functions:
+            functions[name] = function_record(name, circuit)
     if function_name not in functions or target_circuit_fields is None:
         raise ValueError(f"Circuit '{function_name}' not found in {input_ir_path}")
     if target_bb_fields is None:
@@ -2173,6 +2181,546 @@ def _python_inline_ir(
         "output_path": str(output_ir_path),
         "function_name": function_name,
         "circuit_override_count": int(len(overrides)),
+        "input_mode": "json_load",
+        "elapsed_seconds": float(time.perf_counter() - started),
+        "emitted_instruction_count": int(stream_summary["emitted_instruction_count"]),
+        "scheduled_instruction_count": int(
+            stream_summary["scheduled_instruction_count"]
+        ),
+        "instruction_count_semantics": {
+            "emitted_instruction_count": (
+                "all emitted flat IR instructions including Return"
+            ),
+            "scheduled_instruction_count": (
+                "non-control instructions included in depth scheduling"
+            ),
+        },
+        "instruction_stream": stream_summary,
+    }
+
+
+class _IncrementalJsonReader:
+    def __init__(
+        self,
+        path: Path,
+        *,
+        chunk_size: int = 65536,
+        compact_threshold: int = 65536,
+    ) -> None:
+        self._path = path
+        self._file = path.open("r", encoding="utf-8")
+        self._decoder = json.JSONDecoder()
+        self._chunk_size = int(chunk_size)
+        self._compact_threshold = int(compact_threshold)
+        self._buffer = ""
+        self._pos = 0
+        self._eof = False
+        self.max_buffer_chars = 0
+
+    def close(self) -> None:
+        self._file.close()
+
+    def __enter__(self) -> "_IncrementalJsonReader":
+        return self
+
+    def __exit__(self, *_: Any) -> None:
+        self.close()
+
+    def _compact(self) -> None:
+        if self._pos > self._compact_threshold:
+            self._buffer = self._buffer[self._pos :]
+            self._pos = 0
+
+    def _fill(self) -> bool:
+        if self._eof:
+            return False
+        chunk = self._file.read(self._chunk_size)
+        if not chunk:
+            self._eof = True
+            return False
+        self._buffer += chunk
+        self.max_buffer_chars = max(self.max_buffer_chars, len(self._buffer))
+        return True
+
+    def _ensure_char(self) -> bool:
+        while self._pos >= len(self._buffer):
+            if not self._fill():
+                return False
+        return True
+
+    def skip_ws(self) -> None:
+        while True:
+            while self._pos < len(self._buffer) and self._buffer[self._pos].isspace():
+                self._pos += 1
+            self._compact()
+            if self._pos < len(self._buffer) or not self._fill():
+                return
+
+    def peek(self) -> str:
+        self.skip_ws()
+        if not self._ensure_char():
+            raise ValueError(f"Unexpected end of JSON while reading {self._path}")
+        return self._buffer[self._pos]
+
+    def consume_if(self, expected: str) -> bool:
+        if self.peek() == expected:
+            self._pos += len(expected)
+            self._compact()
+            return True
+        return False
+
+    def expect(self, expected: str) -> None:
+        actual = self.peek()
+        if actual != expected:
+            raise ValueError(
+                f"Expected {expected!r} while reading {self._path}, got {actual!r}"
+            )
+        self._pos += len(expected)
+        self._compact()
+
+    def decode_value(self) -> Any:
+        self.skip_ws()
+        while True:
+            try:
+                value, end = self._decoder.raw_decode(self._buffer, self._pos)
+            except json.JSONDecodeError:
+                if self._eof:
+                    raise
+                self._fill()
+                continue
+            self._pos = int(end)
+            self._compact()
+            return value
+
+    def decode_string(self) -> str:
+        value = self.decode_value()
+        if not isinstance(value, str):
+            raise ValueError(f"Expected JSON string while reading {self._path}")
+        return value
+
+    def object_members(self) -> Any:
+        self.expect("{")
+        if self.consume_if("}"):
+            return
+        while True:
+            key = self.decode_string()
+            self.expect(":")
+            yield key
+            if self.consume_if(","):
+                continue
+            self.expect("}")
+            break
+
+    def array_items(self) -> Any:
+        self.expect("[")
+        if self.consume_if("]"):
+            return
+        index = 0
+        while True:
+            yield index
+            index += 1
+            if self.consume_if(","):
+                continue
+            self.expect("]")
+            break
+
+
+def _inline_function_record(name: str, circuit: Mapping[str, Any]) -> dict[str, Any]:
+    bb_list = circuit.get("bb_list")
+    argument = circuit.get("argument")
+    if not isinstance(argument, Mapping):
+        raise ValueError(f"Missing argument for {name}")
+    if not isinstance(bb_list, list) or len(bb_list) != 1:
+        raise ValueError(f"Python inliner only supports one basic block: {name}")
+    inst_list = bb_list[0].get("inst_list", [])
+    if not isinstance(inst_list, list):
+        raise ValueError(f"Invalid inst_list for {name}")
+    num_qubits = int(argument.get("num_qubits", 0))
+    if num_qubits < 0:
+        raise ValueError(f"Invalid num_qubits={num_qubits} for {name}")
+    return {
+        "inst_list": inst_list,
+        "num_qubits": num_qubits,
+    }
+
+
+def _validate_inline_overrides(
+    circuit_overrides: Mapping[str, Mapping[str, Any]] | None,
+    *,
+    function_name: str,
+) -> dict[str, Mapping[str, Any]]:
+    overrides = dict(circuit_overrides or {})
+    if function_name in overrides:
+        raise ValueError(f"Override for entry function '{function_name}' is not supported")
+    for name, circuit in overrides.items():
+        if not isinstance(name, str):
+            raise ValueError("Override function names must be strings")
+        if not isinstance(circuit, Mapping):
+            raise ValueError(f"Override for '{name}' must be a mapping")
+        if circuit.get("name") != name:
+            raise ValueError(
+                f"Override circuit name mismatch for '{name}': {circuit.get('name')!r}"
+            )
+        _inline_function_record(name, circuit)
+    return overrides
+
+
+def _write_json_field(
+    f: Any,
+    key: str,
+    value: Any,
+    *,
+    first: bool,
+) -> bool:
+    if not first:
+        f.write(",")
+    json.dump(str(key), f, ensure_ascii=True, separators=(",", ":"))
+    f.write(":")
+    json.dump(value, f, ensure_ascii=True, separators=(",", ":"))
+    return False
+
+
+def _inline_map_qubit(qubit_map: Sequence[int], value: Any) -> int:
+    if not qubit_map:
+        return int(value)
+    return int(qubit_map[int(value)])
+
+
+def _inline_mapped_instruction(
+    inst: Mapping[str, Any],
+    qubit_map: Sequence[int],
+) -> dict[str, Any]:
+    opcode = str(inst.get("opcode"))
+    new_inst = dict(inst)
+    if opcode in _INLINE_ONE_QUBIT_OPS:
+        new_inst["q"] = _inline_map_qubit(qubit_map, new_inst["q"])
+    elif opcode in _INLINE_TWO_QUBIT_OPS:
+        new_inst["q0"] = _inline_map_qubit(qubit_map, new_inst["q0"])
+        new_inst["q1"] = _inline_map_qubit(qubit_map, new_inst["q1"])
+    elif opcode in _INLINE_THREE_QUBIT_OPS:
+        new_inst["q0"] = _inline_map_qubit(qubit_map, new_inst["q0"])
+        new_inst["q1"] = _inline_map_qubit(qubit_map, new_inst["q1"])
+        new_inst["q2"] = _inline_map_qubit(qubit_map, new_inst["q2"])
+    else:
+        raise ValueError(f"Unsupported opcode '{opcode}'")
+    return new_inst
+
+
+def _python_inline_ir_incremental(
+    input_ir_path: Path,
+    output_ir_path: Path,
+    *,
+    function_name: str,
+    circuit_overrides: Mapping[str, Mapping[str, Any]] | None,
+    started: float,
+) -> dict[str, Any]:
+    overrides = _validate_inline_overrides(
+        circuit_overrides,
+        function_name=function_name,
+    )
+    functions: dict[str, dict[str, Any]] = {
+        name: _inline_function_record(name, circuit)
+        for name, circuit in overrides.items()
+    }
+    input_function_names: set[str] = set()
+    target_circuit_fields: dict[str, Any] | None = None
+    target_bb_fields: dict[str, Any] | None = None
+    top_level_fields: dict[str, Any] = {}
+    main_num_qubits: int | None = None
+    used_overrides: set[str] = set()
+    emitted_any = False
+
+    def emit_flat_instruction(f: Any, recorder: _InstructionStreamRecorder, inst: Mapping[str, Any]) -> None:
+        nonlocal emitted_any
+        if emitted_any:
+            f.write(",")
+        json.dump(dict(inst), f, ensure_ascii=True, separators=(",", ":"))
+        recorder.observe(inst)
+        emitted_any = True
+
+    def emit_from_function(
+        f: Any,
+        recorder: _InstructionStreamRecorder,
+        name: str,
+        qubit_map: Sequence[int],
+        stack: tuple[str, ...],
+    ) -> None:
+        if name in stack:
+            raise ValueError("Recursive Call cycle detected: " + " -> ".join((*stack, name)))
+        function = functions.get(name)
+        if function is None:
+            raise ValueError(f"Unknown callee '{name}'")
+        if name in overrides:
+            used_overrides.add(name)
+        for inst in function["inst_list"]:
+            if not isinstance(inst, Mapping):
+                continue
+            emit_from_instruction(f, recorder, inst, qubit_map, (*stack, name))
+
+    def emit_from_instruction(
+        f: Any,
+        recorder: _InstructionStreamRecorder,
+        inst: Mapping[str, Any],
+        qubit_map: Sequence[int],
+        stack: tuple[str, ...],
+    ) -> None:
+        opcode = str(inst.get("opcode"))
+        if opcode == "Call":
+            callee = inst.get("callee")
+            operate = inst.get("operate")
+            if not isinstance(callee, str) or not isinstance(operate, list):
+                raise ValueError(f"Invalid Call in {stack[-1] if stack else function_name}")
+            child_map = [_inline_map_qubit(qubit_map, q) for q in operate]
+            emit_from_function(f, recorder, callee, child_map, stack)
+            return
+        if opcode in _INLINE_IGNORED_OPS:
+            return
+        emit_flat_instruction(
+            f,
+            recorder,
+            _inline_mapped_instruction(inst, qubit_map),
+        )
+
+    def parse_main_inst_list(
+        reader: _IncrementalJsonReader,
+        f: Any,
+        recorder: _InstructionStreamRecorder,
+        *,
+        emit: bool,
+    ) -> None:
+        for _index in reader.array_items():
+            inst = reader.decode_value()
+            if emit and isinstance(inst, Mapping):
+                emit_from_instruction(f, recorder, inst, (), (function_name,))
+
+    def parse_main_bb_list(
+        reader: _IncrementalJsonReader,
+        f: Any,
+        recorder: _InstructionStreamRecorder,
+        *,
+        collect_metadata: bool,
+        emit: bool,
+    ) -> dict[str, Any]:
+        bb_fields: dict[str, Any] | None = None
+        for index in reader.array_items():
+            if index != 0:
+                raise ValueError(f"Python inliner only supports one basic block: {function_name}")
+            current_bb: dict[str, Any] = {}
+            saw_inst_list = False
+            for key in reader.object_members():
+                if key == "inst_list":
+                    saw_inst_list = True
+                    parse_main_inst_list(reader, f, recorder, emit=emit)
+                else:
+                    value = reader.decode_value()
+                    if collect_metadata:
+                        current_bb[key] = value
+            if not saw_inst_list:
+                raise ValueError(f"Invalid inst_list for {function_name}")
+            bb_fields = current_bb
+        if bb_fields is None:
+            raise ValueError(f"Python inliner only supports one basic block: {function_name}")
+        return bb_fields
+
+    def parse_circuit_list(
+        reader: _IncrementalJsonReader,
+        f: Any,
+        recorder: _InstructionStreamRecorder,
+        *,
+        collect_metadata: bool,
+        emit_main: bool,
+    ) -> None:
+        nonlocal target_circuit_fields, target_bb_fields, main_num_qubits
+        for _index in reader.array_items():
+            circuit_name: str | None = None
+            is_main = False
+            circuit_fields: dict[str, Any] = {}
+            saw_bb_list = False
+            for key in reader.object_members():
+                if key == "name":
+                    value = reader.decode_value()
+                    if not isinstance(value, str):
+                        raise ValueError("Circuit name must be a string")
+                    if collect_metadata:
+                        if value in input_function_names:
+                            raise ValueError(f"Duplicate circuit name in input IR: {value}")
+                        input_function_names.add(value)
+                    circuit_name = value
+                    is_main = value == function_name
+                    if collect_metadata:
+                        circuit_fields[key] = value
+                    continue
+                if key == "bb_list":
+                    if circuit_name is None:
+                        raise ValueError(
+                            "Circuit name must appear before bb_list for incremental inline"
+                        )
+                    saw_bb_list = True
+                    if is_main:
+                        parsed_bb_fields = parse_main_bb_list(
+                            reader,
+                            f,
+                            recorder,
+                            collect_metadata=collect_metadata,
+                            emit=emit_main,
+                        )
+                        if collect_metadata:
+                            target_bb_fields = parsed_bb_fields
+                    else:
+                        value = reader.decode_value()
+                        if collect_metadata and circuit_name not in overrides:
+                            circuit_fields[key] = value
+                    continue
+                value = reader.decode_value()
+                if collect_metadata and (
+                    is_main
+                    or circuit_name is None
+                    or circuit_name not in overrides
+                ):
+                    circuit_fields[key] = value
+                    if is_main and key == "argument":
+                        if not isinstance(value, Mapping):
+                            raise ValueError(f"Missing argument for {function_name}")
+                        parsed_num_qubits = int(value.get("num_qubits", 0))
+                        if parsed_num_qubits < 0:
+                            raise ValueError(
+                                f"Invalid num_qubits={parsed_num_qubits} for {function_name}"
+                            )
+                        main_num_qubits = parsed_num_qubits
+            if circuit_name is None:
+                raise ValueError("Circuit without name in input IR")
+            if collect_metadata and is_main:
+                if not saw_bb_list:
+                    raise ValueError(f"Missing entry block for '{function_name}' in {input_ir_path}")
+                argument = circuit_fields.get("argument")
+                if not isinstance(argument, Mapping):
+                    raise ValueError(f"Missing argument for {function_name}")
+                parsed_num_qubits = int(argument.get("num_qubits", 0))
+                if parsed_num_qubits < 0:
+                    raise ValueError(
+                        f"Invalid num_qubits={parsed_num_qubits} for {function_name}"
+                    )
+                main_num_qubits = parsed_num_qubits
+                target_circuit_fields = circuit_fields
+            elif collect_metadata and circuit_name not in overrides:
+                functions[circuit_name] = _inline_function_record(
+                    circuit_name,
+                    circuit_fields,
+                )
+
+    output_ir_path.parent.mkdir(parents=True, exist_ok=True)
+    output_tmp = _atomic_temp_path(output_ir_path)
+    inst_tmp = _atomic_temp_path(output_ir_path.with_name(output_ir_path.name + ".inst"))
+    try:
+        with _IncrementalJsonReader(input_ir_path) as reader:
+            for key in reader.object_members():
+                if key == "circuit_list":
+                    parse_circuit_list(
+                        reader,
+                        f=None,
+                        recorder=_InstructionStreamRecorder(num_qubits=0),
+                        collect_metadata=True,
+                        emit_main=False,
+                    )
+                else:
+                    top_level_fields[key] = reader.decode_value()
+            if target_circuit_fields is None or main_num_qubits is None:
+                raise ValueError(f"Circuit '{function_name}' not found in {input_ir_path}")
+            if target_bb_fields is None:
+                raise ValueError(f"Missing entry block for '{function_name}' in {input_ir_path}")
+            first_pass_max_buffer_chars = reader.max_buffer_chars
+
+        recorder = _InstructionStreamRecorder(num_qubits=main_num_qubits)
+        with (
+            _IncrementalJsonReader(input_ir_path) as reader,
+            inst_tmp.open("w", encoding="utf-8") as inst_file,
+        ):
+            for key in reader.object_members():
+                if key == "circuit_list":
+                    parse_circuit_list(
+                        reader,
+                        inst_file,
+                        recorder,
+                        collect_metadata=False,
+                        emit_main=True,
+                    )
+                else:
+                    reader.decode_value()
+            return_inst = {"opcode": "Return"}
+            emit_flat_instruction(inst_file, recorder, return_inst)
+            max_buffer_chars = max(first_pass_max_buffer_chars, reader.max_buffer_chars)
+
+        unused_overrides = sorted(set(overrides) - used_overrides)
+        if unused_overrides:
+            raise ValueError(
+                "Override circuit(s) were not used during inline: "
+                + ", ".join(unused_overrides)
+            )
+
+        with output_tmp.open("w", encoding="utf-8") as out:
+            out.write("{")
+            first_top = True
+            for key, value in top_level_fields.items():
+                first_top = _write_json_field(out, str(key), value, first=first_top)
+            if not first_top:
+                out.write(",")
+            json.dump("circuit_list", out, ensure_ascii=True, separators=(",", ":"))
+            out.write(":[{")
+
+            first_circuit = True
+            for key, value in target_circuit_fields.items():
+                if key == "bb_list":
+                    continue
+                first_circuit = _write_json_field(
+                    out,
+                    str(key),
+                    value,
+                    first=first_circuit,
+                )
+            if not first_circuit:
+                out.write(",")
+            json.dump("bb_list", out, ensure_ascii=True, separators=(",", ":"))
+            out.write(":[{")
+
+            first_bb = True
+            for key, value in target_bb_fields.items():
+                if key == "inst_list":
+                    continue
+                first_bb = _write_json_field(out, str(key), value, first=first_bb)
+            if not first_bb:
+                out.write(",")
+            json.dump("inst_list", out, ensure_ascii=True, separators=(",", ":"))
+            out.write(":[")
+            with inst_tmp.open("r", encoding="utf-8") as inst_file:
+                for chunk in iter(lambda: inst_file.read(1024 * 1024), ""):
+                    out.write(chunk)
+            out.write("]}]}]}")
+
+        os.replace(output_tmp, output_ir_path)
+    except Exception:
+        try:
+            output_tmp.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+    finally:
+        try:
+            inst_tmp.unlink()
+        except FileNotFoundError:
+            pass
+
+    stream_summary = recorder.summary()
+    return {
+        "version": _PYTHON_INLINE_IR_VERSION,
+        "input_path": str(input_ir_path),
+        "output_path": str(output_ir_path),
+        "function_name": function_name,
+        "circuit_override_count": int(len(overrides)),
+        "input_mode": "incremental_json",
+        "incremental_parser": {
+            "backend": "json.JSONDecoder.raw_decode",
+            "max_buffer_chars": int(max_buffer_chars),
+        },
         "elapsed_seconds": float(time.perf_counter() - started),
         "emitted_instruction_count": int(stream_summary["emitted_instruction_count"]),
         "scheduled_instruction_count": int(
@@ -2819,9 +3367,11 @@ def _run_rz_call_cached_opt(
             opt_path,
             function_name="main",
             circuit_overrides=circuit_overrides,
+            incremental_input=bool(circuit_overrides),
         )
         span.add_result(
             helper_override_count=len(circuit_overrides or {}),
+            input_mode=inline_summary.get("input_mode"),
             input_size_bytes=_file_size_bytes(main_pre_inline),
             output_size_bytes=_file_size_bytes(opt_path),
             emitted_instruction_count=inline_summary.get("emitted_instruction_count"),

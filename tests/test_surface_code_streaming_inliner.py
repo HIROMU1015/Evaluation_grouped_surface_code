@@ -454,7 +454,7 @@ def test_streaming_inliner_override_validation(tmp_path: Path) -> None:
         ),
         (
             {"missing": _override_circuit("missing", num_qubits=1, inst_list=[])},
-            "unknown circuit",
+            "not used",
         ),
         (
             {"helper": _override_circuit("other", num_qubits=2, inst_list=[])},
@@ -558,6 +558,98 @@ def test_streaming_inliner_overrides_match_merged_reference(tmp_path: Path) -> N
         ][key]
 
 
+def test_incremental_inliner_supports_override_only_functions(tmp_path: Path) -> None:
+    fixture = _fixture_ir()
+    main_only = {
+        key: value for key, value in fixture.items() if key != "circuit_list"
+    }
+    main_only["circuit_list"] = [fixture["circuit_list"][0]]
+    full_input = tmp_path / "full.json"
+    main_only_input = tmp_path / "main_only.json"
+    reference_path = tmp_path / "reference.json"
+    incremental_path = tmp_path / "incremental.json"
+    _write_ir(full_input, fixture)
+    _write_ir(main_only_input, main_only)
+
+    reference_summary = sc._python_inline_ir(full_input, reference_path)
+    incremental_summary = sc._python_inline_ir(
+        main_only_input,
+        incremental_path,
+        circuit_overrides={
+            "helper": fixture["circuit_list"][1],
+            "nested": fixture["circuit_list"][2],
+        },
+        incremental_input=True,
+    )
+
+    assert _flat_inst_list(incremental_path) == _flat_inst_list(reference_path)
+    assert incremental_summary["input_mode"] == "incremental_json"
+    assert incremental_summary["incremental_parser"]["max_buffer_chars"] < 65536 * 4
+    stream_keys = [
+        "normalized_instruction_stream_hash",
+        "opcode_count",
+        "emitted_instruction_count",
+        "scheduled_instruction_count",
+        "gate_depth",
+        "step_magic_state_count",
+        "step_magic_state_depth",
+        "peak_magic_layer",
+    ]
+    for key in stream_keys:
+        assert incremental_summary["instruction_stream"][key] == reference_summary[
+            "instruction_stream"
+        ][key]
+
+
+def test_incremental_inliner_override_validation(tmp_path: Path) -> None:
+    fixture = _fixture_ir()
+    main_only = {
+        key: value for key, value in fixture.items() if key != "circuit_list"
+    }
+    main_only["circuit_list"] = [fixture["circuit_list"][0]]
+    input_path = tmp_path / "main_only.json"
+    output_path = tmp_path / "out.json"
+    _write_ir(input_path, main_only)
+
+    with pytest.raises(ValueError, match="Unknown callee"):
+        sc._python_inline_ir(input_path, output_path, incremental_input=True)
+
+    with pytest.raises(ValueError, match="not used"):
+        sc._python_inline_ir(
+            input_path,
+            output_path,
+            circuit_overrides={
+                "helper": fixture["circuit_list"][1],
+                "nested": fixture["circuit_list"][2],
+                "unused": _override_circuit(
+                    "unused",
+                    num_qubits=1,
+                    inst_list=[{"opcode": "H", "q": 0}, {"opcode": "Return"}],
+                ),
+            },
+            incremental_input=True,
+        )
+
+    recursive_helper = _override_circuit(
+        "helper",
+        num_qubits=2,
+        inst_list=[
+            {"opcode": "Call", "callee": "helper", "operate": [0, 1]},
+            {"opcode": "Return"},
+        ],
+    )
+    with pytest.raises(ValueError, match="Recursive Call cycle"):
+        sc._python_inline_ir(
+            input_path,
+            output_path,
+            circuit_overrides={"helper": recursive_helper},
+            incremental_input=True,
+        )
+    assert not output_path.exists()
+    assert not list(tmp_path.glob("*.tmp"))
+    assert not list(tmp_path.glob(".*.tmp"))
+
+
 def test_independent_rz_helper_flow_uses_inline_overrides(
     tmp_path: Path,
     monkeypatch: Any,
@@ -584,6 +676,7 @@ def test_independent_rz_helper_flow_uses_inline_overrides(
     )
     main_cleanup_inputs: list[Path] = []
     inline_override_keys: list[str] = []
+    inline_incremental_flags: list[bool] = []
 
     def fake_optimize_helper(**kwargs: Any) -> tuple[Mapping[str, Any], dict[str, Any]]:
         assert kwargs["full_ir_data"]["circuit_list"][0]["name"] == "main"
@@ -624,6 +717,7 @@ def test_independent_rz_helper_flow_uses_inline_overrides(
     def recording_inline(*args: Any, **kwargs: Any) -> dict[str, Any]:
         overrides = kwargs.get("circuit_overrides") or {}
         inline_override_keys.extend(sorted(overrides))
+        inline_incremental_flags.append(bool(kwargs.get("incremental_input")))
         return original_inline(*args, **kwargs)
 
     monkeypatch.setattr(sc, "SURFACE_CODE_RZ_HELPER_OPT_MODE", "independent_helper")
@@ -646,6 +740,7 @@ def test_independent_rz_helper_flow_uses_inline_overrides(
     assert main_cleanup_inputs == [ir_path]
     assert not (runtime_root / "rz_call_cache" / "helpers_merged.json").exists()
     assert inline_override_keys == ["__helper()"]
+    assert inline_incremental_flags == [True]
     assert _flat_inst_list(opt_path) == [
         {"opcode": "H", "q": 0},
         {"opcode": "T", "q": 1},
