@@ -1932,34 +1932,84 @@ def _python_inline_ir(
     output_ir_path: Path,
     *,
     function_name: str = "main",
+    circuit_overrides: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     started = time.perf_counter()
     with input_ir_path.open("r", encoding="utf-8") as f:
         data = json.load(f)
 
+    overrides = dict(circuit_overrides or {})
+    if function_name in overrides:
+        raise ValueError(f"Override for entry function '{function_name}' is not supported")
+    for name, circuit in overrides.items():
+        if not isinstance(name, str):
+            raise ValueError("Override function names must be strings")
+        if not isinstance(circuit, Mapping):
+            raise ValueError(f"Override for '{name}' must be a mapping")
+        if circuit.get("name") != name:
+            raise ValueError(
+                f"Override circuit name mismatch for '{name}': {circuit.get('name')!r}"
+            )
+
+    def function_record(name: str, circuit: Mapping[str, Any]) -> dict[str, Any]:
+        bb_list = circuit.get("bb_list")
+        argument = circuit.get("argument")
+        if not isinstance(argument, Mapping):
+            raise ValueError(f"Missing argument for {name}")
+        if not isinstance(bb_list, list) or len(bb_list) != 1:
+            raise ValueError(f"Python inliner only supports one basic block: {name}")
+        inst_list = bb_list[0].get("inst_list", [])
+        if not isinstance(inst_list, list):
+            raise ValueError(f"Invalid inst_list for {name}")
+        num_qubits = int(argument.get("num_qubits", 0))
+        if num_qubits < 0:
+            raise ValueError(f"Invalid num_qubits={num_qubits} for {name}")
+        return {
+            "inst_list": inst_list,
+            "num_qubits": num_qubits,
+        }
+
+    top_level_fields = {key: value for key, value in data.items() if key != "circuit_list"}
     functions: dict[str, dict[str, Any]] = {}
-    target_item: dict[str, Any] | None = None
-    for circuit in data.get("circuit_list", []):
+    target_circuit_fields: dict[str, Any] | None = None
+    target_bb_fields: dict[str, Any] | None = None
+    input_function_names: set[str] = set()
+    circuit_list = data.get("circuit_list", [])
+    if not isinstance(circuit_list, list):
+        raise ValueError(f"Invalid circuit_list in {input_ir_path}")
+    for circuit in circuit_list:
         if not isinstance(circuit, Mapping):
             continue
         name = circuit.get("name")
         if not isinstance(name, str):
             continue
-        bb_list = circuit.get("bb_list")
-        argument = circuit.get("argument")
-        if not isinstance(bb_list, list) or len(bb_list) != 1:
-            raise ValueError(f"Python inliner only supports one basic block: {name}")
-        if not isinstance(argument, Mapping):
-            raise ValueError(f"Missing argument for {name}")
-        functions[name] = {
-            "inst_list": bb_list[0].get("inst_list", []),
-            "num_qubits": int(argument.get("num_qubits", 0)),
-        }
+        if name in input_function_names:
+            raise ValueError(f"Duplicate circuit name in input IR: {name}")
+        input_function_names.add(name)
+        source_circuit = overrides.get(name, circuit)
+        functions[name] = function_record(name, source_circuit)
         if name == function_name:
-            target_item = dict(circuit)
+            bb_list = circuit.get("bb_list")
+            if not isinstance(bb_list, list) or len(bb_list) != 1:
+                raise ValueError(f"Python inliner only supports one basic block: {name}")
+            target_circuit_fields = {
+                key: value for key, value in circuit.items() if key != "bb_list"
+            }
+            target_bb_fields = {
+                key: value for key, value in bb_list[0].items() if key != "inst_list"
+            }
 
-    if function_name not in functions or target_item is None:
+    unknown_overrides = sorted(set(overrides) - input_function_names)
+    if unknown_overrides:
+        raise ValueError(
+            "Override references unknown circuit(s): " + ", ".join(unknown_overrides)
+        )
+    if function_name not in functions or target_circuit_fields is None:
         raise ValueError(f"Circuit '{function_name}' not found in {input_ir_path}")
+    if target_bb_fields is None:
+        raise ValueError(f"Missing entry block for '{function_name}' in {input_ir_path}")
+    del data
+    del circuit_list
 
     def map_qubit(qubit_map: Sequence[int], value: Any) -> int:
         return int(qubit_map[int(value)])
@@ -1984,12 +2034,15 @@ def _python_inline_ir(
         name: str,
         qubit_map: Sequence[int],
         stack: tuple[str, ...],
+        used_overrides: set[str],
     ) -> Any:
         if name in stack:
             raise ValueError("Recursive Call cycle detected: " + " -> ".join((*stack, name)))
         function = functions.get(name)
         if function is None:
             raise ValueError(f"Unknown callee '{name}'")
+        if name in overrides:
+            used_overrides.add(name)
         for inst in function["inst_list"]:
             if not isinstance(inst, Mapping):
                 continue
@@ -2000,7 +2053,12 @@ def _python_inline_ir(
                 if not isinstance(callee, str) or not isinstance(operate, list):
                     raise ValueError(f"Invalid Call in {name}")
                 child_map = [map_qubit(qubit_map, q) for q in operate]
-                yield from iter_unrolled(callee, child_map, (*stack, name))
+                yield from iter_unrolled(
+                    callee,
+                    child_map,
+                    (*stack, name),
+                    used_overrides,
+                )
                 continue
             if opcode in _INLINE_IGNORED_OPS:
                 continue
@@ -2025,19 +2083,15 @@ def _python_inline_ir(
         tmp_path: Path,
         recorder: _InstructionStreamRecorder,
     ) -> None:
-        target = dict(target_item or {})
-        bb_list = target.get("bb_list")
-        if not isinstance(bb_list, list) or len(bb_list) != 1:
-            raise ValueError(f"Python inliner only supports one basic block: {function_name}")
-        target_bb = dict(bb_list[0])
+        target = dict(target_circuit_fields or {})
+        target_bb = dict(target_bb_fields or {})
         num_qubits = int(functions[function_name]["num_qubits"])
+        used_overrides: set[str] = set()
 
         with tmp_path.open("w", encoding="utf-8") as f:
             f.write("{")
             first_top = True
-            for key, value in data.items():
-                if key == "circuit_list":
-                    continue
+            for key, value in top_level_fields.items():
                 first_top = write_json_field(f, str(key), value, first=first_top)
 
             if not first_top:
@@ -2073,7 +2127,12 @@ def _python_inline_ir(
             f.write(":[")
 
             first_inst = True
-            for inst in iter_unrolled(function_name, list(range(num_qubits)), ()):
+            for inst in iter_unrolled(
+                function_name,
+                list(range(num_qubits)),
+                (),
+                used_overrides,
+            ):
                 if not first_inst:
                     f.write(",")
                 json.dump(inst, f, ensure_ascii=True, separators=(",", ":"))
@@ -2086,6 +2145,12 @@ def _python_inline_ir(
             json.dump(return_inst, f, ensure_ascii=True, separators=(",", ":"))
             recorder.observe(return_inst)
             f.write("]}]}]}")
+        unused_overrides = sorted(set(overrides) - used_overrides)
+        if unused_overrides:
+            raise ValueError(
+                "Override circuit(s) were not used during inline: "
+                + ", ".join(unused_overrides)
+            )
 
     num_qubits = int(functions[function_name]["num_qubits"])
     recorder = _InstructionStreamRecorder(num_qubits=num_qubits)
@@ -2107,6 +2172,7 @@ def _python_inline_ir(
         "input_path": str(input_ir_path),
         "output_path": str(output_ir_path),
         "function_name": function_name,
+        "circuit_override_count": int(len(overrides)),
         "elapsed_seconds": float(time.perf_counter() - started),
         "emitted_instruction_count": int(stream_summary["emitted_instruction_count"]),
         "scheduled_instruction_count": int(
@@ -2621,6 +2687,8 @@ def _run_rz_call_cached_opt(
     helper_opt_mode = _rz_helper_opt_mode()
     qret_hash = file_sha256(qret_path)
     helper_cache_results: list[dict[str, Any]] = []
+    circuit_overrides: Mapping[str, Mapping[str, Any]] | None = None
+    helper_integration_mode = "legacy_full_ir"
     if helper_opt_mode == "legacy_full_ir":
         for index, helper in enumerate(helpers):
             pass_output = cache_dir / f"rz_helper_{index:04d}.json"
@@ -2661,6 +2729,7 @@ def _run_rz_call_cached_opt(
             )
             current_input = pass_output
     else:
+        helper_integration_mode = "python_inline_overrides"
         with (
             stage_recorder.stage("load_rz_helper_full_ir", input_path=str(ir_path))
             if stage_recorder is not None
@@ -2686,22 +2755,27 @@ def _run_rz_call_cached_opt(
             )
             replacements[str(helper["function_name"])] = helper_circuit
             helper_cache_results.append(helper_result)
+        circuit_overrides = replacements
         with (
             stage_recorder.stage(
-                "merge_independent_rz_helpers",
+                "prepare_rz_helper_overrides",
                 input_path=str(ir_path),
-                output_path=str(cache_dir / "helpers_merged.json"),
+                helper_integration_mode=helper_integration_mode,
             )
             if stage_recorder is not None
             else _null_stage()
         ) as span:
-            current_input = cache_dir / "helpers_merged.json"
-            merged_data = _replace_ir_circuits(full_ir_data, replacements)
-            _write_compact_json_atomic(current_input, merged_data)
             span.add_result(
-                helper_replacement_count=len(replacements),
-                output_size_bytes=_file_size_bytes(current_input),
+                helper_override_count=len(replacements),
+                source_ir_size_bytes=_file_size_bytes(ir_path),
+                old_merged_ir_generated=False,
+                integration_mode=helper_integration_mode,
             )
+        del full_ir_data
+        try:
+            del helper_circuit
+        except UnboundLocalError:
+            pass
 
     main_pre_inline = cache_dir / "main_before_python_inline.json"
     main_yaml = cache_dir / "main_cleanup.yaml"
@@ -2722,9 +2796,11 @@ def _run_rz_call_cached_opt(
         stage_name="qret_opt_main_cleanup",
         stage_details={
             "input_path": str(current_input),
+            "input_size_bytes": _file_size_bytes(current_input),
             "output_path": str(main_pre_inline),
             "pipeline_path": str(main_yaml),
             "helper_opt_mode": helper_opt_mode,
+            "helper_integration_mode": helper_integration_mode,
         },
     )
     with (
@@ -2732,6 +2808,8 @@ def _run_rz_call_cached_opt(
             "python_streaming_inline",
             input_path=str(main_pre_inline),
             output_path=str(opt_path),
+            helper_override_count=len(circuit_overrides or {}),
+            input_size_bytes=_file_size_bytes(main_pre_inline),
         )
         if stage_recorder is not None
         else _null_stage()
@@ -2740,8 +2818,11 @@ def _run_rz_call_cached_opt(
             main_pre_inline,
             opt_path,
             function_name="main",
+            circuit_overrides=circuit_overrides,
         )
         span.add_result(
+            helper_override_count=len(circuit_overrides or {}),
+            input_size_bytes=_file_size_bytes(main_pre_inline),
             output_size_bytes=_file_size_bytes(opt_path),
             emitted_instruction_count=inline_summary.get("emitted_instruction_count"),
             scheduled_instruction_count=inline_summary.get(
@@ -2763,6 +2844,7 @@ def _run_rz_call_cached_opt(
     return {
         "mode": "rz_call_cached_streaming_python_inline",
         "helper_opt_mode": helper_opt_mode,
+        "helper_integration_mode": helper_integration_mode,
         "helper_count": int(len(helpers)),
         "helper_cache": {
             "hit_count": sum(

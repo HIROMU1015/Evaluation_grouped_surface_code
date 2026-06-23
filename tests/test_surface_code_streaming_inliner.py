@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 import numpy as np
+import pytest
 
 from trotterlib import surface_code as sc
 
@@ -282,14 +283,31 @@ def _flat_inst_list(path: Path) -> list[dict[str, Any]]:
     return data["circuit_list"][0]["bb_list"][0]["inst_list"]
 
 
+def _write_ir(path: Path, payload: Mapping[str, Any]) -> None:
+    path.write_text(
+        json.dumps(payload, ensure_ascii=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+
+
+def _override_circuit(
+    name: str,
+    *,
+    num_qubits: int,
+    inst_list: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "name": name,
+        "argument": {"num_qubits": num_qubits},
+        "bb_list": [{"name": "entry", "inst_list": inst_list}],
+    }
+
+
 def test_streaming_inliner_matches_legacy_flat_ir_and_metrics(tmp_path: Path) -> None:
     input_path = tmp_path / "input.json"
     legacy_path = tmp_path / "legacy.json"
     streaming_path = tmp_path / "streaming.json"
-    input_path.write_text(
-        json.dumps(_fixture_ir(), ensure_ascii=True, separators=(",", ":")),
-        encoding="utf-8",
-    )
+    _write_ir(input_path, _fixture_ir())
 
     _legacy_python_inline_ir(input_path, legacy_path)
     streaming_inline_summary = sc._python_inline_ir(input_path, streaming_path)
@@ -347,10 +365,7 @@ def test_streaming_inliner_matches_legacy_flat_ir_and_metrics(tmp_path: Path) ->
 def test_inline_summary_is_used_without_reloading_flat_ir(tmp_path: Path) -> None:
     input_path = tmp_path / "input.json"
     streaming_path = tmp_path / "streaming.json"
-    input_path.write_text(
-        json.dumps(_fixture_ir(), ensure_ascii=True, separators=(",", ":")),
-        encoding="utf-8",
-    )
+    _write_ir(input_path, _fixture_ir())
     streaming_inline_summary = sc._python_inline_ir(input_path, streaming_path)
 
     summary = sc._optimized_ir_summary_from_inline_or_file(
@@ -363,6 +378,282 @@ def test_inline_summary_is_used_without_reloading_flat_ir(tmp_path: Path) -> Non
     ]
     assert summary["instruction_count"] == 6
     assert summary["emitted_instruction_count"] == 7
+
+
+def test_streaming_inliner_uses_circuit_overrides(tmp_path: Path) -> None:
+    input_path = tmp_path / "input.json"
+    output_path = tmp_path / "output.json"
+    _write_ir(input_path, _fixture_ir())
+
+    override = _override_circuit(
+        "helper",
+        num_qubits=2,
+        inst_list=[
+            {"opcode": "X", "q": 0},
+            {"opcode": "T", "q": 1},
+            {"opcode": "Return"},
+        ],
+    )
+    summary = sc._python_inline_ir(
+        input_path,
+        output_path,
+        circuit_overrides={"helper": override},
+    )
+
+    assert _flat_inst_list(output_path) == [
+        {"opcode": "H", "q": 0},
+        {"opcode": "X", "q": 2},
+        {"opcode": "T", "q": 0},
+        {"opcode": "CX", "q0": 0, "q1": 2},
+        {"opcode": "Return"},
+    ]
+    assert summary["circuit_override_count"] == 1
+    assert summary["instruction_stream"]["call_count"] == 0
+
+
+def test_streaming_inliner_uses_nested_circuit_overrides(tmp_path: Path) -> None:
+    input_path = tmp_path / "input.json"
+    output_path = tmp_path / "output.json"
+    _write_ir(input_path, _fixture_ir())
+
+    nested_override = _override_circuit(
+        "nested",
+        num_qubits=1,
+        inst_list=[{"opcode": "H", "q": 0}, {"opcode": "Return"}],
+    )
+    sc._python_inline_ir(
+        input_path,
+        output_path,
+        circuit_overrides={"nested": nested_override},
+    )
+
+    assert _flat_inst_list(output_path) == [
+        {"opcode": "H", "q": 0},
+        {"opcode": "T", "q": 2},
+        {"opcode": "H", "q": 0},
+        {"opcode": "TDag", "q": 0},
+        {"opcode": "CX", "q0": 0, "q1": 2},
+        {"opcode": "Return"},
+    ]
+
+
+def test_streaming_inliner_override_validation(tmp_path: Path) -> None:
+    input_path = tmp_path / "input.json"
+    output_path = tmp_path / "output.json"
+    _write_ir(input_path, _fixture_ir())
+
+    valid_helper = _override_circuit(
+        "helper",
+        num_qubits=2,
+        inst_list=[{"opcode": "H", "q": 0}, {"opcode": "Return"}],
+    )
+    invalid_cases = [
+        (
+            {"main": _override_circuit("main", num_qubits=3, inst_list=[])},
+            "entry function",
+        ),
+        (
+            {"missing": _override_circuit("missing", num_qubits=1, inst_list=[])},
+            "unknown circuit",
+        ),
+        (
+            {"helper": _override_circuit("other", num_qubits=2, inst_list=[])},
+            "name mismatch",
+        ),
+        (
+            {"helper": {"name": "helper", "bb_list": []}},
+            "Missing argument",
+        ),
+        (
+            {"helper": {"name": "helper", "argument": {"num_qubits": 1}, "bb_list": []}},
+            "one basic block",
+        ),
+        (
+            {
+                "helper": {
+                    "name": "helper",
+                    "argument": {"num_qubits": 1},
+                    "bb_list": [{"name": "entry", "inst_list": {}}],
+                }
+            },
+            "Invalid inst_list",
+        ),
+    ]
+    for overrides, message in invalid_cases:
+        with pytest.raises(ValueError, match=message):
+            sc._python_inline_ir(
+                input_path,
+                output_path,
+                circuit_overrides=overrides,
+            )
+
+    unused_ir = _fixture_ir()
+    unused_ir["circuit_list"].append(
+        _override_circuit(
+            "unused",
+            num_qubits=1,
+            inst_list=[{"opcode": "H", "q": 0}, {"opcode": "Return"}],
+        )
+    )
+    unused_input = tmp_path / "unused_input.json"
+    unused_output = tmp_path / "unused_output.json"
+    _write_ir(unused_input, unused_ir)
+    with pytest.raises(ValueError, match="not used"):
+        sc._python_inline_ir(
+            unused_input,
+            unused_output,
+            circuit_overrides={"unused": valid_helper | {"name": "unused"}},
+        )
+    assert not unused_output.exists()
+    assert not list(tmp_path.glob("*.tmp"))
+    assert not list(tmp_path.glob(".*.tmp"))
+
+    duplicate_ir = _fixture_ir()
+    duplicate_ir["circuit_list"].append(dict(duplicate_ir["circuit_list"][1]))
+    duplicate_input = tmp_path / "duplicate_input.json"
+    _write_ir(duplicate_input, duplicate_ir)
+    with pytest.raises(ValueError, match="Duplicate circuit name"):
+        sc._python_inline_ir(duplicate_input, tmp_path / "duplicate_output.json")
+
+
+def test_streaming_inliner_overrides_match_merged_reference(tmp_path: Path) -> None:
+    input_path = tmp_path / "input.json"
+    merged_path = tmp_path / "merged.json"
+    reference_path = tmp_path / "reference.json"
+    candidate_path = tmp_path / "candidate.json"
+    fixture = _fixture_ir()
+    override = _override_circuit(
+        "helper",
+        num_qubits=2,
+        inst_list=[
+            {"opcode": "S", "q": 0},
+            {"opcode": "T", "q": 1},
+            {"opcode": "Return"},
+        ],
+    )
+    _write_ir(input_path, fixture)
+    _write_ir(merged_path, sc._replace_ir_circuits(fixture, {"helper": override}))
+
+    reference_summary = sc._python_inline_ir(merged_path, reference_path)
+    candidate_summary = sc._python_inline_ir(
+        input_path,
+        candidate_path,
+        circuit_overrides={"helper": override},
+    )
+
+    assert _flat_inst_list(candidate_path) == _flat_inst_list(reference_path)
+    stream_keys = [
+        "normalized_instruction_stream_hash",
+        "opcode_count",
+        "emitted_instruction_count",
+        "scheduled_instruction_count",
+        "gate_depth",
+        "step_magic_state_count",
+        "step_magic_state_depth",
+        "peak_magic_layer",
+    ]
+    for key in stream_keys:
+        assert candidate_summary["instruction_stream"][key] == reference_summary[
+            "instruction_stream"
+        ][key]
+
+
+def test_independent_rz_helper_flow_uses_inline_overrides(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    qret_path = tmp_path / "qret"
+    qret_path.write_text("#!/bin/sh\n", encoding="utf-8")
+    runtime_root = tmp_path / "runtime"
+    runtime_root.mkdir()
+    ir_path = runtime_root / "step_ir.json"
+    opt_path = runtime_root / "step_opt.json"
+    _write_ir(ir_path, _rz_helper_e2e_fixture_ir())
+    rz_metadata = {
+        "enabled": True,
+        "helpers": [_rz_helper_fixture_metadata()],
+    }
+    optimized_helper = _override_circuit(
+        "__helper()",
+        num_qubits=1,
+        inst_list=[
+            {"opcode": "T", "q": 0},
+            {"opcode": "H", "q": 0},
+            {"opcode": "Return"},
+        ],
+    )
+    main_cleanup_inputs: list[Path] = []
+    inline_override_keys: list[str] = []
+
+    def fake_optimize_helper(**kwargs: Any) -> tuple[Mapping[str, Any], dict[str, Any]]:
+        assert kwargs["full_ir_data"]["circuit_list"][0]["name"] == "main"
+        return optimized_helper, {
+            "helper_index": int(kwargs["helper_index"]),
+            "function_name": kwargs["helper"]["function_name"],
+            "cache_status": "hit",
+        }
+
+    def fail_replace(*_: Any, **__: Any) -> dict[str, Any]:
+        raise AssertionError("_replace_ir_circuits should not be used")
+
+    def fake_run_qret(
+        cmd: Any,
+        *,
+        runtime_root: Path,
+        rotation_precision: float | None = None,
+        stage_recorder: Any = None,
+        stage_name: str | None = None,
+        stage_details: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        del cmd, runtime_root, rotation_precision, stage_recorder
+        assert stage_name == "qret_opt_main_cleanup"
+        assert stage_details is not None
+        input_path = Path(str(stage_details["input_path"]))
+        output_path = Path(str(stage_details["output_path"]))
+        main_cleanup_inputs.append(input_path)
+        output_path.write_text(input_path.read_text(encoding="utf-8"), encoding="utf-8")
+        return {
+            "returncode": 0,
+            "gnu_time_used": False,
+            "stdout_bytes": 0,
+            "stderr_bytes": 0,
+        }
+
+    original_inline = sc._python_inline_ir
+
+    def recording_inline(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        overrides = kwargs.get("circuit_overrides") or {}
+        inline_override_keys.extend(sorted(overrides))
+        return original_inline(*args, **kwargs)
+
+    monkeypatch.setattr(sc, "SURFACE_CODE_RZ_HELPER_OPT_MODE", "independent_helper")
+    monkeypatch.setattr(sc, "SURFACE_CODE_CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(sc, "_optimize_rz_helper_independent_cached", fake_optimize_helper)
+    monkeypatch.setattr(sc, "_replace_ir_circuits", fail_replace)
+    monkeypatch.setattr(sc, "_run_qret", fake_run_qret)
+    monkeypatch.setattr(sc, "_python_inline_ir", recording_inline)
+
+    result = sc._run_rz_call_cached_opt(
+        qret_path=qret_path,
+        runtime_root=runtime_root,
+        ir_path=ir_path,
+        opt_path=opt_path,
+        rz_metadata=rz_metadata,
+        rotation_precision=1.0e-5,
+        stage_recorder=None,
+    )
+
+    assert main_cleanup_inputs == [ir_path]
+    assert not (runtime_root / "rz_call_cache" / "helpers_merged.json").exists()
+    assert inline_override_keys == ["__helper()"]
+    assert _flat_inst_list(opt_path) == [
+        {"opcode": "H", "q": 0},
+        {"opcode": "T", "q": 1},
+        {"opcode": "H", "q": 1},
+        {"opcode": "CX", "q0": 0, "q1": 1},
+        {"opcode": "Return"},
+    ]
+    assert result["helper_integration_mode"] == "python_inline_overrides"
 
 
 def test_mapping_result_collection_is_opt_in(tmp_path: Path, monkeypatch: Any) -> None:
