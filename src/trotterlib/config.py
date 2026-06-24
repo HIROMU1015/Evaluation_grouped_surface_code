@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Dict, Iterable, TypeAlias
+from typing import Dict, TypeAlias
 
 
 PFLabel: TypeAlias = str
@@ -22,17 +22,6 @@ def _first_existing_path(*candidates: Path) -> Path:
         if path.exists():
             return path
     return candidates[0]
-
-
-def _unique_paths(paths: Iterable[Path]) -> tuple[Path, ...]:
-    out: list[Path] = []
-    seen: set[Path] = set()
-    for path in paths:
-        if path in seen:
-            continue
-        seen.add(path)
-        out.append(path)
-    return tuple(out)
 
 
 def _positive_int_env(name: str, default: int) -> int:
@@ -199,44 +188,37 @@ SURFACE_CODE_QEC_DROP_RATE = 0.1
 SURFACE_CODE_QEC_CODE_CYCLE_TIME_SECONDS = SURFACE_CODE_CYCLE_TIME_SECONDS
 SURFACE_CODE_QEC_ALLOWED_FAILURE_PROB = SURFACE_CODE_DELTA_FAIL_CASES[0]
 
-_quration_root_env = os.environ.get("QURATION_ROOT") or os.environ.get(
-    "SURFACE_CODE_REPO_ROOT"
+VENDORED_QURATION_ROOT = PROJECT_ROOT / "third_party" / "quration"
+
+_qret_path_env = os.environ.get("QRET_PATH") or os.environ.get(
+    "SURFACE_CODE_QRET_PATH"
 )
-SURFACE_CODE_EXTERNAL_REPO_ROOT = (
-    Path(_quration_root_env).expanduser().resolve()
-    if _quration_root_env
-    else (PROJECT_ROOT.parent / "quration").resolve()
+SURFACE_CODE_QCSF_PATH = (
+    Path(_qret_path_env).expanduser().resolve()
+    if _qret_path_env
+    else PROJECT_ROOT / "build" / "quration" / "qret"
 )
-SURFACE_CODE_REPO_ROOT_CANDIDATES = _unique_paths((SURFACE_CODE_EXTERNAL_REPO_ROOT,))
-SURFACE_CODE_QCSF_PATH = _first_existing_path(
-    *(
-        path
-        for root in SURFACE_CODE_REPO_ROOT_CANDIDATES
-        for path in (
-            root / "build" / "main" / "qret",
-            root / "bin" / "main" / "qret",
-            root / "build" / "main" / "qcsf",
-            root / "bin" / "main" / "qcsf",
-        )
-    )
+
+_topology_path_env = os.environ.get("SURFACE_CODE_TOPOLOGY_PATH")
+SURFACE_CODE_TOPOLOGY_PATH = (
+    Path(_topology_path_env).expanduser().resolve()
+    if _topology_path_env
+    else VENDORED_QURATION_ROOT
+    / "quration-core"
+    / "examples"
+    / "data"
+    / "topology"
+    / "tutorial.yaml"
 )
-SURFACE_CODE_TOPOLOGY_PATH = _first_existing_path(
-    *(
-        path
-        for root in SURFACE_CODE_REPO_ROOT_CANDIDATES
-        for path in (
-            root / "quration-core" / "examples" / "data" / "topology" / "tutorial.yaml",
-            root / "examples" / "data" / "topology" / "tutorial.yaml",
-        )
-    )
+
+_gridsynth_path_env = os.environ.get("GRIDSYNTH_PATH") or os.environ.get(
+    "SURFACE_CODE_GRIDSYNTH_PATH"
 )
-SURFACE_CODE_GRIDSYNTH_PATH = _first_existing_path(
-    *(
-        path
-        for root in SURFACE_CODE_REPO_ROOT_CANDIDATES
-        for path in (
-            root / "externals" / "bin" / "gridsynth",
-            root / "src" / "externals" / "bin" / "gridsynth",
-        )
+SURFACE_CODE_GRIDSYNTH_PATH = (
+    Path(_gridsynth_path_env).expanduser().resolve()
+    if _gridsynth_path_env
+    else _first_existing_path(
+        PROJECT_ROOT / "externals" / "bin" / "gridsynth",
+        PROJECT_ROOT.parent / "quration" / "externals" / "bin" / "gridsynth",
     )
 )
