@@ -95,6 +95,8 @@ PROFILE_STAGES = [
     "routing_after_initial_queue_peek",
     "routing_before_main_loop",
     "routing_after_main_loop",
+    "after_pass_manager_run",
+    "pipeline_state_output_skipped",
     "before_build_pipeline_state",
     "build_pipeline_state_entry",
     "build_pipeline_state_after_target",
@@ -108,6 +110,7 @@ PROFILE_STAGES = [
     "save_pipeline_state_after_to_json",
     "save_pipeline_state_after_stream_write",
     "after_save_pipeline_state",
+    "run_compilation_end",
 ]
 
 
@@ -225,6 +228,7 @@ def _build_pipeline_yaml(
     compile_info_path: Path,
     topology_path: Path,
     passes: list[str],
+    skip_pipeline_state_output: bool = False,
 ) -> str:
     lines = [
         "source: IR",
@@ -239,11 +243,17 @@ def _build_pipeline_yaml(
         "sc_ls_fixed_v0_entanglement_generation_period: 100",
         "sc_ls_fixed_v0_maximum_entangled_state_stock: 10",
         "sc_ls_fixed_v0_reaction_time: 1",
-        f"sc_ls_fixed_v0_dump_compile_info_to_json: {compile_info_path}",
-        "sc_ls_fixed_v0_pass:",
-        *[f"  - {name}" for name in passes],
-        "",
     ]
+    if skip_pipeline_state_output:
+        lines.append("sc_ls_fixed_v0_skip_pipeline_state_output: true")
+    lines.extend(
+        [
+            f"sc_ls_fixed_v0_dump_compile_info_to_json: {compile_info_path}",
+            "sc_ls_fixed_v0_pass:",
+            *[f"  - {name}" for name in passes],
+            "",
+        ]
+    )
     return "\n".join(lines)
 
 

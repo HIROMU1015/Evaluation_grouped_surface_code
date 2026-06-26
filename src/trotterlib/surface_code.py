@@ -4403,6 +4403,8 @@ def compile_pipeline_yaml(
                 f"sc_ls_fixed_v0_allowed_failure_prob: {float(architecture.allowed_failure_prob):.12g}",
             ]
         )
+    if architecture.skip_compile_output:
+        lines.append("sc_ls_fixed_v0_skip_pipeline_state_output: true")
     lines.extend(
         [
             f"sc_ls_fixed_v0_dump_compile_info_to_json: {compile_info_path}",

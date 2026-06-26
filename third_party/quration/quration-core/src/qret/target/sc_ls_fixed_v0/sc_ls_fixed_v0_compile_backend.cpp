@@ -74,6 +74,15 @@ qret::Json MachineFunctionStats(const qret::MachineFunction& mf) {
     return extra;
 }
 
+qret::Json MachineFunctionStats(
+        const qret::MachineFunction& mf,
+        bool skip_pipeline_state_output
+) {
+    auto extra = MachineFunctionStats(mf);
+    extra["skip_pipeline_state_output"] = skip_pipeline_state_output;
+    return extra;
+}
+
 // This backend depends only on CompileOptionReader, not on value sources.
 std::vector<qret::PassConfig> GetDefaultPass(const CompileFormat source) {
     if (source == CompileFormat::SC_LS_FIXED_V0) {
@@ -206,11 +215,13 @@ bool RunCompilation(
         const qret::CompileRequest& request,
         const std::shared_ptr<qret::sc_ls_fixed_v0::Topology>& topology,
         const qret::sc_ls_fixed_v0::ScLsFixedV0MachineOption& option,
-        const std::vector<qret::PassConfig>& pass_config
+        const std::vector<qret::PassConfig>& pass_config,
+        bool skip_pipeline_state_output
 ) {
     auto start_extra = qret::Json::object();
     start_extra["pass_count"] = pass_config.size();
     start_extra["source_format"] = static_cast<std::int32_t>(request.source_format);
+    start_extra["skip_pipeline_state_output"] = skip_pipeline_state_output;
     qret::rss_profile::Mark("run_compilation_start", start_extra);
     auto target_machine = qret::sc_ls_fixed_v0::ScLsFixedV0TargetMachine::New(topology, option);
 
@@ -283,14 +294,33 @@ bool RunCompilation(
     }
     qret::rss_profile::Mark("before_pass_manager_run", MachineFunctionStats(mf));
     manager.Run(mf);
-    qret::rss_profile::Mark("after_pass_manager_run", MachineFunctionStats(mf));
+    qret::rss_profile::Mark(
+            "after_pass_manager_run",
+            MachineFunctionStats(mf, skip_pipeline_state_output)
+    );
+
+    if (skip_pipeline_state_output) {
+        LOG_INFO("Skip SC_LS_FIXED_V0 pipeline state output.");
+        const auto extra = MachineFunctionStats(mf, skip_pipeline_state_output);
+        qret::rss_profile::Mark("pipeline_state_output_skipped", extra);
+        qret::rss_profile::Mark("run_compilation_end", extra);
+        return true;
+    }
 
     LOG_INFO("Save SC_LS_FIXED_V0 pipeline state file.");
-    qret::rss_profile::Mark("before_build_pipeline_state", MachineFunctionStats(mf));
+    qret::rss_profile::Mark(
+            "before_build_pipeline_state",
+            MachineFunctionStats(mf, skip_pipeline_state_output)
+    );
     const auto state = qret::sc_ls_fixed_v0::BuildPipelineState(manager, target_machine, mf);
-    qret::rss_profile::Mark("after_build_pipeline_state", MachineFunctionStats(mf));
+    qret::rss_profile::Mark(
+            "after_build_pipeline_state",
+            MachineFunctionStats(mf, skip_pipeline_state_output)
+    );
     qret::sc_ls_fixed_v0::SavePipelineState(request.output, state);
-    qret::rss_profile::Mark("after_save_pipeline_state", MachineFunctionStats(mf));
+    const auto extra = MachineFunctionStats(mf, skip_pipeline_state_output);
+    qret::rss_profile::Mark("after_save_pipeline_state", extra);
+    qret::rss_profile::Mark("run_compilation_end", extra);
     return true;
 }
 }  // namespace
@@ -323,6 +353,10 @@ void ScLsFixedV0CompileBackend::AddCompileOptions(qret::CompileOptionRegistrar& 
             "Simulate magic-state factories using the cultivation method "
             "(requires --sc_ls_fixed_v0_magic_factory_seed_offset, "
             "--sc_ls_fixed_v0_prob_magic_state_creation)."
+    );
+    registrar.AddFlagOption(
+            "sc_ls_fixed_v0_skip_pipeline_state_output",
+            "Skip writing the SC_LS_FIXED_V0 pipeline-state output file."
     );
     registrar.AddUInt64Option(
             "sc_ls_fixed_v0_magic_factory_seed_offset",
@@ -428,9 +462,18 @@ bool ScLsFixedV0CompileBackend::Compile(
     const auto pass_config = options.Contains("sc_ls_fixed_v0_pass")
             ? options.GetPassConfigList("sc_ls_fixed_v0_pass")
             : GetDefaultPass(request.source_format);
+    const auto skip_pipeline_state_output =
+            options.Contains("sc_ls_fixed_v0_skip_pipeline_state_output");
     auto pass_extra = qret::Json::object();
     pass_extra["pass_count"] = pass_config.size();
+    pass_extra["skip_pipeline_state_output"] = skip_pipeline_state_output;
     qret::rss_profile::Mark("compile_backend_after_pass_config", pass_extra);
-    return RunCompilation(request, topology.value(), machine_option.value(), pass_config);
+    return RunCompilation(
+            request,
+            topology.value(),
+            machine_option.value(),
+            pass_config,
+            skip_pipeline_state_output
+    );
 }
 }  // namespace qret::sc_ls_fixed_v0

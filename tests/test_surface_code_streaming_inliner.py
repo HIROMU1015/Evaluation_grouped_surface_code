@@ -1017,6 +1017,61 @@ def _write_fake_compile_qret(path: Path, *, fail: bool = False) -> None:
     path.chmod(0o755)
 
 
+def test_compile_pipeline_yaml_sets_skip_pipeline_state_flag(tmp_path: Path) -> None:
+    opt_path = tmp_path / "step_opt.json"
+    compile_output_path = tmp_path / "step_sc_ls_fixed_v0.json"
+    compile_info_path = tmp_path / "compile_info.json"
+    topology_path = tmp_path / "topology.yaml"
+
+    skip_yaml = sc.compile_pipeline_yaml(
+        opt_path=opt_path,
+        compile_output_path=compile_output_path,
+        compile_info_path=compile_info_path,
+        architecture=sc.SurfaceCodeArchitecture(
+            topology_path=topology_path,
+            skip_compile_output=True,
+        ),
+    )
+    keep_yaml = sc.compile_pipeline_yaml(
+        opt_path=opt_path,
+        compile_output_path=compile_output_path,
+        compile_info_path=compile_info_path,
+        architecture=sc.SurfaceCodeArchitecture(
+            topology_path=topology_path,
+            skip_compile_output=False,
+        ),
+    )
+
+    assert "sc_ls_fixed_v0_skip_pipeline_state_output: true" in skip_yaml
+    assert "sc_ls_fixed_v0_skip_pipeline_state_output" not in keep_yaml
+
+
+def test_compile_cache_key_separates_skip_compile_output(tmp_path: Path) -> None:
+    qret_path = tmp_path / "fake_qret.py"
+    _write_fake_compile_qret(qret_path)
+    artifact = _compile_fixture_artifact(tmp_path, qret_path)
+    base_kwargs = {
+        "compile_mode": "decompose_only",
+        "qret_path": qret_path,
+    }
+    skip_arch = sc.SurfaceCodeArchitecture(skip_compile_output=True, **base_kwargs)
+    keep_arch = sc.SurfaceCodeArchitecture(skip_compile_output=False, **base_kwargs)
+
+    assert sc.surface_code_compile_cache_payload(artifact, skip_arch)[
+        "skip_compile_output"
+    ] is True
+    assert sc.surface_code_compile_cache_payload(artifact, keep_arch)[
+        "skip_compile_output"
+    ] is False
+    assert sc.surface_code_compile_cache_key(
+        artifact,
+        skip_arch,
+    ) != sc.surface_code_compile_cache_key(
+        artifact,
+        keep_arch,
+    )
+
+
 def test_compile_stage_metrics_cache_hit_preserves_cold_metrics(
     tmp_path: Path,
     monkeypatch: Any,
