@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import platform
 import shutil
 import subprocess
@@ -19,6 +20,7 @@ if str(SRC_ROOT) not in sys.path:
 from trotterlib import surface_code as sc  # noqa: E402
 from trotterlib.profiling import (  # noqa: E402
     flatten_stage_metrics,
+    largest_python_current_rss_delta_stage,
     peak_python_rss_stage,
     peak_subprocess_rss_stage,
     slowest_stage,
@@ -109,7 +111,14 @@ def _environment_payload() -> dict[str, Any]:
         else None,
         "topology_path": str(Path(sc.SURFACE_CODE_TOPOLOGY_PATH).expanduser().resolve()),
         "rz_helper_batch_size": sc._rz_helper_batch_size(),
+        "surface_code_cache_dir": str(sc.SURFACE_CODE_CACHE_DIR),
         "integral_cache_enabled": bool(sc.SURFACE_CODE_INTEGRAL_CACHE_ENABLED),
+        "rss_sampling_enabled": os.environ.get(
+            "SURFACE_CODE_PROFILE_RSS_SAMPLING"
+        ),
+        "rss_sampling_interval_sec": os.environ.get(
+            "SURFACE_CODE_PROFILE_RSS_SAMPLING_INTERVAL_SEC"
+        ),
     }
 
 
@@ -137,12 +146,18 @@ def _format_stage(row: Mapping[str, Any] | None) -> str:
     name = row.get("stage_name")
     elapsed = row.get("elapsed_seconds")
     py_rss = row.get("python_self_maxrss_kb")
+    current_after = row.get("python_current_rss_after_kb")
+    sampled_peak = row.get("python_sampled_peak_rss_kb")
     sub_rss = row.get("subprocess_maxrss_kb")
     pieces = [str(name)]
     if elapsed is not None:
         pieces.append(f"elapsed={float(elapsed):.3f}s")
     if py_rss is not None:
         pieces.append(f"python_rss={int(py_rss)}KB")
+    if current_after is not None:
+        pieces.append(f"current_rss={int(current_after)}KB")
+    if sampled_peak is not None:
+        pieces.append(f"sampled_peak={int(sampled_peak)}KB")
     if sub_rss is not None:
         pieces.append(f"subprocess_rss={int(sub_rss)}KB")
     return ", ".join(pieces)
@@ -157,6 +172,7 @@ def _write_report(
 ) -> None:
     slowest = slowest_stage(rows)
     peak_py = peak_python_rss_stage(rows)
+    largest_current_delta = largest_python_current_rss_delta_stage(rows)
     peak_sub = peak_subprocess_rss_stage(rows)
     lines = [
         "# Surface-Code Stage Profiling Report",
@@ -188,6 +204,9 @@ def _write_report(
         "`compile_stage_cache_hit_metrics.json`.",
         "- Python RSS uses `resource.getrusage(...).ru_maxrss` and is stored in KB.",
         "- qret subprocess RSS uses `/usr/bin/time -v` when available and is stored in KB.",
+        "- Parent Python current RSS is read from `/proc/self/status` `VmRSS` when available.",
+        "- Parent Python sampled peak RSS is enabled by this benchmark script and "
+        "uses a low-frequency sampling thread.",
         "- Mapping, routing, and QEC elapsed are not split unless qret exposes them; "
         "otherwise they are included in `qret_compile`.",
         "",
@@ -232,6 +251,7 @@ def _write_report(
             "",
             f"- Slowest recorded stage: {_format_stage(slowest)}.",
             f"- Highest Python parent RSS stage: {_format_stage(peak_py)}.",
+            f"- Largest Python current RSS delta stage: {_format_stage(largest_current_delta)}.",
             f"- Highest qret subprocess RSS stage: {_format_stage(peak_sub)}.",
             "",
             "## Interpretation",
@@ -245,6 +265,8 @@ def _write_report(
             "without rerunning H4 under the same conditions.",
             "- A flat Python parent high-water mark does not by itself prove that "
             "`step_ir.json` full-load is or is not the dominant H4 RSS source.",
+            "- Current RSS deltas are better evidence for retained memory than "
+            "`ru_maxrss`, which is a process lifetime high-water mark.",
             "",
             "## Judgment Items",
             "",
@@ -385,6 +407,17 @@ def main() -> int:
     )
     parser.add_argument("--cache-condition", default="current-cache-state")
     parser.add_argument(
+        "--cache-root",
+        type=Path,
+        default=None,
+        help="Override SURFACE_CODE_CACHE_DIR for isolated profiling caches.",
+    )
+    parser.add_argument(
+        "--reset-cache-root",
+        action="store_true",
+        help="Delete --cache-root before running. Only allowed under benchmark_results/.",
+    )
+    parser.add_argument(
         "--no-reuse-compile-cache",
         action="store_true",
         help="Force qret compile even when compile_info.json already exists.",
@@ -396,6 +429,17 @@ def main() -> int:
         help="Override SURFACE_CODE_RZ_HELPER_BATCH_SIZE for this process.",
     )
     parser.add_argument(
+        "--rss-sampling-interval",
+        type=float,
+        default=0.02,
+        help="Current RSS sampling interval in seconds. Default: 0.02.",
+    )
+    parser.add_argument(
+        "--no-rss-sampling",
+        action="store_true",
+        help="Disable stage-level current RSS sampling.",
+    )
+    parser.add_argument(
         "--write-report",
         type=Path,
         default=REPO_ROOT / "docs" / "benchmarks" / "profiling_report.md",
@@ -404,6 +448,26 @@ def main() -> int:
 
     if args.batch_size is not None:
         sc.SURFACE_CODE_RZ_HELPER_BATCH_SIZE = int(args.batch_size)
+    if args.cache_root is not None:
+        cache_root = args.cache_root.expanduser().resolve()
+        benchmark_root = (REPO_ROOT / "benchmark_results").resolve()
+        if args.reset_cache_root:
+            try:
+                cache_root.relative_to(benchmark_root)
+            except ValueError as exc:
+                raise SystemExit(
+                    "--reset-cache-root is only allowed under benchmark_results/"
+                ) from exc
+            shutil.rmtree(cache_root, ignore_errors=True)
+        cache_root.mkdir(parents=True, exist_ok=True)
+        sc.SURFACE_CODE_CACHE_DIR = cache_root
+    if args.no_rss_sampling:
+        os.environ.pop("SURFACE_CODE_PROFILE_RSS_SAMPLING", None)
+    else:
+        os.environ["SURFACE_CODE_PROFILE_RSS_SAMPLING"] = "1"
+        os.environ["SURFACE_CODE_PROFILE_RSS_SAMPLING_INTERVAL_SEC"] = str(
+            float(args.rss_sampling_interval)
+        )
 
     cases = [_parse_case(item) for item in (args.case or ["H2:2nd"])]
     compile_modes = args.compile_mode or ["ftqc_compile_topology"]
@@ -433,6 +497,9 @@ def main() -> int:
             "cases": summaries,
             "slowest_stage": dict(slowest_stage(rows) or {}),
             "peak_python_rss_stage": dict(peak_python_rss_stage(rows) or {}),
+            "largest_python_current_rss_delta_stage": dict(
+                largest_python_current_rss_delta_stage(rows) or {}
+            ),
             "peak_subprocess_rss_stage": dict(peak_subprocess_rss_stage(rows) or {}),
         },
     )

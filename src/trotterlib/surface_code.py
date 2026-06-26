@@ -9,6 +9,7 @@ import re
 import resource
 import subprocess
 import tempfile
+import threading
 import time
 from dataclasses import dataclass, field
 from importlib import metadata as importlib_metadata
@@ -337,6 +338,83 @@ def _resource_rss_snapshot() -> dict[str, int]:
     }
 
 
+def _current_rss_kb() -> int | None:
+    status_path = Path("/proc/self/status")
+    try:
+        with status_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        return int(parts[1])
+                    return None
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def _rss_sampling_enabled() -> bool:
+    value = os.environ.get("SURFACE_CODE_PROFILE_RSS_SAMPLING", "")
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _rss_sampling_interval_seconds() -> float:
+    raw = os.environ.get("SURFACE_CODE_PROFILE_RSS_SAMPLING_INTERVAL_SEC", "0.02")
+    try:
+        interval = float(raw)
+    except ValueError:
+        interval = 0.02
+    return max(0.001, interval)
+
+
+class _CurrentRssSampler:
+    def __init__(self, interval_seconds: float) -> None:
+        self._interval_seconds = float(interval_seconds)
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._peak_kb: int | None = None
+        self._sample_count = 0
+
+    def start(self) -> None:
+        first_sample = _current_rss_kb()
+        if first_sample is not None:
+            self._peak_kb = int(first_sample)
+            self._sample_count = 1
+        self._thread = threading.Thread(
+            target=self._run,
+            name="surface-code-rss-sampler",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def _run(self) -> None:
+        while not self._stop.wait(self._interval_seconds):
+            sample = _current_rss_kb()
+            if sample is None:
+                continue
+            self._sample_count += 1
+            if self._peak_kb is None or int(sample) > self._peak_kb:
+                self._peak_kb = int(sample)
+
+    def stop(self) -> dict[str, int | bool | None]:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=max(1.0, self._interval_seconds * 4.0))
+        final_sample = _current_rss_kb()
+        if final_sample is not None:
+            self._sample_count += 1
+            if self._peak_kb is None or int(final_sample) > self._peak_kb:
+                self._peak_kb = int(final_sample)
+        return {
+            "enabled": True,
+            "sample_count": int(self._sample_count),
+            "sampled_peak_rss_kb": self._peak_kb,
+            "thread_alive_after_stop": (
+                self._thread.is_alive() if self._thread is not None else False
+            ),
+        }
+
+
 def _file_size_bytes(path: str | Path | None) -> int | None:
     if path is None:
         return None
@@ -375,8 +453,17 @@ class _StageMetricsRecorder:
 
     def _finish_stage(self, span: "_StageSpan", exc: BaseException | None) -> None:
         ended = time.perf_counter()
+        sampler_result = span.stop_sampler()
+        current_rss_after = _current_rss_kb()
         rss_after = _resource_rss_snapshot()
         rss_before = span.rss_before
+        current_rss_before = span.current_rss_before_kb
+        current_delta = (
+            None
+            if current_rss_before is None or current_rss_after is None
+            else int(current_rss_after) - int(current_rss_before)
+        )
+        sampled_peak = sampler_result.get("sampled_peak_rss_kb")
         event = {
             "index": len(self._stages),
             "name": span.name,
@@ -384,6 +471,13 @@ class _StageMetricsRecorder:
             "elapsed_seconds": float(ended - span.started),
             "rss_before": rss_before,
             "rss_after": rss_after,
+            "python_current_rss_before_kb": current_rss_before,
+            "python_current_rss_after_kb": current_rss_after,
+            "python_current_rss_delta_kb": current_delta,
+            "python_sampled_peak_rss_kb": sampled_peak,
+            "python_rss_sampling": sampler_result,
+            "python_self_maxrss_before_kb": int(rss_before["self_maxrss_kb"]),
+            "python_self_maxrss_after_kb": int(rss_after["self_maxrss_kb"]),
             "self_maxrss_delta_kb": max(
                 0,
                 int(rss_after["self_maxrss_kb"]) - int(rss_before["self_maxrss_kb"]),
@@ -422,6 +516,16 @@ class _StageMetricsRecorder:
             "stage_count": int(len(self._stages)),
             "stages": list(self._stages),
             "rss_semantics": {
+                "python_current_rss_kb": (
+                    "current parent Python process RSS from /proc/self/status VmRSS"
+                ),
+                "python_current_rss_delta_kb": (
+                    "stage end current RSS minus stage start current RSS"
+                ),
+                "python_sampled_peak_rss_kb": (
+                    "sampled current RSS peak during the stage when "
+                    "SURFACE_CODE_PROFILE_RSS_SAMPLING=1"
+                ),
                 "self_maxrss_kb": "Python process high-water mark after the stage",
                 "self_maxrss_delta_kb": (
                     "increase in Python process high-water mark during the stage"
@@ -464,14 +568,30 @@ class _StageSpan:
         self.result: dict[str, Any] = {}
         self.started = 0.0
         self.rss_before: dict[str, int] = {}
+        self.current_rss_before_kb: int | None = None
+        self._sampler: _CurrentRssSampler | None = None
 
     def __enter__(self) -> "_StageSpan":
         self.started = time.perf_counter()
         self.rss_before = _resource_rss_snapshot()
+        self.current_rss_before_kb = _current_rss_kb()
+        if _rss_sampling_enabled():
+            self._sampler = _CurrentRssSampler(_rss_sampling_interval_seconds())
+            self._sampler.start()
         return self
 
     def add_result(self, **items: Any) -> None:
         self.result.update(items)
+
+    def stop_sampler(self) -> dict[str, int | bool | None]:
+        if self._sampler is None:
+            return {
+                "enabled": False,
+                "sample_count": 0,
+                "sampled_peak_rss_kb": None,
+                "thread_alive_after_stop": False,
+            }
+        return self._sampler.stop()
 
     def __exit__(
         self,

@@ -163,6 +163,7 @@ Markdown の QPE-scale 表は、full QPE circuit compile ではなく、uncontro
 prepare / compile の stage 別 elapsed、Python parent RSS、qret subprocess RSS、入出力サイズは、以下のレポートにまとめます。
 
 - [Surface-Code Stage Profiling Report](docs/benchmarks/profiling_report.md)
+- [Surface-Code RSS Memory Profile](docs/benchmarks/rss_memory_profile_report.md)
 
 ローカルで再測定する場合は、以下を使います。生成される `benchmark_results/` は `.gitignore` 対象です。
 

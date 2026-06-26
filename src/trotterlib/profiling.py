@@ -19,8 +19,14 @@ STAGE_PROFILE_FIELDS = [
     "stage_index",
     "stage_name",
     "elapsed_seconds",
+    "python_current_rss_before_kb",
+    "python_current_rss_after_kb",
+    "python_current_rss_delta_kb",
+    "python_sampled_peak_rss_kb",
     "python_self_maxrss_kb",
     "python_self_maxrss_delta_kb",
+    "python_self_maxrss_before_kb",
+    "python_self_maxrss_after_kb",
     "python_children_maxrss_kb",
     "subprocess_maxrss_kb",
     "input_bytes",
@@ -123,8 +129,26 @@ def flatten_stage_metrics(
                 "stage_index": stage.get("index"),
                 "stage_name": stage.get("name"),
                 "elapsed_seconds": stage.get("elapsed_seconds"),
+                "python_current_rss_before_kb": stage.get(
+                    "python_current_rss_before_kb"
+                ),
+                "python_current_rss_after_kb": stage.get(
+                    "python_current_rss_after_kb"
+                ),
+                "python_current_rss_delta_kb": stage.get(
+                    "python_current_rss_delta_kb"
+                ),
+                "python_sampled_peak_rss_kb": stage.get(
+                    "python_sampled_peak_rss_kb"
+                ),
                 "python_self_maxrss_kb": rss_after.get("self_maxrss_kb"),
                 "python_self_maxrss_delta_kb": stage.get("self_maxrss_delta_kb"),
+                "python_self_maxrss_before_kb": stage.get(
+                    "python_self_maxrss_before_kb"
+                ),
+                "python_self_maxrss_after_kb": stage.get(
+                    "python_self_maxrss_after_kb"
+                ),
                 "python_children_maxrss_kb": rss_after.get("children_maxrss_kb"),
                 "subprocess_maxrss_kb": result.get("subprocess_maxrss_kb"),
                 "input_bytes": _stage_input_bytes(details, result),
@@ -173,10 +197,38 @@ def slowest_stage(rows: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | None
 
 
 def peak_python_rss_stage(rows: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | None:
-    candidates = [row for row in rows if row.get("python_self_maxrss_kb") is not None]
+    candidates = [
+        row
+        for row in rows
+        if row.get("python_sampled_peak_rss_kb") is not None
+        or row.get("python_current_rss_after_kb") is not None
+        or row.get("python_self_maxrss_kb") is not None
+    ]
     if not candidates:
         return None
-    return max(candidates, key=lambda row: int(row.get("python_self_maxrss_kb") or 0))
+    return max(
+        candidates,
+        key=lambda row: int(
+            row.get("python_sampled_peak_rss_kb")
+            or row.get("python_current_rss_after_kb")
+            or row.get("python_self_maxrss_kb")
+            or 0
+        ),
+    )
+
+
+def largest_python_current_rss_delta_stage(
+    rows: Sequence[Mapping[str, Any]],
+) -> Mapping[str, Any] | None:
+    candidates = [
+        row for row in rows if row.get("python_current_rss_delta_kb") is not None
+    ]
+    if not candidates:
+        return None
+    return max(
+        candidates,
+        key=lambda row: int(row.get("python_current_rss_delta_kb") or 0),
+    )
 
 
 def peak_subprocess_rss_stage(rows: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | None:

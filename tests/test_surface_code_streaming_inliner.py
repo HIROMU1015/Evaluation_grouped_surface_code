@@ -1001,6 +1001,57 @@ def test_stage_metrics_recorder_writes_valid_json(tmp_path: Path) -> None:
     assert payload["file_sizes_bytes"]["payload"] == 2
 
 
+def test_stage_metrics_current_rss_unavailable_is_safe(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metrics_path = tmp_path / "rss_unavailable.json"
+    monkeypatch.setattr(sc, "_current_rss_kb", lambda: None)
+    monkeypatch.setenv("SURFACE_CODE_PROFILE_RSS_SAMPLING", "1")
+
+    recorder = sc._StageMetricsRecorder(
+        scope="unit_test",
+        metadata={"case": "rss_unavailable"},
+    )
+    with recorder.stage("noop"):
+        pass
+    recorder.write(metrics_path, status="ok")
+
+    payload = json.loads(metrics_path.read_text(encoding="utf-8"))
+    stage = payload["stages"][0]
+    assert stage["python_current_rss_before_kb"] is None
+    assert stage["python_current_rss_after_kb"] is None
+    assert stage["python_current_rss_delta_kb"] is None
+    assert stage["python_sampled_peak_rss_kb"] is None
+    assert stage["python_rss_sampling"]["enabled"] is True
+    assert stage["python_rss_sampling"]["thread_alive_after_stop"] is False
+
+
+def test_stage_metrics_sampling_captures_temporary_rss_peak(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SURFACE_CODE_PROFILE_RSS_SAMPLING", "1")
+    monkeypatch.setenv("SURFACE_CODE_PROFILE_RSS_SAMPLING_INTERVAL_SEC", "0.005")
+    recorder = sc._StageMetricsRecorder(
+        scope="unit_test",
+        metadata={"case": "rss_sampling"},
+    )
+
+    with recorder.stage("allocate_bytearray"):
+        payload = bytearray(8 * 1024 * 1024)
+        payload[0] = 1
+        time.sleep(0.03)
+        del payload
+
+    stage = recorder.summary(status="ok")["stages"][0]
+    assert stage["python_rss_sampling"]["enabled"] is True
+    assert stage["python_rss_sampling"]["thread_alive_after_stop"] is False
+    assert stage["python_current_rss_before_kb"] is not None
+    assert stage["python_current_rss_after_kb"] is not None
+    assert stage["python_sampled_peak_rss_kb"] is not None
+    assert stage["python_sampled_peak_rss_kb"] >= stage["python_current_rss_before_kb"]
+
+
 def test_stage_profile_flatten_schema_handles_missing_subprocess_rss() -> None:
     summary = {
         "metadata": {
@@ -1017,6 +1068,10 @@ def test_stage_profile_flatten_schema_handles_missing_subprocess_rss() -> None:
                 "elapsed_seconds": 0.125,
                 "rss_after": {"self_maxrss_kb": 100, "children_maxrss_kb": 0},
                 "self_maxrss_delta_kb": 4,
+                "python_current_rss_before_kb": 90,
+                "python_current_rss_after_kb": 95,
+                "python_current_rss_delta_kb": 5,
+                "python_sampled_peak_rss_kb": 98,
                 "details": {"input_size_bytes": 10},
                 "result": {"output_size_bytes": 20, "cache_hit": False},
             },
@@ -1027,6 +1082,10 @@ def test_stage_profile_flatten_schema_handles_missing_subprocess_rss() -> None:
                 "elapsed_seconds": 0.25,
                 "rss_after": {"self_maxrss_kb": 110, "children_maxrss_kb": 120},
                 "self_maxrss_delta_kb": 0,
+                "python_current_rss_before_kb": 95,
+                "python_current_rss_after_kb": 110,
+                "python_current_rss_delta_kb": 15,
+                "python_sampled_peak_rss_kb": 112,
                 "details": {"command": ["qret", "compile"]},
                 "result": {"subprocess_maxrss_kb": 256},
             },
@@ -1045,10 +1104,15 @@ def test_stage_profile_flatten_schema_handles_missing_subprocess_rss() -> None:
     assert len(rows) == 2
     assert set(profiling.STAGE_PROFILE_FIELDS).issuperset(rows[0])
     assert rows[0]["subprocess_maxrss_kb"] is None
+    assert rows[0]["python_current_rss_delta_kb"] == 5
+    assert rows[1]["python_sampled_peak_rss_kb"] == 112
     assert rows[0]["cache_status"] == "miss"
     assert rows[1]["qret_invocation_count"] == 1
     assert profiling.slowest_stage(rows)["stage_name"] == "qret_stage"
     assert profiling.peak_python_rss_stage(rows)["stage_name"] == "qret_stage"
+    assert profiling.largest_python_current_rss_delta_stage(rows)["stage_name"] == (
+        "qret_stage"
+    )
     assert profiling.peak_subprocess_rss_stage(rows)["stage_name"] == "qret_stage"
 
 
