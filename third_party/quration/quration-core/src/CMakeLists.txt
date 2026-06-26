@@ -79,6 +79,7 @@ list(
   qret/base/log.cpp
   qret/base/option.cpp
   qret/base/portable_function.cpp
+  qret/base/rss_profile.cpp
   qret/base/string.cpp
   qret/base/system.cpp
   qret/base/type.cpp

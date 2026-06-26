@@ -20,6 +20,7 @@
 #include "qret/base/graph.h"
 #include "qret/base/log.h"
 #include "qret/base/option.h"
+#include "qret/base/rss_profile.h"
 #include "qret/codegen/machine_function.h"
 #include "qret/target/sc_ls_fixed_v0/instruction.h"
 #include "qret/target/sc_ls_fixed_v0/sc_ls_fixed_v0_target_machine.h"
@@ -56,6 +57,22 @@ static auto ScLsFindPlaceAlgorithm = Opt<std::uint32_t>(
         "Find place algorithm of mapping (0: EnoughSpaceSoft, 1: EnoughSpaceHard)",
         OptionHidden::Hidden
 );
+
+std::size_t CountMachineInstructions(const MachineFunction& mf) {
+    auto ret = std::size_t{0};
+    for (const auto& mbb : mf) {
+        ret += mbb.NumInstructions();
+    }
+    return ret;
+}
+
+qret::Json MachineFunctionStats(const MachineFunction& mf) {
+    auto extra = qret::Json::object();
+    extra["machine_basic_blocks"] = mf.NumBBs();
+    extra["machine_instructions"] = CountMachineInstructions(mf);
+    extra["has_compile_info"] = mf.HasCompileInfo();
+    return extra;
+}
 }  // namespace
 
 void UpdateEdges(
@@ -276,6 +293,7 @@ bool QubitMapper::MapQubits(QubitGraph& graph, PartitionAlgorithm algorithm) {
     return true;
 }
 bool Mapping::RunOnMachineFunction(MachineFunction& mf) {
+    qret::rss_profile::Mark("mapping_entry", MachineFunctionStats(mf));
     if (ScLsMappingAlgorithm.Get() == 0) {
         return MapBasedOnTopologyFile(mf);
     }
@@ -297,11 +315,22 @@ bool Mapping::RunOnMachineFunction(MachineFunction& mf) {
     const auto& topology = target.topology;
 
     auto graph = QubitGraph(mf);
+    auto graph_extra = MachineFunctionStats(mf);
+    graph_extra["qubit_graph_nodes"] = graph.GetGraph().NumNodes();
+    graph_extra["qubit_graph_edges"] = graph.GetGraph().NumEdges();
+    graph_extra["qubit_graph_num_qubits"] = graph.NumQubits();
+    qret::rss_profile::Mark("mapping_after_qubit_graph", graph_extra);
     auto mapper =
             QubitMapper(topology, QubitMapper::FindPlaceAlgorithm(ScLsFindPlaceAlgorithm.Get()));
+    qret::rss_profile::Mark("mapping_after_mapper_construct", graph_extra);
     if (!mapper.MapQubits(graph, QubitMapper::PartitionAlgorithm(ScLsPartitionAlgorithm.Get()))) {
         throw std::runtime_error("Failed to find place to map qubits");
     }
+    auto mapped_extra = MachineFunctionStats(mf);
+    mapped_extra["qubit_graph_nodes"] = graph.GetGraph().NumNodes();
+    mapped_extra["qubit_graph_edges"] = graph.GetGraph().NumEdges();
+    mapped_extra["qubit_graph_num_qubits"] = graph.NumQubits();
+    qret::rss_profile::Mark("mapping_after_map_qubits", mapped_extra);
 
     for (auto&& mbb : mf) {
         for (auto&& minst : mbb) {
@@ -316,9 +345,11 @@ bool Mapping::RunOnMachineFunction(MachineFunction& mf) {
     }
 
     auto changed = true;
+    qret::rss_profile::Mark("mapping_after_apply_places", MachineFunctionStats(mf));
     return changed;
 }
 bool Mapping::MapBasedOnTopologyFile(MachineFunction& mf) {
+    qret::rss_profile::Mark("mapping_topology_file_entry", MachineFunctionStats(mf));
     const auto& target = *static_cast<const ScLsFixedV0TargetMachine*>(mf.GetTarget());
     const auto& topology = target.topology;
 
@@ -340,6 +371,7 @@ bool Mapping::MapBasedOnTopologyFile(MachineFunction& mf) {
     }
 
     auto changed = true;
+    qret::rss_profile::Mark("mapping_topology_file_after_apply_places", MachineFunctionStats(mf));
     return changed;
 }
 }  // namespace qret::sc_ls_fixed_v0

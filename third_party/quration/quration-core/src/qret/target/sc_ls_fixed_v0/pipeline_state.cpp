@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "qret/base/log.h"
+#include "qret/base/rss_profile.h"
 #include "qret/base/time.h"
 #include "qret/codegen/dummy.h"
 #include "qret/codegen/machine_function.h"
@@ -23,7 +24,33 @@
 
 namespace qret::sc_ls_fixed_v0 {
 namespace {
+std::size_t CountMachineInstructions(const MachineFunction& mf) {
+    auto ret = std::size_t{0};
+    for (const auto& bb : mf) {
+        ret += bb.NumInstructions();
+    }
+    return ret;
+}
+
+Json MachineFunctionStats(const MachineFunction& mf) {
+    auto extra = Json::object();
+    extra["machine_basic_blocks"] = mf.NumBBs();
+    extra["machine_instructions"] = CountMachineInstructions(mf);
+    extra["has_compile_info"] = mf.HasCompileInfo();
+    return extra;
+}
+
+Json PipelineStateStats(const ScLsFixedV0PipelineState& state) {
+    auto extra = Json::object();
+    extra["state_program_size"] = state.program.size();
+    extra["state_pass_count"] = state.opt.passes.size();
+    extra["state_has_target"] = state.parameter.target.has_value();
+    extra["state_has_compile_info"] = state.opt.compile_info.has_value();
+    return extra;
+}
+
 void BuildProgramJson(const MachineFunction& mf, std::vector<Json>& out) {
+    qret::rss_profile::Mark("build_program_json_before", MachineFunctionStats(mf));
     out.clear();
     for (const auto& bb : mf) {
         for (const auto& tmp : bb) {
@@ -31,6 +58,9 @@ void BuildProgramJson(const MachineFunction& mf, std::vector<Json>& out) {
             out.emplace_back(inst.ToJson());
         }
     }
+    auto extra = MachineFunctionStats(mf);
+    extra["state_program_size"] = out.size();
+    qret::rss_profile::Mark("build_program_json_after", extra);
 }
 
 void ApplyProgramJson(const std::vector<Json>& program, MachineFunction& mf) {
@@ -149,12 +179,18 @@ ScLsFixedV0PipelineState LoadPipelineState(const std::string& input) {
 
 void SavePipelineState(const std::string& output, const ScLsFixedV0PipelineState& state) {
     LOG_INFO("Saving SC_LS_FIXED_V0 pipeline state to JSON file: {}", output);
+    qret::rss_profile::Mark("save_pipeline_state_entry", PipelineStateStats(state));
 
     auto ofs = std::ofstream(output);
     if (!ofs.good()) {
         throw std::runtime_error(fmt::format("failed to open: {}", output));
     }
-    ofs << Json(state) << std::endl;
+    auto j = Json(state);
+    auto extra = PipelineStateStats(state);
+    extra["json_program_size"] = j.contains("program") ? j["program"].size() : 0;
+    qret::rss_profile::Mark("save_pipeline_state_after_to_json", extra);
+    ofs << j << std::endl;
+    qret::rss_profile::Mark("save_pipeline_state_after_stream_write", extra);
 }
 
 ScLsFixedV0PipelineState BuildPipelineState(
@@ -163,10 +199,12 @@ ScLsFixedV0PipelineState BuildPipelineState(
         const MachineFunction& mf
 ) {
     auto state = ScLsFixedV0PipelineState{};
+    qret::rss_profile::Mark("build_pipeline_state_entry", MachineFunctionStats(mf));
 
     if (target != nullptr) {
         state.parameter.target = *target;
     }
+    qret::rss_profile::Mark("build_pipeline_state_after_target", PipelineStateStats(state));
 
     const auto& analysis = manager.GetAnalysis();
     for (const auto& pass : analysis.run_order) {
@@ -176,17 +214,21 @@ ScLsFixedV0PipelineState BuildPipelineState(
         }
         state.opt.passes.emplace_back(pass->GetPassArgument(), it->second.count());
     }
+    qret::rss_profile::Mark("build_pipeline_state_after_pass_history", PipelineStateStats(state));
 
     if (mf.HasCompileInfo()) {
         state.opt.compile_info = *static_cast<const ScLsFixedV0CompileInfo*>(mf.GetCompileInfo());
     }
+    qret::rss_profile::Mark("build_pipeline_state_after_compile_info", PipelineStateStats(state));
 
     BuildProgramJson(mf, state.program);
+    qret::rss_profile::Mark("build_pipeline_state_after_program", PipelineStateStats(state));
     return state;
 }
 
 ScLsFixedV0PipelineState BuildPipelineState(const MachineFunction& mf) {
     auto state = ScLsFixedV0PipelineState{};
+    qret::rss_profile::Mark("build_pipeline_state_simple_entry", MachineFunctionStats(mf));
 
     state.info.description =
             "This is a SC_LS_FIXED_V0 pipeline state file. Do not change 'parameter' field.";
@@ -199,8 +241,13 @@ ScLsFixedV0PipelineState BuildPipelineState(const MachineFunction& mf) {
     if (mf.HasCompileInfo()) {
         state.opt.compile_info = *static_cast<const ScLsFixedV0CompileInfo*>(mf.GetCompileInfo());
     }
+    qret::rss_profile::Mark(
+            "build_pipeline_state_simple_after_compile_info",
+            PipelineStateStats(state)
+    );
 
     BuildProgramJson(mf, state.program);
+    qret::rss_profile::Mark("build_pipeline_state_simple_after_program", PipelineStateStats(state));
     return state;
 }
 

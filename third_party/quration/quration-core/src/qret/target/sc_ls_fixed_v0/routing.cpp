@@ -15,6 +15,7 @@
 
 #include "qret/base/log.h"
 #include "qret/base/option.h"
+#include "qret/base/rss_profile.h"
 #include "qret/codegen/machine_function.h"
 #include "qret/pass.h"
 #include "qret/target/sc_ls_fixed_v0/inst_queue.h"
@@ -53,6 +54,31 @@ static Opt<std::int32_t> RouteSearcherType(
         "Route searcher strategy (0: default)",
         OptionHidden::Hidden
 );
+
+std::size_t CountMachineInstructions(const MachineFunction& mf) {
+    auto ret = std::size_t{0};
+    for (const auto& mbb : mf) {
+        ret += mbb.NumInstructions();
+    }
+    return ret;
+}
+
+qret::Json MachineFunctionStats(const MachineFunction& mf) {
+    auto extra = qret::Json::object();
+    extra["machine_basic_blocks"] = mf.NumBBs();
+    extra["machine_instructions"] = CountMachineInstructions(mf);
+    extra["has_compile_info"] = mf.HasCompileInfo();
+    return extra;
+}
+
+qret::Json QueueStats(const MachineFunction& mf, const InstQueue& queue) {
+    auto extra = MachineFunctionStats(mf);
+    extra["queue_insts"] = queue.NumInsts();
+    extra["queue_runnables"] = queue.NumRunnables();
+    extra["queue_reserved"] = queue.NumReserved();
+    extra["queue_peek_finished"] = queue.IsPeekFinished();
+    return extra;
+}
 }  // namespace
 
 bool SkipAllocate(
@@ -70,6 +96,7 @@ bool SkipAllocate(
     return initial_weight + 1 < allocate_weight;
 }
 bool Routing::RunOnMachineFunction(MachineFunction& mf) {
+    qret::rss_profile::Mark("routing_entry", MachineFunctionStats(mf));
     if (InstQueueWeightAlgorithm > 2) {
         throw std::runtime_error(
                 "InstQueueWeightAlgorithm must be 0, 1, or 2 (0: index, 1: type, 2: InvDepth)."
@@ -104,11 +131,13 @@ bool Routing::RunOnMachineFunction(MachineFunction& mf) {
     }
 
     Validate(mf);
+    qret::rss_profile::Mark("routing_after_validate", MachineFunctionStats(mf));
 
     // Initialize machine function.
     for (auto&& mbb : mf) {
         mbb.ConstructInverseMap();
     }
+    qret::rss_profile::Mark("routing_after_construct_inverse_map", MachineFunctionStats(mf));
 
     auto symbol_generator = SymbolGenerator::New();
     {
@@ -128,15 +157,19 @@ bool Routing::RunOnMachineFunction(MachineFunction& mf) {
         symbol_generator->SetQ(QSymbol{q_max + 1});
         symbol_generator->SetC(CSymbol{c_max + 1});
     }
+    qret::rss_profile::Mark("routing_after_symbol_generator", MachineFunctionStats(mf));
     auto splitter = SplitMultinodeInst(*topology, symbol_generator);
+    qret::rss_profile::Mark("routing_after_splitter_construct", MachineFunctionStats(mf));
 
     // Define states.
     auto queue = InstQueue(option, mf, weight_algorithm);
+    qret::rss_profile::Mark("routing_after_inst_queue_construct", QueueStats(mf, queue));
     auto route_searcher = std::unique_ptr<RouteSearcher>();
     if (RouteSearcherType == 0) {
         // Keep the simulator wired to the strategy interface, even with a single backend today.
         route_searcher = std::make_unique<DefaultRouteSearcher>();
     }
+    qret::rss_profile::Mark("routing_after_route_searcher_construct", QueueStats(mf, queue));
     auto simulator = ScLsSimulator(
             *topology,
             option,
@@ -144,15 +177,18 @@ bool Routing::RunOnMachineFunction(MachineFunction& mf) {
             symbol_generator,
             std::move(route_searcher)
     );
+    qret::rss_profile::Mark("routing_after_simulator_construct", QueueStats(mf, queue));
     auto lightest_weight_of_inst_at_beat = std::numeric_limits<std::int64_t>::max();
     auto current_beat = simulator.GetBeat();
     auto idle_beats = Beat{0};
 
     // Peek instructions.
     queue.Peek(2 * InstQueuePeekSize);
+    qret::rss_profile::Mark("routing_after_initial_queue_peek", QueueStats(mf, queue));
     if (!queue.Empty() && queue.NumRunnables() > 0) {
         lightest_weight_of_inst_at_beat = queue.GetNode(*queue.begin()).weight;
     }
+    qret::rss_profile::Mark("routing_before_main_loop", QueueStats(mf, queue));
 
     while (!queue.Empty()) {
         // DEBUG.
@@ -240,6 +276,7 @@ bool Routing::RunOnMachineFunction(MachineFunction& mf) {
     LOG_DEBUG("Simulator stats: {}", simulator.GetStats());
 
     auto changed = true;
+    qret::rss_profile::Mark("routing_after_main_loop", MachineFunctionStats(mf));
     return changed;
 }
 }  // namespace qret::sc_ls_fixed_v0
