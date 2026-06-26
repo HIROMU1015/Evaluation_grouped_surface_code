@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import time
 from dataclasses import dataclass, field
+from importlib import metadata as importlib_metadata
 from pathlib import Path
 from typing import Any, Dict, Mapping, Sequence
 
@@ -309,7 +310,19 @@ class _FileLock:
 _PREPARE_STAGE_METRICS_VERSION = "surface_code_prepare_stage_metrics_v1"
 _PREPARE_STAGE_METRICS_FILENAME = "prepare_stage_metrics.json"
 _PREPARE_STAGE_CACHE_HIT_METRICS_FILENAME = "prepare_stage_cache_hit_metrics.json"
+_COMPILE_STAGE_METRICS_FILENAME = "compile_stage_metrics.json"
+_COMPILE_STAGE_CACHE_HIT_METRICS_FILENAME = "compile_stage_cache_hit_metrics.json"
 _SURFACE_CODE_INTEGRAL_CACHE_VERSION = "surface_code_integral_cache_v2"
+_SURFACE_CODE_STEP_ARTIFACT_CACHE_VERSION = "surface_code_step_artifact_cache_v2"
+_SURFACE_CODE_CIRCUIT_GENERATION_VERSION = "grouped_hchain_pf_step_circuit_v2"
+_SURFACE_CODE_STEP_DEPENDENCY_PACKAGES = (
+    "numpy",
+    "scipy",
+    "pyscf",
+    "openfermion",
+    "openfermionpyscf",
+    "qiskit",
+)
 _GNU_TIME_MAXRSS_RE = re.compile(
     r"Maximum resident set size \(kbytes\):\s*(?P<rss>\d+)"
 )
@@ -654,6 +667,20 @@ def _pyscf_version() -> str:
     import pyscf
 
     return str(getattr(pyscf, "__version__", "unknown"))
+
+
+def _package_version(package_name: str) -> str:
+    try:
+        return str(importlib_metadata.version(package_name))
+    except importlib_metadata.PackageNotFoundError:
+        return "not-installed"
+
+
+def _surface_code_step_dependency_versions() -> dict[str, str]:
+    return {
+        package_name: _package_version(package_name)
+        for package_name in _SURFACE_CODE_STEP_DEPENDENCY_PACKAGES
+    }
 
 
 def _normalized_geometry_for_cache(
@@ -4066,6 +4093,8 @@ def _step_artifact_cache_key(
     integral_value_hash: str,
 ) -> str:
     payload = {
+        "step_artifact_cache_schema_version": _SURFACE_CODE_STEP_ARTIFACT_CACHE_VERSION,
+        "circuit_generation_version": _SURFACE_CODE_CIRCUIT_GENERATION_VERSION,
         "ham_name": ham_name,
         "pf_label": pf_label,
         "target_error": float(target_error),
@@ -4086,6 +4115,7 @@ def _step_artifact_cache_key(
         "ir_metadata_normalization": _IR_METADATA_NORMALIZATION_VERSION,
         "ir_stream_summary": _IR_STREAM_SUMMARY_VERSION,
         "python_inline_ir": _PYTHON_INLINE_IR_VERSION,
+        "dependency_versions": _surface_code_step_dependency_versions(),
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()[:16]
@@ -4178,6 +4208,11 @@ def prepare_grouped_surface_code_step_artifact(
             "rz_helper_batch_size": _rz_helper_batch_size(),
             "integral_cache_enabled": bool(SURFACE_CODE_INTEGRAL_CACHE_ENABLED),
             "integral_cache_schema_version": _SURFACE_CODE_INTEGRAL_CACHE_VERSION,
+            "step_artifact_cache_schema_version": (
+                _SURFACE_CODE_STEP_ARTIFACT_CACHE_VERSION
+            ),
+            "circuit_generation_version": _SURFACE_CODE_CIRCUIT_GENERATION_VERSION,
+            "dependency_versions": _surface_code_step_dependency_versions(),
         },
     )
     stage_metrics_path: Path | None = None
@@ -4691,102 +4726,260 @@ def compile_prepared_surface_code_step_artifact(
     compile_output_path = runtime_root / "step_sc_ls_fixed_v0.json"
     if architecture.skip_compile_output:
         compile_output_path = Path(os.devnull)
-
-    cache_hit = bool(reuse_cache and compile_info_path.exists())
-    started = time.perf_counter()
-    if not cache_hit:
-        compile_yaml_path = runtime_root / "compile.yaml"
-        compile_yaml_path.write_text(
-            compile_pipeline_yaml(
-                opt_path=artifact.optimized_ir_path,
-                compile_output_path=compile_output_path,
-                compile_info_path=compile_info_path,
-                architecture=architecture,
-            ),
-            encoding="utf-8",
-        )
-        _run_qret(
-            [
-                str(qret_path),
-                "compile",
-                "--pipeline",
-                str(compile_yaml_path),
-                "--verbose",
-            ],
-            runtime_root=runtime_root,
-            rotation_precision=artifact.rotation_precision,
-        )
-    elapsed = float(time.perf_counter() - started)
-
-    if architecture.save_mapping_result:
-        mapping_metadata = save_surface_code_mapping_result(
-            artifact=artifact,
-            architecture=architecture,
-            runtime_root=runtime_root,
-            reuse_cache=reuse_cache,
-        )
-    else:
-        mapping_metadata = {
-            "mapping_result_json": None,
-            "mapping_result_hash": None,
-            "mapping_result_unavailable_reason": "disabled",
-        }
-    metrics = surface_code_step_metrics_from_compile_info_json(compile_info_path)
-    cache_key = surface_code_compile_cache_key(artifact, architecture)
-    metrics.update(
-        {
+    compile_yaml_path = runtime_root / "compile.yaml"
+    step_metrics_path = runtime_root / "step_metrics.json"
+    stage_metrics_path = runtime_root / _COMPILE_STAGE_METRICS_FILENAME
+    stage_cache_hit_metrics_path = (
+        runtime_root / _COMPILE_STAGE_CACHE_HIT_METRICS_FILENAME
+    )
+    stage_files = {
+        "optimized_ir": artifact.optimized_ir_path,
+        "compile_pipeline": compile_yaml_path,
+        "compile_info": compile_info_path,
+        "compile_output": None
+        if architecture.skip_compile_output
+        else compile_output_path,
+        "step_metrics": step_metrics_path,
+    }
+    stage_recorder = _StageMetricsRecorder(
+        scope="compile_prepared_surface_code_step_artifact",
+        metadata={
+            "ham_name": artifact.ham_name,
+            "molecule": artifact.molecule,
+            "pf_label": artifact.pf_label,
             "target_error": float(artifact.target_error),
             "step_time": float(artifact.step_time),
             "rotation_precision": float(artifact.rotation_precision),
-            "cache_key": cache_key,
-            "generator": "grouped_surface_code_qret",
-            "auto_generated": True,
-            "source": "gr",
             "compile_mode": architecture.compile_mode,
-            "execution_time_sec": elapsed,
-            "compile_cache_hit": cache_hit,
-            "compile_runtime_config": architecture.to_dict(),
-            "compile_runtime_config_source": "architecture",
-            "qasm_hash": artifact.qasm_hash,
-            "optimized_ir_hash": artifact.optimized_ir_hash,
-            "compiler_executable_path": str(qret_path),
-            "compiler_executable_hash": file_sha256(qret_path),
+            "qret_path": str(qret_path),
+            "qret_hash": file_sha256(qret_path),
+            "topology_path": str(topology_path)
+            if _compile_uses_topology(architecture.compile_mode)
+            else None,
             "topology_hash": file_sha256(topology_path)
             if _compile_uses_topology(architecture.compile_mode)
             else None,
-            **mapping_metadata,
-            "step_rz_count": int(artifact.step_rz_count),
-            "step_rz_layer": artifact.step_rz_layer,
-            "step_magic_state_count": int(artifact.step_magic_state_count),
-            "step_magic_state_depth": int(artifact.step_magic_state_depth),
-            "peak_magic_layer": int(artifact.peak_magic_layer),
-            "rz_call_cache": dict(artifact.rz_call_cache),
-        }
+            "architecture": architecture.to_dict(),
+            "mapping_routing_stage_granularity": (
+                "qret exposes mapping/routing elapsed only as part of qret_compile"
+            ),
+        },
     )
-    normalized = normalize_surface_code_step_metrics(
-        metrics,
-        context=f"{artifact.ham_name}_Operator_{artifact.pf_label}",
-    )
-    for key in (
-        "compile_cache_hit",
-        "qasm_hash",
-        "optimized_ir_hash",
-        "compiler_executable_path",
-        "compiler_executable_hash",
-        "topology_hash",
-        "mapping_result_json",
-        "mapping_result_hash",
-        "mapping_result_unavailable_reason",
-        "step_rz_count",
-        "step_rz_layer",
-        "step_magic_state_count",
-        "step_magic_state_depth",
-        "peak_magic_layer",
-    ):
-        if key in metrics:
-            normalized[key] = metrics[key]
-    _atomic_write_json(runtime_root / "step_metrics.json", normalized)
-    return normalized
+
+    started = time.perf_counter()
+    cache_hit = False
+    try:
+        with stage_recorder.stage(
+            "compile_cache_lookup",
+            compile_info_path=str(compile_info_path),
+        ) as span:
+            cache_hit = bool(reuse_cache and compile_info_path.exists())
+            span.add_result(cache_hit=cache_hit)
+        if not cache_hit:
+            with stage_recorder.stage(
+                "compile_pipeline_generate",
+                input_path=str(artifact.optimized_ir_path),
+                output_path=str(compile_output_path),
+                compile_info_path=str(compile_info_path),
+            ) as span:
+                compile_yaml = compile_pipeline_yaml(
+                    opt_path=artifact.optimized_ir_path,
+                    compile_output_path=compile_output_path,
+                    compile_info_path=compile_info_path,
+                    architecture=architecture,
+                )
+                span.add_result(
+                    pipeline_bytes=len(compile_yaml.encode("utf-8")),
+                    input_size_bytes=_file_size_bytes(artifact.optimized_ir_path),
+                )
+            with stage_recorder.stage(
+                "write_compile_pipeline",
+                output_path=str(compile_yaml_path),
+            ) as span:
+                yaml_tmp = _atomic_temp_path(compile_yaml_path)
+                try:
+                    yaml_tmp.write_text(compile_yaml, encoding="utf-8")
+                    os.replace(yaml_tmp, compile_yaml_path)
+                except Exception:
+                    try:
+                        yaml_tmp.unlink()
+                    except FileNotFoundError:
+                        pass
+                    raise
+                span.add_result(output_size_bytes=_file_size_bytes(compile_yaml_path))
+            _run_qret(
+                [
+                    str(qret_path),
+                    "compile",
+                    "--pipeline",
+                    str(compile_yaml_path),
+                    "--verbose",
+                ],
+                runtime_root=runtime_root,
+                rotation_precision=artifact.rotation_precision,
+                stage_recorder=stage_recorder,
+                stage_name="qret_compile",
+                stage_details={
+                    "input_path": str(artifact.optimized_ir_path),
+                    "output_path": str(compile_output_path),
+                    "compile_info_path": str(compile_info_path),
+                    "pipeline_path": str(compile_yaml_path),
+                    "compile_mode": architecture.compile_mode,
+                    "mapping_routing_elapsed_available": False,
+                },
+            )
+        elapsed = float(time.perf_counter() - started)
+
+        if architecture.save_mapping_result:
+            with stage_recorder.stage("save_mapping_result") as span:
+                mapping_metadata = save_surface_code_mapping_result(
+                    artifact=artifact,
+                    architecture=architecture,
+                    runtime_root=runtime_root,
+                    reuse_cache=reuse_cache,
+                )
+                span.add_result(**mapping_metadata)
+        else:
+            mapping_metadata = {
+                "mapping_result_json": None,
+                "mapping_result_hash": None,
+                "mapping_result_unavailable_reason": "disabled",
+            }
+
+        with stage_recorder.stage(
+            "read_compile_info_json",
+            input_path=str(compile_info_path),
+        ) as span:
+            with compile_info_path.open("r", encoding="utf-8") as f:
+                compile_info = json.load(f)
+            compile_info_field_count = (
+                len(compile_info) if isinstance(compile_info, Mapping) else None
+            )
+            span.add_result(
+                input_size_bytes=_file_size_bytes(compile_info_path),
+                field_count=compile_info_field_count,
+            )
+        with stage_recorder.stage("normalize_compile_info") as span:
+            metrics = normalize_surface_code_step_metrics(
+                compile_info,
+                context=str(compile_info_path.resolve()),
+            )
+            metrics["compile_info_json"] = str(compile_info_path.resolve())
+            span.add_result(
+                normalized_field_count=len(metrics),
+                magic_state_consumption_count=metrics.get(
+                    "magic_state_consumption_count"
+                ),
+                runtime=metrics.get("runtime"),
+                runtime_without_topology=metrics.get("runtime_without_topology"),
+            )
+
+        cache_key = surface_code_compile_cache_key(artifact, architecture)
+        metrics.update(
+            {
+                "target_error": float(artifact.target_error),
+                "step_time": float(artifact.step_time),
+                "rotation_precision": float(artifact.rotation_precision),
+                "cache_key": cache_key,
+                "generator": "grouped_surface_code_qret",
+                "auto_generated": True,
+                "source": "gr",
+                "compile_mode": architecture.compile_mode,
+                "execution_time_sec": elapsed,
+                "compile_cache_hit": cache_hit,
+                "compile_runtime_config": architecture.to_dict(),
+                "compile_runtime_config_source": "architecture",
+                "qasm_hash": artifact.qasm_hash,
+                "optimized_ir_hash": artifact.optimized_ir_hash,
+                "compiler_executable_path": str(qret_path),
+                "compiler_executable_hash": file_sha256(qret_path),
+                "topology_hash": file_sha256(topology_path)
+                if _compile_uses_topology(architecture.compile_mode)
+                else None,
+                **mapping_metadata,
+                "step_rz_count": int(artifact.step_rz_count),
+                "step_rz_layer": artifact.step_rz_layer,
+                "step_magic_state_count": int(artifact.step_magic_state_count),
+                "step_magic_state_depth": int(artifact.step_magic_state_depth),
+                "peak_magic_layer": int(artifact.peak_magic_layer),
+                "rz_call_cache": dict(artifact.rz_call_cache),
+            }
+        )
+        with stage_recorder.stage("normalize_step_metrics") as span:
+            normalized = normalize_surface_code_step_metrics(
+                metrics,
+                context=f"{artifact.ham_name}_Operator_{artifact.pf_label}",
+            )
+            span.add_result(normalized_field_count=len(normalized))
+        for key in (
+            "compile_cache_hit",
+            "qasm_hash",
+            "optimized_ir_hash",
+            "compiler_executable_path",
+            "compiler_executable_hash",
+            "topology_hash",
+            "mapping_result_json",
+            "mapping_result_hash",
+            "mapping_result_unavailable_reason",
+            "step_rz_count",
+            "step_rz_layer",
+            "step_magic_state_count",
+            "step_magic_state_depth",
+            "peak_magic_layer",
+        ):
+            if key in metrics:
+                normalized[key] = metrics[key]
+        with stage_recorder.stage("collect_compile_outputs") as span:
+            span.add_result(
+                compile_info_size_bytes=_file_size_bytes(compile_info_path),
+                compile_output_size_bytes=(
+                    None
+                    if architecture.skip_compile_output
+                    else _file_size_bytes(compile_output_path)
+                ),
+                qret_compile_granularity=(
+                    "mapping, routing, and QEC resource estimation are included "
+                    "inside qret_compile unless qret exposes finer metrics"
+                ),
+            )
+        with stage_recorder.stage("write_step_metrics") as span:
+            _atomic_write_json(step_metrics_path, normalized)
+            span.add_result(output_size_bytes=_file_size_bytes(step_metrics_path))
+
+        write_path = stage_cache_hit_metrics_path if cache_hit else stage_metrics_path
+        stage_recorder.write(
+            write_path,
+            status="cache_hit" if cache_hit else "ok",
+            files=stage_files,
+            extra={
+                "cold_run_stage_metrics_path": str(stage_metrics_path),
+                "cold_run_stage_metrics_exists": stage_metrics_path.exists(),
+                "compile_cache_hit": bool(cache_hit),
+            }
+            if cache_hit
+            else {"compile_cache_hit": bool(cache_hit)},
+        )
+        return normalized
+    except Exception:
+        try:
+            stage_recorder.write(
+                stage_metrics_path,
+                status="failed",
+                files=stage_files,
+                extra={
+                    "compile_cache_hit": bool(cache_hit),
+                    "failed_stage_recorded": any(
+                        item.get("status") == "failed"
+                        for item in stage_recorder.summary(status="failed").get(
+                            "stages",
+                            [],
+                        )
+                    ),
+                },
+            )
+        except Exception:
+            pass
+        raise
 
 
 def normalize_surface_code_step_metrics(

@@ -10,7 +10,10 @@ rotation_precision:
 qret_path:
 
 defaults:
-  compile_mode: ftqc_compile_topology
+  # Use QEC mode by default so physical_qubits, code_distance, and
+  # failure_probability are populated. For routing-only sweeps, override this
+  # with ftqc_compile_topology in a case or local config.
+  compile_mode: ftqc_compile_topology_qec
   topology: tutorial
   machine_type: Dim2
   magic_generation_period: 15

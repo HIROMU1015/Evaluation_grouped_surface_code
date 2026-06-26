@@ -32,8 +32,13 @@ from .surface_code import (
 )
 
 
+COMPILED_CIRCUIT_SCOPE = "uncontrolled_pf_one_step"
+QPE_SCALING_MODEL = "linear_extrapolation_from_uncontrolled_pf_one_step"
+
 RESULT_FIELDS = [
     "status",
+    "compiled_circuit_scope",
+    "qpe_scaling_model",
     "molecule",
     "num_logical_qubits",
     "pf_label",
@@ -285,6 +290,8 @@ def _artifact_row(
     qpe_scale: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     row = {
+        "compiled_circuit_scope": COMPILED_CIRCUIT_SCOPE,
+        "qpe_scaling_model": QPE_SCALING_MODEL,
         "molecule": molecule,
         "pf_label": pf_label,
     }
@@ -573,7 +580,16 @@ def _append_pf_comparison_report(lines: list[str], rows: list[dict[str, Any]]) -
     for row in rows:
         molecule_groups.setdefault(row.get("molecule"), []).append(row)
 
-    lines.extend(["## QPE-Scaled PF Comparison", ""])
+    lines.extend(
+        [
+            "## PF-Step Linear Scaling Comparison",
+            "",
+            "These totals are linear extrapolations from one uncontrolled PF step. "
+            "They are not compiled full QPE circuits with ancilla, controlled-U, "
+            "inverse QFT, measurements, or repeated QPE iterations.",
+            "",
+        ]
+    )
     for molecule, molecule_rows in molecule_groups.items():
         case_groups: dict[Any, list[dict[str, Any]]] = {}
         for row in molecule_rows:
@@ -681,7 +697,7 @@ def _write_markdown_report(rows: list[dict[str, Any]], markdown_path: Path) -> N
             [
                 f"## {molecule} / {pf_label}",
                 "",
-                "### QPE Scale",
+                "### PF-Step Scaling",
                 "",
                 *_markdown_table(
                     [
@@ -702,7 +718,7 @@ def _write_markdown_report(rows: list[dict[str, Any]], markdown_path: Path) -> N
                     ],
                 ),
                 "",
-                "### QPE-Scaled Resources",
+                "### Linearly Scaled Resources",
                 "",
                 *_markdown_table(
                     [

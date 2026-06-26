@@ -1,63 +1,100 @@
 # Evaluation Grouped Surface Code
 
-H-chain grouped Hamiltonian の Trotter 回路を対象に、quration / surface-code compile による資源見積もりを行うためのリポジトリです。
+H-chain grouped Hamiltonian の product-formula 回路を対象に、quration / qret の surface-code compile による資源見積もりを行うためのリポジトリです。
 
-現段階の主目的は、固定した 1 Trotter step 回路に対して architecture 条件を変え、topology-aware な実行時間、chip cell 数、qubit volume、physical qubit 数などを比較できる状態にすることです。
+主目的は、固定した 1 Trotter step 回路に対して architecture 条件を変え、topology-aware な実行時間、chip cell 数、qubit volume、physical qubit 数、code distance などを比較できる状態にすることです。
 
 ## 対象範囲
+
+現在の compile 対象は以下です。
 
 - H-chain grouped Hamiltonian
 - deterministic 2nd PF
 - optimized 4th PF: `4th(new_2)`
-- 1 Trotter step
-- uncontrolled time-evolution 回路
+- uncontrolled な 1 Trotter step 回路
 - quration の `SC_LS_FIXED_V0` compile
 - topology-aware routing
 - QEC resource estimation pass
+- 1 step 結果に基づく QPE-scale の線形外挿
+
+QPE-scale の出力は、PF 誤差係数から action count を見積もり、1 step の runtime / qubit volume / magic-state 数などを線形に掛けたものです。現時点では full QPE 回路を compile しているわけではありません。
 
 現段階では以下は対象外です。
 
 - DF Hamiltonian
-- full QPE 回路の明示的な compile
-- controlled-U を含む QPE step compile
-- QPE 全体への資源外挿
+- QPE ancilla、controlled-U、inverse QFT、測定などを含む full QPE 回路の compile
+- QPE 反復を明示的に展開した回路の compile
+- step 間の factory stock や測定フィードバックを含む QPE 全体の動的評価
+
+将来的には ancilla や controlled-U を含む QPE 回路を扱う可能性があります。ただし、QPE の反復まで回路として展開するか、1 回路ブロックを別途スケールするかは未定です。
+
+## H-chain の物理条件
+
+`grouped_hchain_ham_name()` では、偶数長と奇数長で異なる電子状態を使います。
+
+- 偶数長 H-chain: neutral singlet, `charge_0`
+- 奇数長 H-chain: triplet `1+`, `charge_1`
+
+そのため、H2, H3, H4, ... を横並びにするときは、単純な neutral H-chain の原子数スケーリングではない点に注意してください。
 
 ## 構成
 
 - `src/trotterlib/surface_code.py`
   - grouped H-chain 回路生成
-  - quration 用 pipeline YAML 生成
   - OpenQASM2 export
   - qret parse / opt / compile 実行
+  - RZ helper cache、integral cache、prepared step cache
   - `compile_info.json` からの metrics 抽出
+- `src/trotterlib/architecture_sweep.py`
+  - molecule / PF / architecture 条件の sweep
+  - JSONL / CSV / Markdown 出力
+  - 1 step 結果からの QPE-scale 線形外挿
 - `src/trotterlib/config.py`
   - default target error
   - product formula 設定
-  - quration binary / topology path
+  - vendored qret / topology path
   - surface-code architecture default
-- `src/trotterlib/cost_extrapolation.py`
-  - 互換用の薄い入口
+- `scripts/build_qret.sh`
+  - vendored quration から `build/quration/qret` を生成
+- `third_party/quration`
+  - Evaluation 内で確認・ビルドする quration / qret ソース
 - `artifacts/trotter_expo_coeff_gr*`
   - grouped Hamiltonian の既存 PF 誤差係数 artifact
 
-## quration 依存
+## quration / qret 依存
 
-quration 本体はこのリポジトリには含めません。
-
-デフォルトでは、同じ親ディレクトリにある quration を探します。
+quration / qret のソースは `third_party/quration` に同梱しています。qret binary は生成物なので commit せず、必要に応じて Evaluation リポジトリ内でビルドします。
 
 ```bash
-/home/abe/Project/quration/build/main/qret
-/home/abe/Project/quration/quration-core/examples/data/topology/tutorial.yaml
+./scripts/build_qret.sh
 ```
 
-別の場所を使う場合は `QURATION_ROOT` を指定します。
+デフォルトの qret 実行ファイルは以下です。
+
+```text
+build/quration/qret
+```
+
+デフォルトの topology は vendored quration の tutorial topology です。
+
+```text
+third_party/quration/quration-core/examples/data/topology/tutorial.yaml
+```
+
+別の qret や topology を使う場合は、環境変数または `SurfaceCodeArchitecture` で明示します。
 
 ```bash
-export QURATION_ROOT=/path/to/quration
+export QRET_PATH=/path/to/qret
+export SURFACE_CODE_TOPOLOGY_PATH=/path/to/topology.yaml
 ```
 
-または Python 側で `SurfaceCodeArchitecture` に `qret_path` と `topology_path` を渡します。
+`gridsynth` は変更対象ではないため、このリポジトリには同梱していません。必要なら以下で指定してください。
+
+```bash
+export GRIDSYNTH_PATH=/path/to/gridsynth
+```
+
+未指定の場合は、`externals/bin/gridsynth` や既存のローカル quration checkout 内の `externals/bin/gridsynth` を探索します。
 
 ## セットアップ
 
@@ -66,13 +103,14 @@ cd /home/abe/Project/Evaluation_grouped_surface_code
 python3.11 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+./scripts/build_qret.sh
 ```
 
 既存の作業環境を使う場合は、`PYTHONPATH=src` を付けて実行できます。
 
 ## Smoke Test
 
-H3 grouped Hamiltonian の 1 Trotter step を、topology-aware + QEC resource estimation で compile します。
+H3 grouped Hamiltonian の 1 Trotter step を topology-aware + QEC resource estimation で compile します。
 
 ```bash
 PYTHONPATH=src python - <<'PY'
@@ -99,62 +137,54 @@ for pf in ("2nd", "4th(new_2)"):
 PY
 ```
 
-ローカル環境では、以下を確認済みです。
+## Architecture Sweep
 
-- H3 `2nd`
-  - `chip_cell_count = 96`
-  - `qubit_volume = 424144`
-  - `num_physical_qubits = 23232`
-- H3 `4th(new_2)`
-  - `chip_cell_count = 96`
-  - `qubit_volume = 1847043`
-  - `num_physical_qubits = 32448`
+標準設定は以下です。
 
-## 実行結果
+```bash
+PYTHONPATH=src python -m trotterlib.architecture_sweep \
+  configs/surface_code_architecture_sweep.yaml
+```
 
-quration の中間ファイルと `compile_info.json` は以下に保存されます。
+`configs/surface_code_architecture_sweep.yaml` の default は `ftqc_compile_topology_qec` です。これにより、physical qubits、code distance、failure probability などの QEC 依存指標を標準出力に含めます。
+
+routing / topology の比較だけを軽く行う場合は、local config または個別 case で `compile_mode: ftqc_compile_topology` に変更してください。その場合、QEC 依存指標は `N/A` になります。
+
+結果は以下へ出力されます。
+
+```text
+artifacts/surface_code_architecture_sweep/
+```
+
+Markdown の QPE-scale 表は、full QPE circuit compile ではなく、uncontrolled PF 1 step からの線形外挿です。
+
+## Profiling
+
+prepare / compile の stage 別 elapsed、Python parent RSS、qret subprocess RSS、入出力サイズは、以下のレポートにまとめます。
+
+- [Surface-Code Stage Profiling Report](docs/benchmarks/profiling_report.md)
+
+ローカルで再測定する場合は、以下を使います。生成される `benchmark_results/` は `.gitignore` 対象です。
+
+```bash
+PYTHONPATH=src python scripts/profile_surface_code_stages.py \
+  --case H2:2nd \
+  --case 'H2:4th(new_2)' \
+  --compile-mode ftqc_compile_topology \
+  --cache-condition current-cache-state \
+  --batch-size 2
+```
+
+## Cache と Artifact
+
+qret の中間ファイル、prepared step、integral cache、RZ helper cache、compile 結果は以下に保存されます。
 
 ```text
 artifacts/surface_code_cache/
 ```
 
-このディレクトリは `.gitignore` 対象です。比較や図作成に使う要約結果は、今後 `results/` などに別途保存する想定です。
+このディレクトリは `.gitignore` 対象です。
 
-## Architecture 設定
+prepared step artifact の cache key には、qret hash、積分 cache identity、積分値 hash、RZ helper mode、IR 処理 version、QASM 分解設定に加えて、回路生成 schema version と主要依存パッケージ version を含めています。これにより、Qiskit / OpenFermion などの変更後に古い prepared artifact を誤再利用しにくくしています。
 
-`SurfaceCodeArchitecture` で compile 条件を変更できます。
-
-```python
-from pathlib import Path
-from trotterlib import SurfaceCodeArchitecture
-
-arch = SurfaceCodeArchitecture(
-    compile_mode="ftqc_compile_topology_qec",
-    topology_path=Path("/path/to/topology.yaml"),
-    magic_generation_period=15,
-    maximum_magic_state_stock=10000,
-    entanglement_generation_period=100,
-    maximum_entangled_state_stock=10,
-    reaction_time=1,
-    physical_error_rate=1.0e-3,
-    drop_rate=0.1,
-    code_cycle_time_sec=1.0e-6,
-    allowed_failure_prob=1.0e-2,
-)
-```
-
-主に sweep したい値は以下です。
-
-- topology
-- magic-state factory の数・配置
-- magic-state generation period
-- magic-state stock 上限
-- reaction time
-- entangled-state generation period
-- QEC 条件
-
-## Artifact について
-
-初期移行では、元リポジトリで commit 済みの artifact を一旦そのまま移しています。そのため、解析対象外の DF 関連 artifact も一部含まれています。
-
-コード側では DF Hamiltonian 用の実装は移していません。今後、必要に応じて artifact も grouped / surface-code 用に整理します。
+ただし、回路生成ロジックを変更した場合は、対応する version 定数を更新してください。

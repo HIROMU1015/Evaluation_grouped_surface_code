@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 
 from trotterlib import surface_code as sc
+from trotterlib import profiling
 
 
 def _fixture_ir() -> dict[str, Any]:
@@ -828,6 +829,148 @@ def test_mapping_result_collection_is_opt_in(tmp_path: Path, monkeypatch: Any) -
     assert metrics["mapping_result_unavailable_reason"] == "disabled"
 
 
+def _compile_fixture_artifact(tmp_path: Path, qret_path: Path) -> sc.SurfaceCodeStepArtifact:
+    opt_path = tmp_path / "step_opt.json"
+    opt_path.write_text("{}", encoding="utf-8")
+    return sc.SurfaceCodeStepArtifact(
+        ham_name="H2_sto-3g_singlet_distance_100_charge_0_grouping",
+        molecule="H2",
+        num_logical_qubits=4,
+        pf_label="2nd",
+        target_error=1.0e-4,
+        step_time=1.0,
+        rotation_precision=1.0e-5,
+        runtime_root=tmp_path,
+        qasm_path=tmp_path / "step.qasm",
+        ir_path=tmp_path / "step_ir.json",
+        optimized_ir_path=opt_path,
+        qasm_hash="qasm",
+        optimized_ir_hash="opt",
+        qret_path=qret_path,
+        qret_hash=sc.file_sha256(qret_path),
+        step_rz_count=0,
+        step_rz_layer=None,
+        step_magic_state_count=0,
+        step_magic_state_depth=0,
+        peak_magic_layer=0,
+        instruction_count=0,
+        gate_depth=0,
+        rz_call_cache={},
+    )
+
+
+def _write_fake_compile_qret(path: Path, *, fail: bool = False) -> None:
+    path.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json\n"
+        "import sys\n"
+        "from pathlib import Path\n"
+        f"FAIL = {bool(fail)!r}\n"
+        "pipeline = Path(sys.argv[sys.argv.index('--pipeline') + 1])\n"
+        "values = {}\n"
+        "for raw_line in pipeline.read_text(encoding='utf-8').splitlines():\n"
+        "    if ': ' in raw_line:\n"
+        "        key, value = raw_line.split(': ', 1)\n"
+        "        values[key] = value\n"
+        "if FAIL:\n"
+        "    sys.exit(7)\n"
+        "info = {\n"
+        "    'magic_state_consumption_count': 3,\n"
+        "    'magic_state_consumption_depth': 2,\n"
+        "    'runtime': 11,\n"
+        "    'runtime_without_topology': 7,\n"
+        "    'qubit_volume': 13,\n"
+        "}\n"
+        "Path(values['sc_ls_fixed_v0_dump_compile_info_to_json']).write_text(\n"
+        "    json.dumps(info, ensure_ascii=True, separators=(',', ':')),\n"
+        "    encoding='utf-8',\n"
+        ")\n"
+        "output = values.get('output')\n"
+        "if output and output != '/dev/null':\n"
+        "    Path(output).write_text('{}', encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+
+
+def test_compile_stage_metrics_cache_hit_preserves_cold_metrics(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    qret_path = tmp_path / "fake_qret.py"
+    _write_fake_compile_qret(qret_path)
+    artifact = _compile_fixture_artifact(tmp_path, qret_path)
+    compile_root = tmp_path / "compile"
+    monkeypatch.setattr(sc, "_compile_runtime_root", lambda *_: compile_root)
+    architecture = sc.SurfaceCodeArchitecture(
+        compile_mode="decompose_only",
+        qret_path=qret_path,
+    )
+
+    metrics = sc.compile_prepared_surface_code_step_artifact(
+        artifact,
+        architecture,
+        reuse_cache=False,
+    )
+    assert metrics["compile_cache_hit"] is False
+    cold_path = compile_root / sc._COMPILE_STAGE_METRICS_FILENAME
+    hit_path = compile_root / sc._COMPILE_STAGE_CACHE_HIT_METRICS_FILENAME
+    cold_payload = json.loads(cold_path.read_text(encoding="utf-8"))
+    assert cold_payload["status"] == "ok"
+    assert "qret_compile" in [stage["name"] for stage in cold_payload["stages"]]
+    cold_text = cold_path.read_text(encoding="utf-8")
+
+    cached_metrics = sc.compile_prepared_surface_code_step_artifact(
+        artifact,
+        architecture,
+        reuse_cache=True,
+    )
+
+    assert cached_metrics["compile_cache_hit"] is True
+    assert cold_path.read_text(encoding="utf-8") == cold_text
+    hit_payload = json.loads(hit_path.read_text(encoding="utf-8"))
+    assert hit_payload["status"] == "cache_hit"
+    assert hit_payload["cold_run_stage_metrics_exists"] is True
+    lookup = next(
+        stage
+        for stage in hit_payload["stages"]
+        if stage["name"] == "compile_cache_lookup"
+    )
+    assert lookup["result"]["cache_hit"] is True
+
+
+def test_compile_stage_metrics_records_failure_stage(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    qret_path = tmp_path / "fake_qret_fail.py"
+    _write_fake_compile_qret(qret_path, fail=True)
+    artifact = _compile_fixture_artifact(tmp_path, qret_path)
+    compile_root = tmp_path / "compile_fail"
+    monkeypatch.setattr(sc, "_compile_runtime_root", lambda *_: compile_root)
+    architecture = sc.SurfaceCodeArchitecture(
+        compile_mode="decompose_only",
+        qret_path=qret_path,
+    )
+
+    with pytest.raises(RuntimeError):
+        sc.compile_prepared_surface_code_step_artifact(
+            artifact,
+            architecture,
+            reuse_cache=False,
+        )
+
+    payload = json.loads(
+        (compile_root / sc._COMPILE_STAGE_METRICS_FILENAME).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert payload["status"] == "failed"
+    failed = [stage for stage in payload["stages"] if stage["status"] == "failed"]
+    assert [stage["name"] for stage in failed] == ["qret_compile"]
+    assert payload["failed_stage_recorded"] is True
+
+
 def test_stage_metrics_recorder_writes_valid_json(tmp_path: Path) -> None:
     output_path = tmp_path / "payload.json"
     metrics_path = tmp_path / "prepare_stage_metrics.json"
@@ -856,6 +999,57 @@ def test_stage_metrics_recorder_writes_valid_json(tmp_path: Path) -> None:
     assert payload["stages"][0]["name"] == "write_payload"
     assert payload["stages"][0]["result"]["output_size_bytes"] == 2
     assert payload["file_sizes_bytes"]["payload"] == 2
+
+
+def test_stage_profile_flatten_schema_handles_missing_subprocess_rss() -> None:
+    summary = {
+        "metadata": {
+            "molecule": "H2",
+            "pf_label": "2nd",
+            "rz_helper_batch_size": 2,
+            "compile_mode": "ftqc_compile_topology",
+        },
+        "stages": [
+            {
+                "index": 0,
+                "name": "python_only",
+                "status": "ok",
+                "elapsed_seconds": 0.125,
+                "rss_after": {"self_maxrss_kb": 100, "children_maxrss_kb": 0},
+                "self_maxrss_delta_kb": 4,
+                "details": {"input_size_bytes": 10},
+                "result": {"output_size_bytes": 20, "cache_hit": False},
+            },
+            {
+                "index": 1,
+                "name": "qret_stage",
+                "status": "ok",
+                "elapsed_seconds": 0.25,
+                "rss_after": {"self_maxrss_kb": 110, "children_maxrss_kb": 120},
+                "self_maxrss_delta_kb": 0,
+                "details": {"command": ["qret", "compile"]},
+                "result": {"subprocess_maxrss_kb": 256},
+            },
+        ],
+    }
+
+    rows = profiling.flatten_stage_metrics(
+        summary,
+        commit_sha="commit",
+        case_name="case",
+        phase="prepare",
+        cache_condition="unit",
+        hchain_size=2,
+    )
+
+    assert len(rows) == 2
+    assert set(profiling.STAGE_PROFILE_FIELDS).issuperset(rows[0])
+    assert rows[0]["subprocess_maxrss_kb"] is None
+    assert rows[0]["cache_status"] == "miss"
+    assert rows[1]["qret_invocation_count"] == 1
+    assert profiling.slowest_stage(rows)["stage_name"] == "qret_stage"
+    assert profiling.peak_python_rss_stage(rows)["stage_name"] == "qret_stage"
+    assert profiling.peak_subprocess_rss_stage(rows)["stage_name"] == "qret_stage"
 
 
 def test_ir_rotation_rewrite_normalizes_parse_timestamp(tmp_path: Path) -> None:
@@ -1832,6 +2026,58 @@ def test_step_artifact_cache_key_depends_on_integral_identity() -> None:
 
     same_identity = dict(base)
     assert sc._step_artifact_cache_key(**same_identity) == base_key
+
+
+def test_step_artifact_cache_key_depends_on_generation_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base = {
+        "ham_name": "H4_sto-3g_singlet_distance_100_charge_0_grouping",
+        "pf_label": "4th(new_2)",
+        "target_error": 1.0e-4,
+        "step_time": 1.0,
+        "rotation_precision": 1.0e-5,
+        "qret_hash": "qret",
+        "integral_cache_enabled": True,
+        "integral_cache_schema_version": sc._SURFACE_CODE_INTEGRAL_CACHE_VERSION,
+        "integral_cache_key": "integral-key-a",
+        "integral_value_hash": "value-hash-a",
+    }
+
+    def key_with(
+        *,
+        step_artifact_version: str = sc._SURFACE_CODE_STEP_ARTIFACT_CACHE_VERSION,
+        circuit_generation_version: str = sc._SURFACE_CODE_CIRCUIT_GENERATION_VERSION,
+        dependency_versions: Mapping[str, str] | None = None,
+    ) -> str:
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                sc,
+                "_SURFACE_CODE_STEP_ARTIFACT_CACHE_VERSION",
+                step_artifact_version,
+            )
+            patch.setattr(
+                sc,
+                "_SURFACE_CODE_CIRCUIT_GENERATION_VERSION",
+                circuit_generation_version,
+            )
+            patch.setattr(
+                sc,
+                "_surface_code_step_dependency_versions",
+                lambda: dict(dependency_versions or {"qiskit": "1.0"}),
+            )
+            return sc._step_artifact_cache_key(**base)
+
+    base_key = key_with()
+    assert (
+        key_with(step_artifact_version="surface_code_step_artifact_cache_v_next")
+        != base_key
+    )
+    assert (
+        key_with(circuit_generation_version="grouped_hchain_pf_step_circuit_v_next")
+        != base_key
+    )
+    assert key_with(dependency_versions={"qiskit": "1.1"}) != base_key
 
 
 def test_stale_prepared_artifact_is_not_reused_for_new_integral_value(

@@ -8,6 +8,7 @@ __pycache__/
 .ruff_cache/
 .ipynb_checkpoints/
 /build/quration/
+benchmark_results/
 artifacts/surface_code_cache/
 artifacts/surface_code_experiments/
 artifacts/surface_code_architecture_sweep/
