@@ -119,6 +119,12 @@ def _environment_payload() -> dict[str, Any]:
         "rss_sampling_interval_sec": os.environ.get(
             "SURFACE_CODE_PROFILE_RSS_SAMPLING_INTERVAL_SEC"
         ),
+        "circuit_release_experiment": os.environ.get(
+            "SURFACE_CODE_PROFILE_CIRCUIT_RELEASE_EXPERIMENT"
+        ),
+        "compile_info_extraction_mode": os.environ.get(
+            "SURFACE_CODE_COMPILE_INFO_EXTRACTION_MODE"
+        ),
     }
 
 
@@ -207,6 +213,12 @@ def _write_report(
         "- Parent Python current RSS is read from `/proc/self/status` `VmRSS` when available.",
         "- Parent Python sampled peak RSS is enabled by this benchmark script and "
         "uses a low-frequency sampling thread.",
+        "- `SURFACE_CODE_PROFILE_CIRCUIT_RELEASE_EXPERIMENT=del` or "
+        "`del_plus_gc` adds profiling-only object release stages after OpenQASM "
+        "text generation and after writing QASM.",
+        "- `SURFACE_CODE_COMPILE_INFO_EXTRACTION_MODE=top_level_metric_fields` "
+        "uses the experimental minimal `compile_info.json` metric-field extractor; "
+        "the default is full `json.load()`.",
         "- Mapping, routing, and QEC elapsed are not split unless qret exposes them; "
         "otherwise they are included in `qret_compile`.",
         "",
@@ -440,6 +452,25 @@ def main() -> int:
         help="Disable stage-level current RSS sampling.",
     )
     parser.add_argument(
+        "--circuit-release-experiment",
+        nargs="?",
+        const="del_plus_gc",
+        choices=("del", "del_plus_gc"),
+        help=(
+            "Add profiling-only stages that delete qc/qc_basis and qasm_text. "
+            "Use 'del' or 'del_plus_gc'. With no value, uses del_plus_gc."
+        ),
+    )
+    parser.add_argument(
+        "--compile-info-extraction-mode",
+        choices=("full_json_load", "top_level_metric_fields"),
+        default="full_json_load",
+        help=(
+            "compile_info.json read mode. Default keeps the production baseline "
+            "full json.load() behavior."
+        ),
+    )
+    parser.add_argument(
         "--write-report",
         type=Path,
         default=REPO_ROOT / "docs" / "benchmarks" / "profiling_report.md",
@@ -468,6 +499,13 @@ def main() -> int:
         os.environ["SURFACE_CODE_PROFILE_RSS_SAMPLING_INTERVAL_SEC"] = str(
             float(args.rss_sampling_interval)
         )
+    if args.circuit_release_experiment:
+        os.environ["SURFACE_CODE_PROFILE_CIRCUIT_RELEASE_EXPERIMENT"] = str(
+            args.circuit_release_experiment
+        )
+    os.environ["SURFACE_CODE_COMPILE_INFO_EXTRACTION_MODE"] = str(
+        args.compile_info_extraction_mode
+    )
 
     cases = [_parse_case(item) for item in (args.case or ["H2:2nd"])]
     compile_modes = args.compile_mode or ["ftqc_compile_topology"]

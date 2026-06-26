@@ -829,6 +829,130 @@ def test_mapping_result_collection_is_opt_in(tmp_path: Path, monkeypatch: Any) -
     assert metrics["mapping_result_unavailable_reason"] == "disabled"
 
 
+def test_compile_info_metric_field_extractor_matches_full_load(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    compile_info_path = tmp_path / "compile_info.json"
+    payload = {
+        "metadata": {"large": ["ignored"] * 10},
+        "magic_state_consumption_count": 3,
+        "magic_state_consumption_depth": 2,
+        "runtime": 11,
+        "runtime_without_topology": 7,
+        "qubit_volume": 13,
+        "gate_count": 17,
+        "code_distance": 5,
+        "num_physical_qubits": 19,
+        "execution_time_sec": 2.5,
+    }
+    compile_info_path.write_text(
+        json.dumps(payload, ensure_ascii=True, indent=2),
+        encoding="utf-8",
+    )
+
+    monkeypatch.delenv("SURFACE_CODE_COMPILE_INFO_EXTRACTION_MODE", raising=False)
+    full_payload, full_field_count, full_mode = sc._load_compile_info_metrics_json(
+        compile_info_path
+    )
+    partial_payload, partial_field_count, partial_mode = (
+        sc._load_compile_info_metrics_json(
+            compile_info_path,
+            extraction_mode="top_level_metric_fields",
+        )
+    )
+
+    assert full_mode == "full_json_load"
+    assert full_field_count == len(payload)
+    assert partial_mode == "top_level_metric_fields"
+    assert partial_field_count == len(payload)
+    assert set(partial_payload) == {
+        "magic_state_consumption_count",
+        "magic_state_consumption_depth",
+        "runtime",
+        "runtime_without_topology",
+        "qubit_volume",
+        "gate_count",
+        "code_distance",
+        "num_physical_qubits",
+        "execution_time_sec",
+    }
+    assert sc.normalize_surface_code_step_metrics(
+        full_payload,
+        context=str(compile_info_path),
+    ) == sc.normalize_surface_code_step_metrics(
+        partial_payload,
+        context=str(compile_info_path),
+    )
+
+    monkeypatch.setenv(
+        "SURFACE_CODE_COMPILE_INFO_EXTRACTION_MODE",
+        "top_level_metric_fields",
+    )
+    env_payload, _field_count, env_mode = sc._load_compile_info_metrics_json(
+        compile_info_path
+    )
+    assert env_mode == "top_level_metric_fields"
+    assert sc.normalize_surface_code_step_metrics(
+        env_payload,
+        context=str(compile_info_path),
+    ) == sc.normalize_surface_code_step_metrics(
+        full_payload,
+        context=str(compile_info_path),
+    )
+
+
+def test_compile_info_metric_field_extractor_allows_missing_optional_fields(
+    tmp_path: Path,
+) -> None:
+    compile_info_path = tmp_path / "compile_info.json"
+    payload = {
+        "ignored": [1, 2, 3],
+        "magic_state_consumption_count": 0,
+        "magic_state_consumption_depth": 0,
+        "runtime": 0,
+        "runtime_without_topology": 0,
+        "qubit_volume": 0,
+    }
+    compile_info_path.write_text(
+        json.dumps(payload, ensure_ascii=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+
+    partial_payload, field_count, mode = sc._load_compile_info_metrics_json(
+        compile_info_path,
+        extraction_mode="metric_fields",
+    )
+
+    assert mode == "top_level_metric_fields"
+    assert field_count == len(payload)
+    assert set(partial_payload) == set(sc._SURFACE_CODE_STEP_METRIC_REQUIRED_FIELDS)
+    assert sc.normalize_surface_code_step_metrics(
+        partial_payload,
+        context=str(compile_info_path),
+    ) == {
+        "magic_state_consumption_count": 0,
+        "magic_state_consumption_depth": 0,
+        "runtime": 0,
+        "runtime_without_topology": 0,
+        "qubit_volume": 0,
+    }
+
+
+def test_profile_circuit_release_mode_parser(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SURFACE_CODE_PROFILE_CIRCUIT_RELEASE_EXPERIMENT", raising=False)
+    assert sc._profile_circuit_release_experiment_mode() == "none"
+    monkeypatch.setenv("SURFACE_CODE_PROFILE_CIRCUIT_RELEASE_EXPERIMENT", "del")
+    assert sc._profile_circuit_release_experiment_mode() == "del"
+    monkeypatch.setenv(
+        "SURFACE_CODE_PROFILE_CIRCUIT_RELEASE_EXPERIMENT",
+        "del-plus-gc",
+    )
+    assert sc._profile_circuit_release_experiment_mode() == "del_plus_gc"
+
+
 def _compile_fixture_artifact(tmp_path: Path, qret_path: Path) -> sc.SurfaceCodeStepArtifact:
     opt_path = tmp_path / "step_opt.json"
     opt_path.write_text("{}", encoding="utf-8")
@@ -937,6 +1061,55 @@ def test_compile_stage_metrics_cache_hit_preserves_cold_metrics(
         if stage["name"] == "compile_cache_lookup"
     )
     assert lookup["result"]["cache_hit"] is True
+
+
+def test_compile_cache_hit_supports_metric_field_compile_info_extraction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    qret_path = tmp_path / "fake_qret.py"
+    _write_fake_compile_qret(qret_path)
+    artifact = _compile_fixture_artifact(tmp_path, qret_path)
+    compile_root = tmp_path / "compile"
+    monkeypatch.setattr(sc, "_compile_runtime_root", lambda *_: compile_root)
+    architecture = sc.SurfaceCodeArchitecture(
+        compile_mode="decompose_only",
+        qret_path=qret_path,
+    )
+
+    cold_metrics = sc.compile_prepared_surface_code_step_artifact(
+        artifact,
+        architecture,
+        reuse_cache=False,
+    )
+    monkeypatch.setenv(
+        "SURFACE_CODE_COMPILE_INFO_EXTRACTION_MODE",
+        "top_level_metric_fields",
+    )
+    cached_metrics = sc.compile_prepared_surface_code_step_artifact(
+        artifact,
+        architecture,
+        reuse_cache=True,
+    )
+
+    for key in (
+        "magic_state_consumption_count",
+        "magic_state_consumption_depth",
+        "runtime",
+        "runtime_without_topology",
+        "qubit_volume",
+    ):
+        assert cached_metrics[key] == cold_metrics[key]
+    assert cached_metrics["compile_cache_hit"] is True
+    hit_payload = json.loads(
+        (compile_root / sc._COMPILE_STAGE_CACHE_HIT_METRICS_FILENAME).read_text(
+            encoding="utf-8"
+        )
+    )
+    read_stage = next(
+        stage for stage in hit_payload["stages"] if stage["name"] == "read_compile_info_json"
+    )
+    assert read_stage["result"]["extraction_mode"] == "top_level_metric_fields"
 
 
 def test_compile_stage_metrics_records_failure_stage(

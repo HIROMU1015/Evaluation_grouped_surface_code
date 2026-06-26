@@ -4,6 +4,7 @@ import contextlib
 import hashlib
 import json
 import math
+import mmap
 import os
 import re
 import resource
@@ -327,6 +328,33 @@ _SURFACE_CODE_STEP_DEPENDENCY_PACKAGES = (
 _GNU_TIME_MAXRSS_RE = re.compile(
     r"Maximum resident set size \(kbytes\):\s*(?P<rss>\d+)"
 )
+_SURFACE_CODE_STEP_METRIC_REQUIRED_FIELDS = (
+    "magic_state_consumption_count",
+    "magic_state_consumption_depth",
+    "runtime",
+    "runtime_without_topology",
+    "qubit_volume",
+)
+_SURFACE_CODE_STEP_METRIC_OPTIONAL_FIELDS = (
+    "gate_count",
+    "gate_depth",
+    "measurement_feedback_count",
+    "measurement_feedback_depth",
+    "magic_factory_count",
+    "chip_cell_count",
+    "code_distance",
+    "num_physical_qubits",
+    "t_count",
+    "t_depth",
+)
+_SURFACE_CODE_STEP_METRIC_PASSTHROUGH_FIELDS = ("execution_time_sec",)
+_SURFACE_CODE_COMPILE_INFO_METRIC_FIELDS = frozenset(
+    [
+        *_SURFACE_CODE_STEP_METRIC_REQUIRED_FIELDS,
+        *_SURFACE_CODE_STEP_METRIC_OPTIONAL_FIELDS,
+        *_SURFACE_CODE_STEP_METRIC_PASSTHROUGH_FIELDS,
+    ]
+)
 
 
 def _resource_rss_snapshot() -> dict[str, int]:
@@ -353,9 +381,56 @@ def _current_rss_kb() -> int | None:
     return None
 
 
-def _rss_sampling_enabled() -> bool:
-    value = os.environ.get("SURFACE_CODE_PROFILE_RSS_SAMPLING", "")
+def _env_flag(name: str) -> bool:
+    value = os.environ.get(str(name), "")
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _rss_sampling_enabled() -> bool:
+    return _env_flag("SURFACE_CODE_PROFILE_RSS_SAMPLING")
+
+
+def _profile_circuit_release_experiment_enabled() -> bool:
+    return _profile_circuit_release_experiment_mode() != "none"
+
+
+def _profile_circuit_release_experiment_mode() -> str:
+    raw = os.environ.get("SURFACE_CODE_PROFILE_CIRCUIT_RELEASE_EXPERIMENT", "")
+    value = raw.strip().lower().replace("-", "_")
+    if value in {"", "0", "false", "no", "off", "none"}:
+        return "none"
+    if value in {"1", "true", "yes", "on", "del_plus_gc", "gc"}:
+        return "del_plus_gc"
+    if value in {"del", "delete"}:
+        return "del"
+    raise ValueError(
+        "SURFACE_CODE_PROFILE_CIRCUIT_RELEASE_EXPERIMENT must be one of "
+        "none, del, or del_plus_gc"
+    )
+
+
+def _compile_info_extraction_mode() -> str:
+    raw = os.environ.get("SURFACE_CODE_COMPILE_INFO_EXTRACTION_MODE")
+    if raw is None:
+        # Backward-compatible escape hatch from an earlier local prototype.
+        if _env_flag("SURFACE_CODE_COMPILE_INFO_FULL_JSON_LOAD"):
+            return "full_json_load"
+        return "full_json_load"
+    value = raw.strip().lower().replace("-", "_")
+    if value in {"", "full", "full_json", "full_json_load", "json_load"}:
+        return "full_json_load"
+    if value in {
+        "metric_fields",
+        "metrics",
+        "top_level_metric_fields",
+        "partial",
+        "mmap_metric_fields",
+    }:
+        return "top_level_metric_fields"
+    raise ValueError(
+        "SURFACE_CODE_COMPILE_INFO_EXTRACTION_MODE must be full_json_load "
+        "or top_level_metric_fields"
+    )
 
 
 def _rss_sampling_interval_seconds() -> float:
@@ -431,6 +506,215 @@ def _existing_file_sizes(paths: Mapping[str, str | Path | None]) -> dict[str, in
         if size is not None:
             sizes[str(key)] = size
     return sizes
+
+
+_JSON_WHITESPACE_BYTES = frozenset(b" \t\r\n")
+_JSON_SCALAR_DELIMITER_BYTES = frozenset(b",}] \t\r\n")
+_JSON_QUOTE = ord('"')
+_JSON_BACKSLASH = ord("\\")
+_JSON_OBJECT_OPEN = ord("{")
+_JSON_OBJECT_CLOSE = ord("}")
+_JSON_ARRAY_OPEN = ord("[")
+_JSON_ARRAY_CLOSE = ord("]")
+_JSON_COLON = ord(":")
+_JSON_COMMA = ord(",")
+
+
+def _json_scan_error(path: Path, index: int, message: str) -> ValueError:
+    return ValueError(f"Invalid JSON while scanning {path}: {message} at byte {index}")
+
+
+def _skip_json_whitespace(data: mmap.mmap, index: int) -> int:
+    size = len(data)
+    while index < size and data[index] in _JSON_WHITESPACE_BYTES:
+        index += 1
+    return index
+
+
+def _find_json_string_end(data: mmap.mmap, index: int, *, path: Path) -> int:
+    if index >= len(data) or data[index] != _JSON_QUOTE:
+        raise _json_scan_error(path, index, "expected string")
+    escaped = False
+    cursor = index + 1
+    while cursor < len(data):
+        char = data[cursor]
+        if escaped:
+            escaped = False
+        elif char == _JSON_BACKSLASH:
+            escaped = True
+        elif char == _JSON_QUOTE:
+            return cursor + 1
+        cursor += 1
+    raise _json_scan_error(path, index, "unterminated string")
+
+
+def _decode_json_string_at(
+    data: mmap.mmap,
+    index: int,
+    *,
+    path: Path,
+) -> tuple[str, int]:
+    end = _find_json_string_end(data, index, path=path)
+    try:
+        return json.loads(bytes(data[index:end]).decode("utf-8")), end
+    except json.JSONDecodeError as exc:
+        raise _json_scan_error(path, index, str(exc)) from exc
+
+
+def _skip_json_container(data: mmap.mmap, index: int, *, path: Path) -> int:
+    if index >= len(data):
+        raise _json_scan_error(path, index, "expected container")
+    opening = data[index]
+    if opening == _JSON_OBJECT_OPEN:
+        stack = [_JSON_OBJECT_CLOSE]
+    elif opening == _JSON_ARRAY_OPEN:
+        stack = [_JSON_ARRAY_CLOSE]
+    else:
+        raise _json_scan_error(path, index, "expected container")
+
+    cursor = index + 1
+    while cursor < len(data):
+        char = data[cursor]
+        if char == _JSON_QUOTE:
+            cursor = _find_json_string_end(data, cursor, path=path)
+            continue
+        if char == _JSON_OBJECT_OPEN:
+            stack.append(_JSON_OBJECT_CLOSE)
+        elif char == _JSON_ARRAY_OPEN:
+            stack.append(_JSON_ARRAY_CLOSE)
+        elif char in (_JSON_OBJECT_CLOSE, _JSON_ARRAY_CLOSE):
+            if not stack or char != stack[-1]:
+                raise _json_scan_error(path, cursor, "mismatched container close")
+            stack.pop()
+            cursor += 1
+            if not stack:
+                return cursor
+            continue
+        cursor += 1
+    raise _json_scan_error(path, index, "unterminated container")
+
+
+def _find_json_scalar_end(data: mmap.mmap, index: int, *, path: Path) -> int:
+    cursor = index
+    while cursor < len(data) and data[cursor] not in _JSON_SCALAR_DELIMITER_BYTES:
+        cursor += 1
+    if cursor == index:
+        raise _json_scan_error(path, index, "expected scalar value")
+    return cursor
+
+
+def _skip_json_value(data: mmap.mmap, index: int, *, path: Path) -> int:
+    index = _skip_json_whitespace(data, index)
+    if index >= len(data):
+        raise _json_scan_error(path, index, "expected value")
+    char = data[index]
+    if char == _JSON_QUOTE:
+        return _find_json_string_end(data, index, path=path)
+    if char in (_JSON_OBJECT_OPEN, _JSON_ARRAY_OPEN):
+        return _skip_json_container(data, index, path=path)
+    return _find_json_scalar_end(data, index, path=path)
+
+
+def _decode_json_scalar_value_at(
+    data: mmap.mmap,
+    index: int,
+    *,
+    path: Path,
+) -> tuple[Any, int]:
+    index = _skip_json_whitespace(data, index)
+    if index >= len(data):
+        raise _json_scan_error(path, index, "expected scalar value")
+    char = data[index]
+    if char in (_JSON_OBJECT_OPEN, _JSON_ARRAY_OPEN):
+        raise _json_scan_error(path, index, "expected scalar value")
+    end = _skip_json_value(data, index, path=path)
+    try:
+        return json.loads(bytes(data[index:end]).decode("utf-8")), end
+    except json.JSONDecodeError as exc:
+        raise _json_scan_error(path, index, str(exc)) from exc
+
+
+def _load_compile_info_metric_fields_from_json(
+    compile_info_path: str | Path,
+    *,
+    field_names: set[str] | frozenset[str] = _SURFACE_CODE_COMPILE_INFO_METRIC_FIELDS,
+) -> tuple[dict[str, Any], int]:
+    path = Path(compile_info_path).expanduser().resolve()
+    if path.stat().st_size <= 0:
+        raise ValueError(f"compile_info JSON is empty: {path}")
+
+    metrics: dict[str, Any] = {}
+    field_count = 0
+    with path.open("rb") as f:
+        with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as data:
+            cursor = _skip_json_whitespace(data, 0)
+            if cursor >= len(data) or data[cursor] != _JSON_OBJECT_OPEN:
+                raise _json_scan_error(path, cursor, "expected top-level object")
+            cursor += 1
+            cursor = _skip_json_whitespace(data, cursor)
+            if cursor < len(data) and data[cursor] == _JSON_OBJECT_CLOSE:
+                cursor += 1
+            else:
+                while True:
+                    key, cursor = _decode_json_string_at(data, cursor, path=path)
+                    field_count += 1
+                    cursor = _skip_json_whitespace(data, cursor)
+                    if cursor >= len(data) or data[cursor] != _JSON_COLON:
+                        raise _json_scan_error(path, cursor, "expected ':'")
+                    cursor += 1
+                    if key in field_names:
+                        metrics[key], cursor = _decode_json_scalar_value_at(
+                            data,
+                            cursor,
+                            path=path,
+                        )
+                    else:
+                        cursor = _skip_json_value(data, cursor, path=path)
+                    cursor = _skip_json_whitespace(data, cursor)
+                    if cursor >= len(data):
+                        raise _json_scan_error(path, cursor, "expected ',' or '}'")
+                    if data[cursor] == _JSON_COMMA:
+                        cursor += 1
+                        cursor = _skip_json_whitespace(data, cursor)
+                        continue
+                    if data[cursor] == _JSON_OBJECT_CLOSE:
+                        cursor += 1
+                        break
+                    raise _json_scan_error(path, cursor, "expected ',' or '}'")
+            cursor = _skip_json_whitespace(data, cursor)
+            if cursor != len(data):
+                raise _json_scan_error(path, cursor, "unexpected trailing content")
+    return metrics, field_count
+
+
+def _load_compile_info_metrics_json(
+    compile_info_path: str | Path,
+    *,
+    extraction_mode: str | None = None,
+) -> tuple[Mapping[str, Any], int, str]:
+    path = Path(compile_info_path).expanduser().resolve()
+    mode = (
+        _compile_info_extraction_mode()
+        if extraction_mode is None
+        else str(extraction_mode).strip().lower().replace("-", "_")
+    )
+    if mode in {"full", "full_json", "json_load"}:
+        mode = "full_json_load"
+    elif mode in {"metric_fields", "metrics", "partial", "mmap_metric_fields"}:
+        mode = "top_level_metric_fields"
+
+    if mode == "full_json_load":
+        with path.open("r", encoding="utf-8") as f:
+            compile_info = json.load(f)
+        if not isinstance(compile_info, Mapping):
+            raise ValueError(f"compile_info JSON root is not an object: {path}")
+        return compile_info, len(compile_info), "full_json_load"
+
+    if mode == "top_level_metric_fields":
+        metrics, field_count = _load_compile_info_metric_fields_from_json(path)
+        return metrics, field_count, "top_level_metric_fields"
+
+    raise ValueError(f"Unknown compile_info extraction mode: {extraction_mode!r}")
 
 
 def _parse_gnu_time_maxrss_kb(stderr_text: str) -> int | None:
@@ -4414,6 +4698,43 @@ def prepare_grouped_surface_code_step_artifact(
                 rz_count=int(rz_count),
             )
 
+        circuit_release_mode = _profile_circuit_release_experiment_mode()
+        if circuit_release_mode != "none":
+            with stage_recorder.stage(
+                "release_circuit_objects_experiment",
+                mode=circuit_release_mode,
+                object_names=["qc", "qc_basis"],
+            ) as span:
+                before_release = _current_rss_kb()
+                gc_collected: int | None = None
+                after_gc: int | None = None
+
+                del qc_basis
+                del qc
+                after_del = _current_rss_kb()
+                if circuit_release_mode == "del_plus_gc":
+                    import gc
+
+                    gc_collected = int(gc.collect())
+                    after_gc = _current_rss_kb()
+                span.add_result(
+                    object_label="qc,qc_basis",
+                    current_rss_before_release_kb=before_release,
+                    current_rss_after_del_kb=after_del,
+                    current_rss_after_gc_kb=after_gc,
+                    rss_drop_after_del_kb=(
+                        None
+                        if before_release is None or after_del is None
+                        else int(before_release) - int(after_del)
+                    ),
+                    rss_drop_after_gc_kb=(
+                        None
+                        if before_release is None or after_gc is None
+                        else int(before_release) - int(after_gc)
+                    ),
+                    gc_collected_count=gc_collected,
+                )
+
         rz_metadata: dict[str, Any] | None = None
         with stage_recorder.stage(
             "rz_helper_rewrite",
@@ -4437,6 +4758,40 @@ def prepare_grouped_surface_code_step_artifact(
         with stage_recorder.stage("write_qasm", output_path=str(qasm_path)) as span:
             qasm_path.write_text(qasm_text, encoding="utf-8")
             span.add_result(output_size_bytes=_file_size_bytes(qasm_path))
+
+        if circuit_release_mode != "none":
+            with stage_recorder.stage(
+                "release_qasm_text_experiment",
+                mode=circuit_release_mode,
+                object_names=["qasm_text"],
+            ) as span:
+                before_release = _current_rss_kb()
+                gc_collected = None
+                after_gc = None
+                del qasm_text
+                after_del = _current_rss_kb()
+                if circuit_release_mode == "del_plus_gc":
+                    import gc
+
+                    gc_collected = int(gc.collect())
+                    after_gc = _current_rss_kb()
+                span.add_result(
+                    object_label="qasm_text",
+                    current_rss_before_release_kb=before_release,
+                    current_rss_after_del_kb=after_del,
+                    current_rss_after_gc_kb=after_gc,
+                    rss_drop_after_del_kb=(
+                        None
+                        if before_release is None or after_del is None
+                        else int(before_release) - int(after_del)
+                    ),
+                    rss_drop_after_gc_kb=(
+                        None
+                        if before_release is None or after_gc is None
+                        else int(before_release) - int(after_gc)
+                    ),
+                    gc_collected_count=gc_collected,
+                )
 
         _run_qret(
             [
@@ -4970,14 +5325,22 @@ def compile_prepared_surface_code_step_artifact(
             "read_compile_info_json",
             input_path=str(compile_info_path),
         ) as span:
-            with compile_info_path.open("r", encoding="utf-8") as f:
-                compile_info = json.load(f)
-            compile_info_field_count = (
-                len(compile_info) if isinstance(compile_info, Mapping) else None
-            )
+            (
+                compile_info,
+                compile_info_field_count,
+                compile_info_extraction_mode,
+            ) = _load_compile_info_metrics_json(compile_info_path)
+            missing_required_fields = [
+                field
+                for field in _SURFACE_CODE_STEP_METRIC_REQUIRED_FIELDS
+                if field not in compile_info
+            ]
             span.add_result(
                 input_size_bytes=_file_size_bytes(compile_info_path),
                 field_count=compile_info_field_count,
+                extracted_field_count=len(compile_info),
+                missing_required_fields=missing_required_fields,
+                extraction_mode=compile_info_extraction_mode,
             )
         with stage_recorder.stage("normalize_compile_info") as span:
             metrics = normalize_surface_code_step_metrics(
@@ -4985,6 +5348,9 @@ def compile_prepared_surface_code_step_artifact(
                 context=str(compile_info_path.resolve()),
             )
             metrics["compile_info_json"] = str(compile_info_path.resolve())
+            release_before = _current_rss_kb()
+            del compile_info
+            release_after = _current_rss_kb()
             span.add_result(
                 normalized_field_count=len(metrics),
                 magic_state_consumption_count=metrics.get(
@@ -4992,6 +5358,14 @@ def compile_prepared_surface_code_step_artifact(
                 ),
                 runtime=metrics.get("runtime"),
                 runtime_without_topology=metrics.get("runtime_without_topology"),
+                compile_info_payload_released=True,
+                current_rss_before_release_kb=release_before,
+                current_rss_after_del_kb=release_after,
+                rss_drop_after_del_kb=(
+                    None
+                    if release_before is None or release_after is None
+                    else int(release_before) - int(release_after)
+                ),
             )
 
         cache_key = surface_code_compile_cache_key(artifact, architecture)
@@ -5107,33 +5481,14 @@ def normalize_surface_code_step_metrics(
     *,
     context: str = "surface_code_step",
 ) -> Dict[str, Any]:
-    required = (
-        "magic_state_consumption_count",
-        "magic_state_consumption_depth",
-        "runtime",
-        "runtime_without_topology",
-        "qubit_volume",
-    )
-    optional = (
-        "gate_count",
-        "gate_depth",
-        "measurement_feedback_count",
-        "measurement_feedback_depth",
-        "magic_factory_count",
-        "chip_cell_count",
-        "code_distance",
-        "num_physical_qubits",
-        "t_count",
-        "t_depth",
-    )
     out: Dict[str, Any] = {}
-    for field_name in required:
+    for field_name in _SURFACE_CODE_STEP_METRIC_REQUIRED_FIELDS:
         out[field_name] = _artifact_nonnegative_int(
             metrics.get(field_name),
             field=field_name,
             context=context,
         )
-    for field_name in optional:
+    for field_name in _SURFACE_CODE_STEP_METRIC_OPTIONAL_FIELDS:
         if field_name in metrics:
             out[field_name] = _artifact_nonnegative_int(
                 metrics.get(field_name),
@@ -5172,8 +5527,7 @@ def surface_code_step_metrics_from_compile_info_json(
     compile_info_path: str | Path,
 ) -> Dict[str, Any]:
     path = Path(compile_info_path).expanduser().resolve()
-    with path.open("r", encoding="utf-8") as f:
-        compile_info = json.load(f)
+    compile_info, _field_count, _extraction_mode = _load_compile_info_metrics_json(path)
     metrics = normalize_surface_code_step_metrics(compile_info, context=str(path))
     metrics["compile_info_json"] = str(path)
     return metrics
