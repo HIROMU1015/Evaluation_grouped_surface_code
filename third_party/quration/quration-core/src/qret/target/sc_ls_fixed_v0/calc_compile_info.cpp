@@ -85,7 +85,7 @@ static Opt<std::string> CompileInfoOutputModeOption(
 SummaryTimeSeriesImplementation ParseSummaryTimeSeriesImplementation() {
     const auto* raw = std::getenv("QRET_SUMMARY_TIME_SERIES_IMPL");
     if (raw == nullptr || std::string(raw).empty()) {
-        return SummaryTimeSeriesImplementation::Aggregate;
+        return SummaryTimeSeriesImplementation::LegacyTimeSeries;
     }
     return SummaryTimeSeriesImplementationFromString(raw);
 }
@@ -99,7 +99,7 @@ qret::Json CompileInfoModeStats(
     extra["summary_time_series_impl"] = std::string(ToString(summary_impl));
     extra["summary_aggregate_enabled"] =
             output_mode == CompileInfoOutputMode::Summary
-            && summary_impl == SummaryTimeSeriesImplementation::Aggregate;
+            && summary_impl != SummaryTimeSeriesImplementation::Vector;
     return extra;
 }
 
@@ -410,14 +410,111 @@ qret::Json InstQueueStats(const InstQueue& queue) {
     return extra;
 }
 
-qret::Json TimeSeriesStats(const TimeSeries& time_series) {
+Beat EffectiveTimeSeriesLatency(const ScLsInstructionBase& inst) {
+    return inst.Latency() == 0 ? 1 : inst.Latency();
+}
+
+std::uint64_t CalculateTimeSeriesRuntime(const MachineFunction& mf) {
+    auto raw_runtime = std::uint64_t{0};
+    for (const auto& bb : mf) {
+        for (const auto& minst : bb) {
+            const auto& inst = *static_cast<const ScLsInstructionBase*>(minst.get());
+            raw_runtime = std::max(raw_runtime, inst.Metadata().beat + inst.Latency());
+        }
+    }
+    return raw_runtime + 1;
+}
+
+void InitializeChipInfoSpace(
+        TimeSeries::ChipInfo& chip_info,
+        const ScLsFixedV0TargetMachine& target
+) {
+    auto space = std::int32_t{0};
+    for (const auto& grid : *target.topology) {
+        space += grid.GetMaxX() * grid.GetMaxY() * grid.GetZSize();
+        for (const auto& plane : grid) {
+            space -= plane.NumBanned();
+        }
+    }
+    chip_info.space = static_cast<std::uint32_t>(space);
+}
+
+void ApplyInstructionToChipInfo(
+        TimeSeries::ChipInfo& chip_info,
+        const ScLsInstructionBase& inst
+) {
+    if (inst.Type() == ScLsInstructionType::ALLOCATE) {
+        chip_info.q_symb++;
+    } else if (inst.Type() == ScLsInstructionType::ALLOCATE_MAGIC_FACTORY) {
+        chip_info.m_symb++;
+    } else if (inst.Type() == ScLsInstructionType::ALLOCATE_ENTANGLEMENT_FACTORY) {
+        chip_info.e_symb += 2;
+    } else if (inst.Type() == ScLsInstructionType::DEALLOCATE) {
+        chip_info.q_symb--;
+    }
+    chip_info.used_ancilla_count += inst.CountAncillae();
+}
+
+std::vector<const ScLsInstructionBase*> CollectInstructionPointers(const MachineFunction& mf) {
+    auto instructions = std::vector<const ScLsInstructionBase*>();
+    instructions.reserve(CountMachineInstructions(mf));
+    for (const auto& bb : mf) {
+        for (const auto& minst : bb) {
+            instructions.emplace_back(static_cast<const ScLsInstructionBase*>(minst.get()));
+        }
+    }
+    return instructions;
+}
+
+template <typename Series>
+void AddInstructionSequenceStats(
+        qret::Json& extra,
+        const Series& time_series,
+        std::size_t machine_instruction_count
+) {
+    auto non_empty_beats = std::size_t{0};
+    auto max_active = std::size_t{0};
+    for (auto beat = std::uint64_t{0}; beat < time_series.GetRuntime(); ++beat) {
+        const auto active = time_series.GetInstructions(beat).size();
+        if (active != 0) {
+            ++non_empty_beats;
+        }
+        max_active = std::max(max_active, active);
+    }
+    const auto pointer_count = time_series.InstructionPointerCount();
+    extra["beat2inst_non_empty_beat_count"] = non_empty_beats;
+    extra["beat2inst_empty_beat_count"] = time_series.GetRuntime() - non_empty_beats;
+    extra["beat2inst_max_active_instructions_per_beat"] = max_active;
+    extra["beat2inst_average_active_instructions_per_beat"] =
+            time_series.GetRuntime() == 0
+                    ? 0.0
+                    : static_cast<double>(pointer_count)
+                              / static_cast<double>(time_series.GetRuntime());
+    extra["beat2inst_sum_effective_instruction_latencies"] = pointer_count;
+    extra["beat2inst_pointer_duplication_ratio"] =
+            machine_instruction_count == 0
+                    ? 0.0
+                    : static_cast<double>(pointer_count)
+                              / static_cast<double>(machine_instruction_count);
+}
+
+qret::Json TimeSeriesStats(
+        const TimeSeries& time_series,
+        std::size_t machine_instruction_count = 0
+) {
     auto extra = qret::Json::object();
+    extra["time_series_storage_impl"] = "legacy_timeseries";
     extra["time_series_runtime"] = time_series.GetRuntime();
     extra["beat2inst_bucket_count"] = time_series.InstructionBucketCount();
     extra["beat2inst_bucket_capacity"] = time_series.InstructionBucketCapacity();
+    extra["beat2inst_outer_size"] = time_series.InstructionBucketCount();
+    extra["beat2inst_outer_capacity"] = time_series.InstructionBucketCapacity();
+    extra["beat2inst_inner_vector_sizeof"] = sizeof(std::vector<const ScLsInstructionBase*>);
     extra["beat2inst_bucket_object_bytes"] =
             time_series.InstructionBucketCapacity()
             * sizeof(std::vector<const ScLsInstructionBase*>);
+    extra["beat2inst_outer_control_block_capacity_bytes"] =
+            extra["beat2inst_bucket_object_bytes"];
     extra["beat2inst_pointer_count"] = time_series.InstructionPointerCount();
     extra["beat2inst_pointer_capacity"] = time_series.InstructionPointerCapacity();
     extra["beat2inst_pointer_payload_bytes"] =
@@ -426,9 +523,57 @@ qret::Json TimeSeriesStats(const TimeSeries& time_series) {
             time_series.InstructionPointerCapacity() * sizeof(const ScLsInstructionBase*);
     extra["beat2chip_count"] = time_series.ChipInfoCount();
     extra["beat2chip_capacity"] = time_series.ChipInfoCapacity();
+    extra["beat2chip_size"] = time_series.ChipInfoCount();
+    extra["beat2chip_sizeof_element_bytes"] = sizeof(TimeSeries::ChipInfo);
     extra["beat2chip_payload_bytes"] = time_series.ChipInfoCount() * sizeof(TimeSeries::ChipInfo);
     extra["beat2chip_capacity_bytes"] =
             time_series.ChipInfoCapacity() * sizeof(TimeSeries::ChipInfo);
+    extra["time_series_estimated_capacity_bytes"] =
+            extra["beat2inst_outer_control_block_capacity_bytes"].get<std::size_t>()
+            + extra["beat2inst_pointer_capacity_bytes"].get<std::size_t>()
+            + extra["beat2chip_capacity_bytes"].get<std::size_t>();
+    AddInstructionSequenceStats(extra, time_series, machine_instruction_count);
+    return extra;
+}
+
+qret::Json TimeSeriesStats(
+        const CompactTimeSeries& time_series,
+        std::size_t machine_instruction_count = 0
+) {
+    auto extra = qret::Json::object();
+    extra["time_series_storage_impl"] = "compact_timeseries";
+    extra["time_series_runtime"] = time_series.GetRuntime();
+    extra["beat2inst_bucket_count"] = time_series.InstructionBucketCount();
+    extra["beat2inst_bucket_capacity"] = time_series.InstructionBucketCapacity();
+    extra["beat2inst_outer_size"] = time_series.InstructionBucketCount();
+    extra["beat2inst_outer_capacity"] = time_series.InstructionBucketCapacity();
+    extra["beat2inst_inner_vector_sizeof"] = sizeof(std::vector<const ScLsInstructionBase*>);
+    extra["beat2inst_bucket_object_bytes"] = 0;
+    extra["beat2inst_outer_control_block_capacity_bytes"] = 0;
+    extra["beat2inst_offset_count"] = time_series.OffsetCount();
+    extra["beat2inst_offset_capacity"] = time_series.OffsetCapacity();
+    extra["beat2inst_offset_payload_bytes"] =
+            time_series.OffsetCount() * sizeof(std::size_t);
+    extra["beat2inst_offset_capacity_bytes"] =
+            time_series.OffsetCapacity() * sizeof(std::size_t);
+    extra["beat2inst_pointer_count"] = time_series.InstructionPointerCount();
+    extra["beat2inst_pointer_capacity"] = time_series.InstructionPointerCapacity();
+    extra["beat2inst_pointer_payload_bytes"] =
+            time_series.InstructionPointerCount() * sizeof(const ScLsInstructionBase*);
+    extra["beat2inst_pointer_capacity_bytes"] =
+            time_series.InstructionPointerCapacity() * sizeof(const ScLsInstructionBase*);
+    extra["beat2chip_count"] = time_series.ChipInfoCount();
+    extra["beat2chip_capacity"] = time_series.ChipInfoCapacity();
+    extra["beat2chip_size"] = time_series.ChipInfoCount();
+    extra["beat2chip_sizeof_element_bytes"] = sizeof(TimeSeries::ChipInfo);
+    extra["beat2chip_payload_bytes"] = time_series.ChipInfoCount() * sizeof(TimeSeries::ChipInfo);
+    extra["beat2chip_capacity_bytes"] =
+            time_series.ChipInfoCapacity() * sizeof(TimeSeries::ChipInfo);
+    extra["time_series_estimated_capacity_bytes"] =
+            extra["beat2inst_offset_capacity_bytes"].get<std::size_t>()
+            + extra["beat2inst_pointer_capacity_bytes"].get<std::size_t>()
+            + extra["beat2chip_capacity_bytes"].get<std::size_t>();
+    AddInstructionSequenceStats(extra, time_series, machine_instruction_count);
     return extra;
 }
 
@@ -1360,21 +1505,24 @@ Beat CalcRuntimeWithoutTopology(MachineFunction& mf) {
 
 TimeSeries::TimeSeries(const MachineFunction& mf) {
     const auto& target = *static_cast<const ScLsFixedV0TargetMachine*>(mf.GetTarget());
-
-    const auto runtime = [&mf]() {
-        auto runtime = std::uint64_t{0};
-        for (const auto& bb : mf) {
-            for (const auto& minst : bb) {
-                const auto& inst = *static_cast<const ScLsInstructionBase*>(minst.get());
-                runtime = std::max(runtime, inst.Metadata().beat + inst.Latency());
-            }
-        }
-        return runtime;
-    }();
+    const auto machine_instruction_count = CountMachineInstructions(mf);
+    const auto runtime = CalculateTimeSeriesRuntime(mf);
 
     // Initialize beat2chip_ and beat2inst_
-    beat2inst_.resize(runtime + 1);
-    beat2chip_.resize(runtime + 1);
+    beat2inst_.resize(runtime);
+    MarkCompileInfoStage(
+            "calc_info_with_topology_after_beat2inst_resize",
+            mf,
+            nullptr,
+            TimeSeriesStats(*this, machine_instruction_count)
+    );
+    beat2chip_.resize(runtime);
+    MarkCompileInfoStage(
+            "calc_info_with_topology_after_beat2chip_resize",
+            mf,
+            nullptr,
+            TimeSeriesStats(*this, machine_instruction_count)
+    );
 
     // Set beat2inst_
     for (const auto& bb : mf) {
@@ -1382,12 +1530,18 @@ TimeSeries::TimeSeries(const MachineFunction& mf) {
             const auto& inst = *static_cast<const ScLsInstructionBase*>(minst.get());
             const auto& metadata = inst.Metadata();
 
-            const auto latency = inst.Latency() == 0 ? 1 : inst.Latency();
+            const auto latency = EffectiveTimeSeriesLatency(inst);
             for (auto beat = metadata.beat; beat < metadata.beat + latency; ++beat) {
                 beat2inst_[beat].emplace_back(&inst);
             }
         }
     }
+    MarkCompileInfoStage(
+            "calc_info_with_topology_after_beat2inst_fill",
+            mf,
+            nullptr,
+            TimeSeriesStats(*this, machine_instruction_count)
+    );
 
     // Calculate beat2chip_
     for (auto beat = Beat{0}; beat < beat2inst_.size(); ++beat) {
@@ -1395,32 +1549,22 @@ TimeSeries::TimeSeries(const MachineFunction& mf) {
 
         auto& chip_info = beat2chip_[beat];
         if (beat == 0) {
-            auto space = std::int32_t{0};
-            for (const auto& grid : *target.topology) {
-                space += grid.GetMaxX() * grid.GetMaxY() * grid.GetZSize();
-                for (const auto& plane : grid) {
-                    space -= plane.NumBanned();
-                }
-            }
-            chip_info.space = static_cast<std::uint32_t>(space);
+            InitializeChipInfoSpace(chip_info, target);
         } else {
             chip_info = beat2chip_[beat - 1];
             chip_info.used_ancilla_count = 0;
         }
 
         for (const auto& inst : insts) {
-            if (inst->Type() == ScLsInstructionType::ALLOCATE) {
-                chip_info.q_symb++;
-            } else if (inst->Type() == ScLsInstructionType::ALLOCATE_MAGIC_FACTORY) {
-                chip_info.m_symb++;
-            } else if (inst->Type() == ScLsInstructionType::ALLOCATE_ENTANGLEMENT_FACTORY) {
-                chip_info.e_symb += 2;
-            } else if (inst->Type() == ScLsInstructionType::DEALLOCATE) {
-                chip_info.q_symb--;
-            }
-            chip_info.used_ancilla_count += inst->CountAncillae();
+            ApplyInstructionToChipInfo(chip_info, *inst);
         }
     }
+    MarkCompileInfoStage(
+            "calc_info_with_topology_after_beat2chip_fill",
+            mf,
+            nullptr,
+            TimeSeriesStats(*this, machine_instruction_count)
+    );
 }
 
 std::size_t TimeSeries::InstructionPointerCount() const {
@@ -1437,6 +1581,716 @@ std::size_t TimeSeries::InstructionPointerCapacity() const {
         ret += insts.capacity();
     }
     return ret;
+}
+
+CompactTimeSeries::CompactTimeSeries(const MachineFunction& mf) {
+    const auto& target = *static_cast<const ScLsFixedV0TargetMachine*>(mf.GetTarget());
+    const auto machine_instruction_count = CountMachineInstructions(mf);
+    const auto runtime = CalculateTimeSeriesRuntime(mf);
+
+    auto beat_counts = std::vector<std::size_t>(runtime, 0);
+    for (const auto& bb : mf) {
+        for (const auto& minst : bb) {
+            const auto& inst = *static_cast<const ScLsInstructionBase*>(minst.get());
+            const auto latency = EffectiveTimeSeriesLatency(inst);
+            for (auto beat = inst.Metadata().beat; beat < inst.Metadata().beat + latency; ++beat) {
+                ++beat_counts[beat];
+            }
+        }
+    }
+
+    beat_offsets_.resize(runtime + 1, 0);
+    for (auto beat = std::size_t{0}; beat < runtime; ++beat) {
+        beat_offsets_[beat + 1] = beat_offsets_[beat] + beat_counts[beat];
+    }
+    instruction_ptrs_.resize(beat_offsets_.back());
+    auto cursor = beat_offsets_;
+    for (const auto& bb : mf) {
+        for (const auto& minst : bb) {
+            const auto& inst = *static_cast<const ScLsInstructionBase*>(minst.get());
+            const auto latency = EffectiveTimeSeriesLatency(inst);
+            for (auto beat = inst.Metadata().beat; beat < inst.Metadata().beat + latency; ++beat) {
+                instruction_ptrs_[cursor[beat]++] = &inst;
+            }
+        }
+    }
+    MarkCompileInfoStage(
+            "calc_info_with_topology_after_compact_beat2inst_fill",
+            mf,
+            nullptr,
+            TimeSeriesStats(*this, machine_instruction_count)
+    );
+
+    beat2chip_.resize(runtime);
+    MarkCompileInfoStage(
+            "calc_info_with_topology_after_compact_beat2chip_resize",
+            mf,
+            nullptr,
+            TimeSeriesStats(*this, machine_instruction_count)
+    );
+    for (auto beat = Beat{0}; beat < beat2chip_.size(); ++beat) {
+        auto& chip_info = beat2chip_[beat];
+        if (beat == 0) {
+            InitializeChipInfoSpace(chip_info, target);
+        } else {
+            chip_info = beat2chip_[beat - 1];
+            chip_info.used_ancilla_count = 0;
+        }
+        for (const auto* inst : GetInstructions(beat)) {
+            ApplyInstructionToChipInfo(chip_info, *inst);
+        }
+    }
+    MarkCompileInfoStage(
+            "calc_info_with_topology_after_compact_beat2chip_fill",
+            mf,
+            nullptr,
+            TimeSeriesStats(*this, machine_instruction_count)
+    );
+}
+
+struct FeedbackInfo {
+    Beat beat;
+    bool counted;
+};
+
+std::map<CSymbol, FeedbackInfo> InitialFeedbackInfo() {
+    auto feedback_info = std::map<CSymbol, FeedbackInfo>();
+    for (std::uint64_t i = 0; i < NumReservedCSymbols; ++i) {
+        feedback_info.emplace(CSymbol{i}, FeedbackInfo{.beat = 0, .counted = false});
+    }
+    return feedback_info;
+}
+
+template <typename InstructionRange>
+void ProcessFeedbackCreates(
+        Beat beat,
+        const InstructionRange& insts,
+        std::map<CSymbol, FeedbackInfo>& feedback_info
+) {
+    for (const auto* inst : insts) {
+        for (const auto& c : inst->CCreate()) {
+            if (feedback_info.contains(c)) {
+                throw std::runtime_error(fmt::format(
+                        "Store the measurement results to the same c-symbol ({}) more than once",
+                        c.ToString()
+                ));
+            }
+            feedback_info.emplace(c, FeedbackInfo{beat + inst->StartCorrecting(), false});
+        }
+    }
+}
+
+template <typename InstructionRange, typename FeedbackCounter>
+void ProcessFeedbackConditions(
+        const InstructionRange& insts,
+        std::map<CSymbol, FeedbackInfo>& feedback_info,
+        FeedbackCounter&& count_feedback
+) {
+    for (const auto* inst : insts) {
+        for (const auto& c : inst->Condition()) {
+            if (!feedback_info.contains(c)) {
+                throw std::runtime_error(fmt::format(
+                        "Instruction ({}) is conditioned by unknown c-symbol ({})",
+                        inst->ToString(),
+                        c.ToString()
+                ));
+            }
+
+            auto& info = feedback_info.at(c);
+            if (!info.counted) {
+                count_feedback(info.beat);
+                info.counted = true;
+            }
+        }
+    }
+}
+
+void ResetTopologyTimeSeriesFields(ScLsFixedV0CompileInfo& compile_info) {
+    compile_info.gate_throughput = {};
+    compile_info.gate_throughput_summary = {};
+    compile_info.measurement_feedback_rate = {};
+    compile_info.measurement_feedback_rate_summary = {};
+    compile_info.magic_state_consumption_rate = {};
+    compile_info.magic_state_consumption_rate_summary = {};
+    compile_info.entanglement_consumption_rate = {};
+    compile_info.entanglement_consumption_rate_summary = {};
+    compile_info.chip_cell_algorithmic_qubit = {};
+    compile_info.chip_cell_algorithmic_qubit_summary = {};
+    compile_info.chip_cell_algorithmic_qubit_ratio = {};
+    compile_info.chip_cell_algorithmic_qubit_ratio_summary = {};
+    compile_info.chip_cell_active_qubit_area = {};
+    compile_info.chip_cell_active_qubit_area_summary = {};
+    compile_info.chip_cell_active_qubit_area_ratio = {};
+    compile_info.chip_cell_active_qubit_area_ratio_summary = {};
+    compile_info.qubit_volume = 0;
+}
+
+template <typename Series>
+void FillFullVectorsFromSeries(
+        const MachineFunction& mf,
+        ScLsFixedV0CompileInfo& compile_info,
+        const Series& time_series,
+        SummaryTimeSeriesImplementation summary_impl
+) {
+    const auto machine_instruction_count = CountMachineInstructions(mf);
+    auto with_time_series_stats = [&](qret::Json extra = qret::Json::object()) {
+        auto ret = CompileInfoModeStats(CompileInfoOutputMode::Full, summary_impl);
+        const auto time_series_stats = TimeSeriesStats(time_series, machine_instruction_count);
+        for (auto it = time_series_stats.begin(); it != time_series_stats.end(); ++it) {
+            ret[it.key()] = it.value();
+        }
+        for (auto it = extra.begin(); it != extra.end(); ++it) {
+            ret[it.key()] = it.value();
+        }
+        return ret;
+    };
+
+    MarkCompileInfoStage(
+            "calc_info_with_topology_before_compile_info_vector_resize",
+            mf,
+            &compile_info,
+            with_time_series_stats()
+    );
+    compile_info.gate_throughput.resize(compile_info.runtime, 0);
+    MarkCompileInfoStage(
+            "calc_info_with_topology_after_vector_resize_gate_throughput",
+            mf,
+            &compile_info,
+            with_time_series_stats()
+    );
+    compile_info.measurement_feedback_rate.resize(compile_info.runtime, 0);
+    MarkCompileInfoStage(
+            "calc_info_with_topology_after_vector_resize_measurement_feedback_rate",
+            mf,
+            &compile_info,
+            with_time_series_stats()
+    );
+    compile_info.magic_state_consumption_rate.resize(compile_info.runtime, 0);
+    MarkCompileInfoStage(
+            "calc_info_with_topology_after_vector_resize_magic_state_consumption_rate",
+            mf,
+            &compile_info,
+            with_time_series_stats()
+    );
+    compile_info.entanglement_consumption_rate.resize(compile_info.runtime, 0);
+    MarkCompileInfoStage(
+            "calc_info_with_topology_after_vector_resize_entanglement_consumption_rate",
+            mf,
+            &compile_info,
+            with_time_series_stats()
+    );
+    MarkCompileInfoStage(
+            "calc_info_with_topology_after_rate_vector_resize",
+            mf,
+            &compile_info,
+            with_time_series_stats()
+    );
+    compile_info.chip_cell_algorithmic_qubit.resize(compile_info.runtime);
+    MarkCompileInfoStage(
+            "calc_info_with_topology_after_vector_resize_chip_cell_algorithmic_qubit",
+            mf,
+            &compile_info,
+            with_time_series_stats()
+    );
+    compile_info.chip_cell_algorithmic_qubit_ratio.resize(compile_info.runtime);
+    MarkCompileInfoStage(
+            "calc_info_with_topology_after_vector_resize_chip_cell_algorithmic_qubit_ratio",
+            mf,
+            &compile_info,
+            with_time_series_stats()
+    );
+    compile_info.chip_cell_active_qubit_area.resize(compile_info.runtime);
+    MarkCompileInfoStage(
+            "calc_info_with_topology_after_vector_resize_chip_cell_active_qubit_area",
+            mf,
+            &compile_info,
+            with_time_series_stats()
+    );
+    compile_info.chip_cell_active_qubit_area_ratio.resize(compile_info.runtime);
+    MarkCompileInfoStage(
+            "calc_info_with_topology_after_vector_resize_chip_cell_active_qubit_area_ratio",
+            mf,
+            &compile_info,
+            with_time_series_stats()
+    );
+    MarkCompileInfoStage(
+            "calc_info_with_topology_after_cell_vector_resize",
+            mf,
+            &compile_info,
+            with_time_series_stats()
+    );
+    MarkCompileInfoStage(
+            "calc_info_with_topology_after_all_vector_resize",
+            mf,
+            &compile_info,
+            with_time_series_stats()
+    );
+
+    MarkCompileInfoStage(
+            "calc_info_with_topology_before_time_series_fill",
+            mf,
+            &compile_info,
+            with_time_series_stats()
+    );
+    auto feedback_info = InitialFeedbackInfo();
+    for (auto beat = Beat{0}; beat < compile_info.runtime; ++beat) {
+        const auto insts = time_series.GetInstructions(beat);
+        compile_info.gate_throughput[beat] = insts.size();
+        ProcessFeedbackCreates(beat, insts, feedback_info);
+        ProcessFeedbackConditions(insts, feedback_info, [&](Beat feedback_beat) {
+            compile_info.measurement_feedback_rate[feedback_beat]++;
+        });
+
+        for (const auto* inst : insts) {
+            if (inst->UseMagicState()) {
+                compile_info.magic_state_consumption_rate[beat]++;
+            }
+            if (inst->UseEntanglement()) {
+                compile_info.entanglement_consumption_rate[beat] += inst->CountEntanglement();
+            }
+        }
+    }
+    auto rate_extra = qret::Json::object();
+    rate_extra["feedback_info_size"] = feedback_info.size();
+    rate_extra["feedback_info_estimated_payload_bytes"] =
+            feedback_info.size() * (sizeof(CSymbol) + sizeof(FeedbackInfo));
+    MarkCompileInfoStage(
+            "calc_info_with_topology_after_rate_fill",
+            mf,
+            &compile_info,
+            with_time_series_stats(rate_extra)
+    );
+
+    compile_info.chip_cell_count = time_series.GetChipInfo(0).ChipCellCount();
+    for (auto beat = Beat{0}; beat < compile_info.runtime; ++beat) {
+        compile_info.chip_cell_algorithmic_qubit[beat] =
+                time_series.GetChipInfo(beat).ChipCellAlgorithmicQubit();
+        compile_info.chip_cell_algorithmic_qubit_ratio[beat] =
+                time_series.GetChipInfo(beat).ChipCellAlgorithmicQubitRatio();
+        compile_info.chip_cell_active_qubit_area[beat] =
+                time_series.GetChipInfo(beat).ChipCellActiveQubitArea();
+        compile_info.chip_cell_active_qubit_area_ratio[beat] =
+                time_series.GetChipInfo(beat).ChipCellActiveQubitAreaRatio();
+    }
+    MarkCompileInfoStage(
+            "calc_info_with_topology_after_cell_fill",
+            mf,
+            &compile_info,
+            with_time_series_stats()
+    );
+    compile_info.qubit_volume = std::accumulate(
+            compile_info.chip_cell_active_qubit_area.begin(),
+            compile_info.chip_cell_active_qubit_area.end(),
+            std::uint64_t{0}
+    );
+    MarkCompileInfoStage(
+            "calc_info_with_topology_after_time_series_fill",
+            mf,
+            &compile_info,
+            with_time_series_stats()
+    );
+}
+
+template <typename Series>
+void FillSummaryStatsFromSeries(
+        const MachineFunction& mf,
+        ScLsFixedV0CompileInfo& compile_info,
+        const Series& time_series,
+        SummaryTimeSeriesImplementation summary_impl
+) {
+    const auto machine_instruction_count = CountMachineInstructions(mf);
+    auto with_time_series_stats = [&](qret::Json extra = qret::Json::object()) {
+        auto ret = CompileInfoModeStats(CompileInfoOutputMode::Summary, summary_impl);
+        const auto time_series_stats = TimeSeriesStats(time_series, machine_instruction_count);
+        for (auto it = time_series_stats.begin(); it != time_series_stats.end(); ++it) {
+            ret[it.key()] = it.value();
+        }
+        for (auto it = extra.begin(); it != extra.end(); ++it) {
+            ret[it.key()] = it.value();
+        }
+        return ret;
+    };
+
+    MarkCompileInfoStage(
+            "calc_info_with_topology_before_summary_accumulation",
+            mf,
+            &compile_info,
+            with_time_series_stats()
+    );
+    auto feedback_info = InitialFeedbackInfo();
+    auto measurement_feedback_by_beat = std::map<Beat, std::uint64_t>();
+    auto measurement_feedback_sum = std::uint64_t{0};
+    auto measurement_feedback_peak = std::uint64_t{0};
+    for (auto beat = Beat{0}; beat < compile_info.runtime; ++beat) {
+        const auto insts = time_series.GetInstructions(beat);
+        compile_info.gate_throughput_summary.Add(static_cast<std::uint64_t>(insts.size()));
+
+        ProcessFeedbackCreates(beat, insts, feedback_info);
+        ProcessFeedbackConditions(insts, feedback_info, [&](Beat feedback_beat) {
+            auto& count = measurement_feedback_by_beat[feedback_beat];
+            ++count;
+            ++measurement_feedback_sum;
+            measurement_feedback_peak = std::max(measurement_feedback_peak, count);
+        });
+
+        auto magic_rate = std::uint64_t{0};
+        auto entanglement_rate = std::uint64_t{0};
+        for (const auto* inst : insts) {
+            if (inst->UseMagicState()) {
+                ++magic_rate;
+            }
+            if (inst->UseEntanglement()) {
+                entanglement_rate += inst->CountEntanglement();
+            }
+        }
+        compile_info.magic_state_consumption_rate_summary.Add(magic_rate);
+        compile_info.entanglement_consumption_rate_summary.Add(entanglement_rate);
+
+        const auto& chip = time_series.GetChipInfo(beat);
+        const auto algorithmic_qubit =
+                static_cast<std::uint64_t>(chip.ChipCellAlgorithmicQubit());
+        const auto algorithmic_qubit_ratio = chip.ChipCellAlgorithmicQubitRatio();
+        const auto active_qubit_area =
+                static_cast<std::uint64_t>(chip.ChipCellActiveQubitArea());
+        const auto active_qubit_area_ratio = chip.ChipCellActiveQubitAreaRatio();
+        compile_info.chip_cell_algorithmic_qubit_summary.Add(algorithmic_qubit);
+        compile_info.chip_cell_algorithmic_qubit_ratio_summary.Add(algorithmic_qubit_ratio);
+        compile_info.chip_cell_active_qubit_area_summary.Add(active_qubit_area);
+        compile_info.chip_cell_active_qubit_area_ratio_summary.Add(active_qubit_area_ratio);
+        compile_info.qubit_volume += active_qubit_area;
+    }
+
+    compile_info.measurement_feedback_rate_summary.Set(
+            measurement_feedback_sum,
+            measurement_feedback_peak,
+            compile_info.runtime
+    );
+    compile_info.chip_cell_count = time_series.GetChipInfo(0).ChipCellCount();
+
+    auto summary_extra = qret::Json::object();
+    summary_extra["feedback_info_size"] = feedback_info.size();
+    summary_extra["feedback_info_estimated_payload_bytes"] =
+            feedback_info.size() * (sizeof(CSymbol) + sizeof(FeedbackInfo));
+    summary_extra["measurement_feedback_nonzero_beats"] = measurement_feedback_by_beat.size();
+    summary_extra["measurement_feedback_sparse_map_estimated_payload_bytes"] =
+            measurement_feedback_by_beat.size() * (sizeof(Beat) + sizeof(std::uint64_t));
+    MarkCompileInfoStage(
+            "calc_info_with_topology_after_summary_accumulation",
+            mf,
+            &compile_info,
+            with_time_series_stats(summary_extra)
+    );
+    MarkCompileInfoStage(
+            "calc_info_with_topology_after_summary_stats_store",
+            mf,
+            &compile_info,
+            with_time_series_stats(summary_extra)
+    );
+    MarkCompileInfoStage(
+            "calc_info_with_topology_before_time_series_destroy",
+            mf,
+            &compile_info,
+            with_time_series_stats(summary_extra)
+    );
+}
+
+struct EventSweepStorage {
+    std::vector<const ScLsInstructionBase*> instructions;
+    std::vector<std::uint32_t> start_indices;
+    std::vector<std::uint32_t> end_indices;
+};
+
+Beat EventSweepStartBeat(const EventSweepStorage& storage, std::uint32_t index) {
+    return storage.instructions[index]->Metadata().beat;
+}
+
+Beat EventSweepEndBeat(const EventSweepStorage& storage, std::uint32_t index) {
+    const auto& inst = *storage.instructions[index];
+    return inst.Metadata().beat + EffectiveTimeSeriesLatency(inst);
+}
+
+qret::Json EventSweepStorageStats(
+        const EventSweepStorage& storage,
+        std::uint64_t runtime,
+        std::size_t active_set_size = 0,
+        std::size_t active_set_peak = 0
+) {
+    auto extra = qret::Json::object();
+    extra["time_series_storage_impl"] = "event_sweep";
+    extra["time_series_runtime"] = runtime;
+    extra["beat2inst_bucket_count"] = 0;
+    extra["beat2inst_bucket_capacity"] = 0;
+    extra["beat2inst_outer_size"] = 0;
+    extra["beat2inst_outer_capacity"] = 0;
+    extra["beat2inst_inner_vector_sizeof"] = sizeof(std::vector<const ScLsInstructionBase*>);
+    extra["beat2inst_bucket_object_bytes"] = 0;
+    extra["beat2inst_outer_control_block_capacity_bytes"] = 0;
+    extra["beat2inst_pointer_count"] = 0;
+    extra["beat2inst_pointer_capacity"] = 0;
+    extra["beat2inst_pointer_payload_bytes"] = 0;
+    extra["beat2inst_pointer_capacity_bytes"] = 0;
+    extra["beat2chip_count"] = 0;
+    extra["beat2chip_capacity"] = 0;
+    extra["beat2chip_size"] = 0;
+    extra["beat2chip_sizeof_element_bytes"] = sizeof(TimeSeries::ChipInfo);
+    extra["beat2chip_payload_bytes"] = 0;
+    extra["beat2chip_capacity_bytes"] = 0;
+    extra["event_sweep_instruction_count"] = storage.instructions.size();
+    extra["event_sweep_instruction_pointer_capacity_bytes"] =
+            storage.instructions.capacity() * sizeof(const ScLsInstructionBase*);
+    extra["event_sweep_start_index_count"] = storage.start_indices.size();
+    extra["event_sweep_start_index_capacity_bytes"] =
+            storage.start_indices.capacity() * sizeof(std::uint32_t);
+    extra["event_sweep_end_index_count"] = storage.end_indices.size();
+    extra["event_sweep_end_index_capacity_bytes"] =
+            storage.end_indices.capacity() * sizeof(std::uint32_t);
+    extra["event_sweep_active_set_size"] = active_set_size;
+    extra["event_sweep_active_set_peak"] = active_set_peak;
+    extra["event_sweep_estimated_capacity_bytes"] =
+            extra["event_sweep_instruction_pointer_capacity_bytes"].get<std::size_t>()
+            + extra["event_sweep_start_index_capacity_bytes"].get<std::size_t>()
+            + extra["event_sweep_end_index_capacity_bytes"].get<std::size_t>();
+    return extra;
+}
+
+EventSweepStorage BuildEventSweepStorage(const MachineFunction& mf) {
+    auto storage = EventSweepStorage();
+    storage.instructions = CollectInstructionPointers(mf);
+    if (storage.instructions.size() > std::numeric_limits<std::uint32_t>::max()) {
+        throw std::overflow_error("summary event-sweep instruction index overflow");
+    }
+    storage.start_indices.resize(storage.instructions.size());
+    storage.end_indices.resize(storage.instructions.size());
+    std::iota(storage.start_indices.begin(), storage.start_indices.end(), std::uint32_t{0});
+    std::iota(storage.end_indices.begin(), storage.end_indices.end(), std::uint32_t{0});
+
+    std::sort(storage.start_indices.begin(), storage.start_indices.end(), [&](auto lhs, auto rhs) {
+        const auto lhs_beat = EventSweepStartBeat(storage, lhs);
+        const auto rhs_beat = EventSweepStartBeat(storage, rhs);
+        return lhs_beat < rhs_beat || (lhs_beat == rhs_beat && lhs < rhs);
+    });
+    std::sort(storage.end_indices.begin(), storage.end_indices.end(), [&](auto lhs, auto rhs) {
+        const auto lhs_beat = EventSweepEndBeat(storage, lhs);
+        const auto rhs_beat = EventSweepEndBeat(storage, rhs);
+        return lhs_beat < rhs_beat || (lhs_beat == rhs_beat && lhs < rhs);
+    });
+    return storage;
+}
+
+void RunEventSweepSummary(
+        const MachineFunction& mf,
+        ScLsFixedV0CompileInfo& compile_info,
+        std::vector<SummaryBeatMetrics>* debug_beats = nullptr
+) {
+    const auto& target = *static_cast<const ScLsFixedV0TargetMachine*>(mf.GetTarget());
+    const auto runtime = CalculateTimeSeriesRuntime(mf);
+    compile_info.runtime = runtime;
+    if (debug_beats != nullptr) {
+        debug_beats->assign(runtime, SummaryBeatMetrics{});
+    }
+
+    auto storage = BuildEventSweepStorage(mf);
+    auto mode_extra = CompileInfoModeStats(
+            CompileInfoOutputMode::Summary,
+            SummaryTimeSeriesImplementation::EventSweep
+    );
+    auto storage_extra = EventSweepStorageStats(storage, runtime);
+    for (auto it = storage_extra.begin(); it != storage_extra.end(); ++it) {
+        mode_extra[it.key()] = it.value();
+    }
+    MarkCompileInfoStage(
+            "calc_info_with_topology_after_event_sweep_index_build",
+            mf,
+            &compile_info,
+            mode_extra
+    );
+    MarkCompileInfoStage(
+            "calc_info_with_topology_before_summary_accumulation",
+            mf,
+            &compile_info,
+            mode_extra
+    );
+
+    auto feedback_info = InitialFeedbackInfo();
+    auto measurement_feedback_by_beat = std::map<Beat, std::uint64_t>();
+    auto measurement_feedback_sum = std::uint64_t{0};
+    auto measurement_feedback_peak = std::uint64_t{0};
+    auto active = std::set<std::uint32_t>();
+    auto active_peak = std::size_t{0};
+    auto start_pos = std::size_t{0};
+    auto end_pos = std::size_t{0};
+    auto chip = TimeSeries::ChipInfo();
+    auto insts = std::vector<const ScLsInstructionBase*>();
+
+    for (auto beat = Beat{0}; beat < runtime; ++beat) {
+        while (end_pos < storage.end_indices.size()
+               && EventSweepEndBeat(storage, storage.end_indices[end_pos]) == beat) {
+            active.erase(storage.end_indices[end_pos]);
+            ++end_pos;
+        }
+        while (start_pos < storage.start_indices.size()
+               && EventSweepStartBeat(storage, storage.start_indices[start_pos]) == beat) {
+            active.insert(storage.start_indices[start_pos]);
+            ++start_pos;
+        }
+        active_peak = std::max(active_peak, active.size());
+
+        if (beat == 0) {
+            InitializeChipInfoSpace(chip, target);
+        } else {
+            chip.used_ancilla_count = 0;
+        }
+
+        insts.clear();
+        if (insts.capacity() < active.size()) {
+            insts.reserve(active.size());
+        }
+        for (const auto index : active) {
+            insts.emplace_back(storage.instructions[index]);
+        }
+        compile_info.gate_throughput_summary.Add(static_cast<std::uint64_t>(insts.size()));
+
+        ProcessFeedbackCreates(beat, insts, feedback_info);
+        ProcessFeedbackConditions(insts, feedback_info, [&](Beat feedback_beat) {
+            auto& count = measurement_feedback_by_beat[feedback_beat];
+            ++count;
+            ++measurement_feedback_sum;
+            measurement_feedback_peak = std::max(measurement_feedback_peak, count);
+            if (debug_beats != nullptr && feedback_beat < debug_beats->size()) {
+                (*debug_beats)[feedback_beat].measurement_feedback_rate++;
+            }
+        });
+
+        auto magic_rate = std::uint64_t{0};
+        auto entanglement_rate = std::uint64_t{0};
+        for (const auto* inst : insts) {
+            if (inst->UseMagicState()) {
+                ++magic_rate;
+            }
+            if (inst->UseEntanglement()) {
+                entanglement_rate += inst->CountEntanglement();
+            }
+        }
+        compile_info.magic_state_consumption_rate_summary.Add(magic_rate);
+        compile_info.entanglement_consumption_rate_summary.Add(entanglement_rate);
+
+        for (const auto* inst : insts) {
+            ApplyInstructionToChipInfo(chip, *inst);
+        }
+        const auto algorithmic_qubit =
+                static_cast<std::uint64_t>(chip.ChipCellAlgorithmicQubit());
+        const auto algorithmic_qubit_ratio = chip.ChipCellAlgorithmicQubitRatio();
+        const auto active_qubit_area =
+                static_cast<std::uint64_t>(chip.ChipCellActiveQubitArea());
+        const auto active_qubit_area_ratio = chip.ChipCellActiveQubitAreaRatio();
+        compile_info.chip_cell_algorithmic_qubit_summary.Add(algorithmic_qubit);
+        compile_info.chip_cell_algorithmic_qubit_ratio_summary.Add(algorithmic_qubit_ratio);
+        compile_info.chip_cell_active_qubit_area_summary.Add(active_qubit_area);
+        compile_info.chip_cell_active_qubit_area_ratio_summary.Add(active_qubit_area_ratio);
+        compile_info.qubit_volume += active_qubit_area;
+        if (beat == 0) {
+            compile_info.chip_cell_count = chip.ChipCellCount();
+        }
+
+        if (debug_beats != nullptr) {
+            auto& debug = (*debug_beats)[beat];
+            debug.instructions = insts;
+            debug.chip_info = chip;
+            debug.gate_throughput = debug.instructions.size();
+            debug.magic_state_consumption_rate = magic_rate;
+            debug.entanglement_consumption_rate = entanglement_rate;
+        }
+    }
+
+    compile_info.measurement_feedback_rate_summary.Set(
+            measurement_feedback_sum,
+            measurement_feedback_peak,
+            runtime
+    );
+
+    auto summary_extra = EventSweepStorageStats(storage, runtime, active.size(), active_peak);
+    summary_extra["feedback_info_size"] = feedback_info.size();
+    summary_extra["feedback_info_estimated_payload_bytes"] =
+            feedback_info.size() * (sizeof(CSymbol) + sizeof(FeedbackInfo));
+    summary_extra["measurement_feedback_nonzero_beats"] = measurement_feedback_by_beat.size();
+    summary_extra["measurement_feedback_sparse_map_estimated_payload_bytes"] =
+            measurement_feedback_by_beat.size() * (sizeof(Beat) + sizeof(std::uint64_t));
+    auto final_extra = CompileInfoModeStats(
+            CompileInfoOutputMode::Summary,
+            SummaryTimeSeriesImplementation::EventSweep
+    );
+    for (auto it = summary_extra.begin(); it != summary_extra.end(); ++it) {
+        final_extra[it.key()] = it.value();
+    }
+    MarkCompileInfoStage(
+            "calc_info_with_topology_after_summary_accumulation",
+            mf,
+            &compile_info,
+            final_extra
+    );
+    MarkCompileInfoStage(
+            "calc_info_with_topology_after_summary_stats_store",
+            mf,
+            &compile_info,
+            final_extra
+    );
+    MarkCompileInfoStage(
+            "calc_info_with_topology_before_time_series_destroy",
+            mf,
+            &compile_info,
+            final_extra
+    );
+}
+
+template <typename Series>
+std::vector<SummaryBeatMetrics> CollectSeriesBeatMetrics(const MachineFunction& mf) {
+    const auto series = Series(mf);
+    auto ret = std::vector<SummaryBeatMetrics>(series.GetRuntime());
+    auto feedback_info = InitialFeedbackInfo();
+    for (auto beat = Beat{0}; beat < series.GetRuntime(); ++beat) {
+        const auto insts = series.GetInstructions(beat);
+        auto& row = ret[beat];
+        row.instructions.assign(insts.begin(), insts.end());
+        row.chip_info = series.GetChipInfo(beat);
+        row.gate_throughput = row.instructions.size();
+        ProcessFeedbackCreates(beat, row.instructions, feedback_info);
+        ProcessFeedbackConditions(row.instructions, feedback_info, [&](Beat feedback_beat) {
+            if (feedback_beat < ret.size()) {
+                ret[feedback_beat].measurement_feedback_rate++;
+            }
+        });
+        for (const auto* inst : row.instructions) {
+            if (inst->UseMagicState()) {
+                ++row.magic_state_consumption_rate;
+            }
+            if (inst->UseEntanglement()) {
+                row.entanglement_consumption_rate += inst->CountEntanglement();
+            }
+        }
+    }
+    return ret;
+}
+
+std::vector<SummaryBeatMetrics> CollectLegacyTimeSeriesBeatMetrics(const MachineFunction& mf) {
+    return CollectSeriesBeatMetrics<TimeSeries>(mf);
+}
+
+std::vector<SummaryBeatMetrics> CollectCompactTimeSeriesBeatMetrics(const MachineFunction& mf) {
+    return CollectSeriesBeatMetrics<CompactTimeSeries>(mf);
+}
+
+std::vector<SummaryBeatMetrics> CollectEventSweepBeatMetrics(const MachineFunction& mf) {
+    auto info = ScLsFixedV0CompileInfo();
+    auto ret = std::vector<SummaryBeatMetrics>();
+    RunEventSweepSummary(mf, info, &ret);
+    return ret;
+}
+
+ScLsFixedV0CompileInfo CalculateEventSweepSummaryForTest(const MachineFunction& mf) {
+    auto info = ScLsFixedV0CompileInfo();
+    ResetTopologyTimeSeriesFields(info);
+    RunEventSweepSummary(mf, info);
+    return info;
 }
 
 bool CompileInfoWithoutTopology::RunOnMachineFunction(MachineFunction& mf) {
@@ -1708,23 +2562,7 @@ bool CompileInfoWithTopology::RunOnMachineFunction(MachineFunction& mf) {
             CompileInfoModeStats(output_mode, summary_impl)
     );
 
-    compile_info.gate_throughput = {};
-    compile_info.gate_throughput_summary = {};
-    compile_info.measurement_feedback_rate = {};
-    compile_info.measurement_feedback_rate_summary = {};
-    compile_info.magic_state_consumption_rate = {};
-    compile_info.magic_state_consumption_rate_summary = {};
-    compile_info.entanglement_consumption_rate = {};
-    compile_info.entanglement_consumption_rate_summary = {};
-    compile_info.chip_cell_algorithmic_qubit = {};
-    compile_info.chip_cell_algorithmic_qubit_summary = {};
-    compile_info.chip_cell_algorithmic_qubit_ratio = {};
-    compile_info.chip_cell_algorithmic_qubit_ratio_summary = {};
-    compile_info.chip_cell_active_qubit_area = {};
-    compile_info.chip_cell_active_qubit_area_summary = {};
-    compile_info.chip_cell_active_qubit_area_ratio = {};
-    compile_info.chip_cell_active_qubit_area_ratio_summary = {};
-    compile_info.qubit_volume = 0;
+    ResetTopologyTimeSeriesFields(compile_info);
 
     MarkCompileInfoStage(
             "calc_info_with_topology_before_time_series_construct",
@@ -1732,7 +2570,8 @@ bool CompileInfoWithTopology::RunOnMachineFunction(MachineFunction& mf) {
             &compile_info,
             CompileInfoModeStats(output_mode, summary_impl)
     );
-    {
+
+    if (keep_full_vectors || summary_impl == SummaryTimeSeriesImplementation::LegacyTimeSeries) {
         MarkCompileInfoStage(
                 "calc_info_with_topology_before_time_series",
                 mf,
@@ -1740,7 +2579,8 @@ bool CompileInfoWithTopology::RunOnMachineFunction(MachineFunction& mf) {
                 CompileInfoModeStats(output_mode, summary_impl)
         );
         const auto time_series = TimeSeries(mf);
-        auto time_series_extra = TimeSeriesStats(time_series);
+        const auto machine_instruction_count = CountMachineInstructions(mf);
+        auto time_series_extra = TimeSeriesStats(time_series, machine_instruction_count);
         auto mode_extra = CompileInfoModeStats(output_mode, summary_impl);
         for (auto it = time_series_extra.begin(); it != time_series_extra.end(); ++it) {
             mode_extra[it.key()] = it.value();
@@ -1762,7 +2602,7 @@ bool CompileInfoWithTopology::RunOnMachineFunction(MachineFunction& mf) {
         compile_info.runtime = time_series.GetRuntime();
 
         if (compile_info.runtime == 0) {
-            auto empty_extra = TimeSeriesStats(time_series);
+            auto empty_extra = TimeSeriesStats(time_series, machine_instruction_count);
             auto empty_mode_extra = CompileInfoModeStats(output_mode, summary_impl);
             for (auto it = empty_extra.begin(); it != empty_extra.end(); ++it) {
                 empty_mode_extra[it.key()] = it.value();
@@ -1782,352 +2622,38 @@ bool CompileInfoWithTopology::RunOnMachineFunction(MachineFunction& mf) {
             return false;
         }
 
-        // gate_throughput, measurement_feedback_rate, magic_state_consumption_rate,
-        // entanglement_consumption_rate
-        struct FeedbackInfo {
-            Beat beat;
-            bool counted;
-        };
-        auto feedback_info = std::map<CSymbol, FeedbackInfo>();
-        for (std::uint64_t i = 0; i < NumReservedCSymbols; ++i) {
-            feedback_info.emplace(CSymbol{i}, FeedbackInfo{.beat = 0, .counted = false});
-        }
-
-        auto with_time_series_stats = [&](qret::Json extra = qret::Json::object()) {
-            auto ret = CompileInfoModeStats(output_mode, summary_impl);
-            const auto time_series_stats = TimeSeriesStats(time_series);
-            for (auto it = time_series_stats.begin(); it != time_series_stats.end(); ++it) {
-                ret[it.key()] = it.value();
-            }
-            for (auto it = extra.begin(); it != extra.end(); ++it) {
-                ret[it.key()] = it.value();
-            }
-            return ret;
-        };
-
         if (keep_full_vectors) {
-            MarkCompileInfoStage(
-                    "calc_info_with_topology_before_compile_info_vector_resize",
-                    mf,
-                    &compile_info,
-                    with_time_series_stats()
-            );
-            compile_info.gate_throughput.resize(compile_info.runtime, 0);
-            MarkCompileInfoStage(
-                    "calc_info_with_topology_after_vector_resize_gate_throughput",
-                    mf,
-                    &compile_info,
-                    with_time_series_stats()
-            );
-            compile_info.measurement_feedback_rate.resize(compile_info.runtime, 0);
-            MarkCompileInfoStage(
-                    "calc_info_with_topology_after_vector_resize_measurement_feedback_rate",
-                    mf,
-                    &compile_info,
-                    with_time_series_stats()
-            );
-            compile_info.magic_state_consumption_rate.resize(compile_info.runtime, 0);
-            MarkCompileInfoStage(
-                    "calc_info_with_topology_after_vector_resize_magic_state_consumption_rate",
-                    mf,
-                    &compile_info,
-                    with_time_series_stats()
-            );
-            compile_info.entanglement_consumption_rate.resize(compile_info.runtime, 0);
-            MarkCompileInfoStage(
-                    "calc_info_with_topology_after_vector_resize_entanglement_consumption_rate",
-                    mf,
-                    &compile_info,
-                    with_time_series_stats()
-            );
-            MarkCompileInfoStage(
-                    "calc_info_with_topology_after_rate_vector_resize",
-                    mf,
-                    &compile_info,
-                    with_time_series_stats()
-            );
-            compile_info.chip_cell_algorithmic_qubit.resize(compile_info.runtime);
-            MarkCompileInfoStage(
-                    "calc_info_with_topology_after_vector_resize_chip_cell_algorithmic_qubit",
-                    mf,
-                    &compile_info,
-                    with_time_series_stats()
-            );
-            compile_info.chip_cell_algorithmic_qubit_ratio.resize(compile_info.runtime);
-            MarkCompileInfoStage(
-                    "calc_info_with_topology_after_vector_resize_chip_cell_algorithmic_qubit_ratio",
-                    mf,
-                    &compile_info,
-                    with_time_series_stats()
-            );
-            compile_info.chip_cell_active_qubit_area.resize(compile_info.runtime);
-            MarkCompileInfoStage(
-                    "calc_info_with_topology_after_vector_resize_chip_cell_active_qubit_area",
-                    mf,
-                    &compile_info,
-                    with_time_series_stats()
-            );
-            compile_info.chip_cell_active_qubit_area_ratio.resize(compile_info.runtime);
-            MarkCompileInfoStage(
-                    "calc_info_with_topology_after_vector_resize_chip_cell_active_qubit_area_ratio",
-                    mf,
-                    &compile_info,
-                    with_time_series_stats()
-            );
-            MarkCompileInfoStage(
-                    "calc_info_with_topology_after_cell_vector_resize",
-                    mf,
-                    &compile_info,
-                    with_time_series_stats()
-            );
-            MarkCompileInfoStage(
-                    "calc_info_with_topology_after_all_vector_resize",
-                    mf,
-                    &compile_info,
-                    with_time_series_stats()
-            );
-
-            MarkCompileInfoStage(
-                    "calc_info_with_topology_before_time_series_fill",
-                    mf,
-                    &compile_info,
-                    with_time_series_stats()
-            );
-            for (auto beat = Beat{0}; beat < compile_info.runtime; ++beat) {
-                const auto& insts = time_series.GetInstructions(beat);
-
-                // gate_throughput
-                compile_info.gate_throughput[beat] = insts.size();
-
-                // measurement_feedback_rate
-                for (const auto& inst : insts) {
-                    for (const auto& c : inst->CCreate()) {
-                        if (feedback_info.contains(c)) {
-                            throw std::runtime_error(
-                                    fmt::format(
-                                            "Store the measurement results to the same c-symbol ({}) "
-                                            "more than once",
-                                            c.ToString()
-                                    )
-                            );
-                        }
-                        feedback_info.emplace(
-                                c,
-                                FeedbackInfo{beat + inst->StartCorrecting(), false}
-                        );
-                    }
-                }
-                for (const auto& inst : insts) {
-                    for (const auto& c : inst->Condition()) {
-                        if (!feedback_info.contains(c)) {
-                            throw std::runtime_error(
-                                    fmt::format(
-                                            "Instruction ({}) is conditioned by unknown c-symbol ({})",
-                                            inst->ToString(),
-                                            c.ToString()
-                                    )
-                            );
-                        }
-
-                        auto& info = feedback_info.at(c);
-                        if (!info.counted) {
-                            compile_info.measurement_feedback_rate[info.beat]++;
-                            info.counted = true;
-                        }
-                    }
-                }
-
-                // magic_state_consumption_rate, entanglement_consumption_rate
-                for (const auto& inst : insts) {
-                    if (inst->UseMagicState()) {
-                        compile_info.magic_state_consumption_rate[beat]++;
-                    }
-                    if (inst->UseEntanglement()) {
-                        compile_info.entanglement_consumption_rate[beat] +=
-                                inst->CountEntanglement();
-                    }
-                }
-            }
-            auto rate_extra = qret::Json::object();
-            rate_extra["feedback_info_size"] = feedback_info.size();
-            rate_extra["feedback_info_estimated_payload_bytes"] =
-                    feedback_info.size() * (sizeof(CSymbol) + sizeof(FeedbackInfo));
-            MarkCompileInfoStage(
-                    "calc_info_with_topology_after_rate_fill",
-                    mf,
-                    &compile_info,
-                    with_time_series_stats(rate_extra)
-            );
-
-            // chip_cell_count
-            compile_info.chip_cell_count = time_series.GetChipInfo(0).ChipCellCount();
-
-            for (auto beat = Beat{0}; beat < compile_info.runtime; ++beat) {
-                compile_info.chip_cell_algorithmic_qubit[beat] =
-                        time_series.GetChipInfo(beat).ChipCellAlgorithmicQubit();
-                compile_info.chip_cell_algorithmic_qubit_ratio[beat] =
-                        time_series.GetChipInfo(beat).ChipCellAlgorithmicQubitRatio();
-                compile_info.chip_cell_active_qubit_area[beat] =
-                        time_series.GetChipInfo(beat).ChipCellActiveQubitArea();
-                compile_info.chip_cell_active_qubit_area_ratio[beat] =
-                        time_series.GetChipInfo(beat).ChipCellActiveQubitAreaRatio();
-            }
-            MarkCompileInfoStage(
-                    "calc_info_with_topology_after_cell_fill",
-                    mf,
-                    &compile_info,
-                    with_time_series_stats()
-            );
-
-            // qubit_volume
-            compile_info.qubit_volume = std::accumulate(
-                    compile_info.chip_cell_active_qubit_area.begin(),
-                    compile_info.chip_cell_active_qubit_area.end(),
-                    std::uint64_t{0}
-            );
-            MarkCompileInfoStage(
-                    "calc_info_with_topology_after_time_series_fill",
-                    mf,
-                    &compile_info,
-                    with_time_series_stats()
-            );
+            FillFullVectorsFromSeries(mf, compile_info, time_series, summary_impl);
         } else {
-            MarkCompileInfoStage(
-                    "calc_info_with_topology_before_summary_accumulation",
-                    mf,
-                    &compile_info,
-                    with_time_series_stats()
-            );
-
-            auto measurement_feedback_by_beat = std::map<Beat, std::uint64_t>();
-            auto measurement_feedback_sum = std::uint64_t{0};
-            auto measurement_feedback_peak = std::uint64_t{0};
-            for (auto beat = Beat{0}; beat < compile_info.runtime; ++beat) {
-                const auto& insts = time_series.GetInstructions(beat);
-
-                compile_info.gate_throughput_summary.Add(
-                        static_cast<std::uint64_t>(insts.size())
-                );
-
-                for (const auto& inst : insts) {
-                    for (const auto& c : inst->CCreate()) {
-                        if (feedback_info.contains(c)) {
-                            throw std::runtime_error(
-                                    fmt::format(
-                                            "Store the measurement results to the same c-symbol ({}) "
-                                            "more than once",
-                                            c.ToString()
-                                    )
-                            );
-                        }
-                        feedback_info.emplace(
-                                c,
-                                FeedbackInfo{beat + inst->StartCorrecting(), false}
-                        );
-                    }
-                }
-                for (const auto& inst : insts) {
-                    for (const auto& c : inst->Condition()) {
-                        if (!feedback_info.contains(c)) {
-                            throw std::runtime_error(
-                                    fmt::format(
-                                            "Instruction ({}) is conditioned by unknown c-symbol ({})",
-                                            inst->ToString(),
-                                            c.ToString()
-                                    )
-                            );
-                        }
-
-                        auto& info = feedback_info.at(c);
-                        if (!info.counted) {
-                            auto& count = measurement_feedback_by_beat[info.beat];
-                            ++count;
-                            ++measurement_feedback_sum;
-                            measurement_feedback_peak =
-                                    std::max(measurement_feedback_peak, count);
-                            info.counted = true;
-                        }
-                    }
-                }
-
-                auto magic_rate = std::uint64_t{0};
-                auto entanglement_rate = std::uint64_t{0};
-                for (const auto& inst : insts) {
-                    if (inst->UseMagicState()) {
-                        ++magic_rate;
-                    }
-                    if (inst->UseEntanglement()) {
-                        entanglement_rate += inst->CountEntanglement();
-                    }
-                }
-                compile_info.magic_state_consumption_rate_summary.Add(magic_rate);
-                compile_info.entanglement_consumption_rate_summary.Add(entanglement_rate);
-
-                const auto& chip = time_series.GetChipInfo(beat);
-                const auto algorithmic_qubit =
-                        static_cast<std::uint64_t>(chip.ChipCellAlgorithmicQubit());
-                const auto algorithmic_qubit_ratio = chip.ChipCellAlgorithmicQubitRatio();
-                const auto active_qubit_area =
-                        static_cast<std::uint64_t>(chip.ChipCellActiveQubitArea());
-                const auto active_qubit_area_ratio = chip.ChipCellActiveQubitAreaRatio();
-                compile_info.chip_cell_algorithmic_qubit_summary.Add(algorithmic_qubit);
-                compile_info.chip_cell_algorithmic_qubit_ratio_summary.Add(
-                        algorithmic_qubit_ratio
-                );
-                compile_info.chip_cell_active_qubit_area_summary.Add(active_qubit_area);
-                compile_info.chip_cell_active_qubit_area_ratio_summary.Add(
-                        active_qubit_area_ratio
-                );
-                compile_info.qubit_volume += active_qubit_area;
-            }
-
-            compile_info.measurement_feedback_rate_summary.Set(
-                    measurement_feedback_sum,
-                    measurement_feedback_peak,
-                    compile_info.runtime
-            );
-            compile_info.chip_cell_count = time_series.GetChipInfo(0).ChipCellCount();
-
-            auto summary_extra = qret::Json::object();
-            summary_extra["feedback_info_size"] = feedback_info.size();
-            summary_extra["feedback_info_estimated_payload_bytes"] =
-                    feedback_info.size() * (sizeof(CSymbol) + sizeof(FeedbackInfo));
-            summary_extra["measurement_feedback_nonzero_beats"] =
-                    measurement_feedback_by_beat.size();
-            summary_extra["measurement_feedback_sparse_map_estimated_payload_bytes"] =
-                    measurement_feedback_by_beat.size()
-                    * (sizeof(Beat) + sizeof(std::uint64_t));
-            MarkCompileInfoStage(
-                    "calc_info_with_topology_after_summary_accumulation",
-                    mf,
-                    &compile_info,
-                    with_time_series_stats(summary_extra)
-            );
-            MarkCompileInfoStage(
-                    "calc_info_with_topology_after_summary_stats_store",
-                    mf,
-                    &compile_info,
-                    with_time_series_stats(summary_extra)
-            );
+            FillSummaryStatsFromSeries(mf, compile_info, time_series, summary_impl);
         }
-
-        auto exit_extra = qret::Json::object();
-        exit_extra["feedback_info_size"] = feedback_info.size();
-        exit_extra["feedback_info_estimated_payload_bytes"] =
-                feedback_info.size() * (sizeof(CSymbol) + sizeof(FeedbackInfo));
         MarkCompileInfoStage(
-                "calc_info_with_topology_before_time_series_destroy",
+                "calc_info_with_topology_after_time_series_destroy",
                 mf,
                 &compile_info,
-                with_time_series_stats(exit_extra)
+                CompileInfoModeStats(output_mode, summary_impl)
         );
+    } else if (summary_impl == SummaryTimeSeriesImplementation::CompactTimeSeries) {
+        const auto time_series = CompactTimeSeries(mf);
+        compile_info.runtime = time_series.GetRuntime();
+        FillSummaryStatsFromSeries(mf, compile_info, time_series, summary_impl);
+        MarkCompileInfoStage(
+                "calc_info_with_topology_after_time_series_destroy",
+                mf,
+                &compile_info,
+                CompileInfoModeStats(output_mode, summary_impl)
+        );
+    } else if (summary_impl == SummaryTimeSeriesImplementation::EventSweep) {
+        RunEventSweepSummary(mf, compile_info);
+        MarkCompileInfoStage(
+                "calc_info_with_topology_after_time_series_destroy",
+                mf,
+                &compile_info,
+                CompileInfoModeStats(output_mode, summary_impl)
+        );
+    } else {
+        throw std::invalid_argument("unsupported summary time-series implementation");
     }
-    MarkCompileInfoStage(
-            "calc_info_with_topology_after_time_series_destroy",
-            mf,
-            &compile_info,
-            CompileInfoModeStats(output_mode, summary_impl)
-    );
     MarkCompileInfoStage(
             "calc_info_with_topology_exit",
             mf,

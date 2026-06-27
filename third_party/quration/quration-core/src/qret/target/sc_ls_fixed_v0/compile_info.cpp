@@ -95,8 +95,12 @@ std::string_view ToString(SummaryTimeSeriesImplementation mode) {
     switch (mode) {
         case SummaryTimeSeriesImplementation::Vector:
             return "vector";
-        case SummaryTimeSeriesImplementation::Aggregate:
-            return "aggregate";
+        case SummaryTimeSeriesImplementation::LegacyTimeSeries:
+            return "legacy_timeseries";
+        case SummaryTimeSeriesImplementation::CompactTimeSeries:
+            return "compact_timeseries";
+        case SummaryTimeSeriesImplementation::EventSweep:
+            return "event_sweep";
         default:
             throw std::invalid_argument("unknown summary time-series implementation enum value");
     }
@@ -106,11 +110,18 @@ SummaryTimeSeriesImplementation SummaryTimeSeriesImplementationFromString(std::s
     if (value == "vector") {
         return SummaryTimeSeriesImplementation::Vector;
     }
-    if (value == "aggregate") {
-        return SummaryTimeSeriesImplementation::Aggregate;
+    if (value == "aggregate" || value == "legacy_timeseries") {
+        return SummaryTimeSeriesImplementation::LegacyTimeSeries;
+    }
+    if (value == "compact" || value == "compact_timeseries") {
+        return SummaryTimeSeriesImplementation::CompactTimeSeries;
+    }
+    if (value == "event_sweep") {
+        return SummaryTimeSeriesImplementation::EventSweep;
     }
     throw std::invalid_argument(fmt::format(
-            "invalid QRET_SUMMARY_TIME_SERIES_IMPL '{}'; expected 'vector' or 'aggregate'",
+            "invalid QRET_SUMMARY_TIME_SERIES_IMPL '{}'; expected 'vector', "
+            "'legacy_timeseries', 'compact_timeseries', or 'event_sweep'",
             value
     ));
 }

@@ -21,7 +21,12 @@
 
 namespace qret::sc_ls_fixed_v0 {
 enum class CompileInfoOutputMode : std::uint8_t { Full, Summary };
-enum class SummaryTimeSeriesImplementation : std::uint8_t { Vector, Aggregate };
+enum class SummaryTimeSeriesImplementation : std::uint8_t {
+    Vector,
+    LegacyTimeSeries,
+    CompactTimeSeries,
+    EventSweep,
+};
 
 QRET_EXPORT std::string_view ToString(CompileInfoOutputMode mode);
 QRET_EXPORT CompileInfoOutputMode CompileInfoOutputModeFromString(std::string_view value);

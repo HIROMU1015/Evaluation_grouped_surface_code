@@ -308,8 +308,20 @@ TEST(CompileInfoSummaryAggregation, InvalidSummaryImplementationModeThrows) {
     );
     EXPECT_EQ(
             SummaryTimeSeriesImplementationFromString("aggregate"),
-            SummaryTimeSeriesImplementation::Aggregate
+            SummaryTimeSeriesImplementation::LegacyTimeSeries
     );
-    EXPECT_THROW(SummaryTimeSeriesImplementationFromString("compact"), std::invalid_argument);
+    EXPECT_EQ(
+            SummaryTimeSeriesImplementationFromString("legacy_timeseries"),
+            SummaryTimeSeriesImplementation::LegacyTimeSeries
+    );
+    EXPECT_EQ(
+            SummaryTimeSeriesImplementationFromString("compact_timeseries"),
+            SummaryTimeSeriesImplementation::CompactTimeSeries
+    );
+    EXPECT_EQ(
+            SummaryTimeSeriesImplementationFromString("event_sweep"),
+            SummaryTimeSeriesImplementation::EventSweep
+    );
+    EXPECT_THROW(SummaryTimeSeriesImplementationFromString("bogus"), std::invalid_argument);
 }
 }  // namespace qret::sc_ls_fixed_v0

@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -20,6 +21,7 @@
 #include "qret/codegen/machine_function.h"
 #include "qret/codegen/machine_function_pass.h"
 #include "qret/qret_export.h"
+#include "qret/target/sc_ls_fixed_v0/compile_info.h"
 #include "qret/target/sc_ls_fixed_v0/instruction.h"
 
 namespace qret::sc_ls_fixed_v0 {
@@ -171,6 +173,73 @@ private:
     std::vector<std::vector<const ScLsInstructionBase*>> beat2inst_;
     std::vector<ChipInfo> beat2chip_;
 };
+
+class QRET_EXPORT CompactTimeSeries {
+public:
+    using InstructionPointer = const ScLsInstructionBase*;
+
+    explicit CompactTimeSeries(const MachineFunction& mf);
+
+    std::uint64_t GetRuntime() const {
+        return beat_offsets_.empty() ? 0 : beat_offsets_.size() - 1;
+    }
+    std::span<const InstructionPointer> GetInstructions(std::uint64_t beat) const {
+        const auto begin = beat_offsets_[beat];
+        const auto end = beat_offsets_[beat + 1];
+        return std::span<const InstructionPointer>(
+                instruction_ptrs_.data() + begin,
+                end - begin
+        );
+    }
+    const TimeSeries::ChipInfo& GetChipInfo(std::uint64_t beat) const {
+        return beat2chip_[beat];
+    }
+    std::size_t InstructionBucketCount() const {
+        return GetRuntime();
+    }
+    std::size_t InstructionBucketCapacity() const {
+        return beat_offsets_.capacity() == 0 ? 0 : beat_offsets_.capacity() - 1;
+    }
+    std::size_t InstructionPointerCount() const {
+        return instruction_ptrs_.size();
+    }
+    std::size_t InstructionPointerCapacity() const {
+        return instruction_ptrs_.capacity();
+    }
+    std::size_t ChipInfoCount() const {
+        return beat2chip_.size();
+    }
+    std::size_t ChipInfoCapacity() const {
+        return beat2chip_.capacity();
+    }
+    std::size_t OffsetCount() const {
+        return beat_offsets_.size();
+    }
+    std::size_t OffsetCapacity() const {
+        return beat_offsets_.capacity();
+    }
+
+private:
+    std::vector<std::size_t> beat_offsets_;
+    std::vector<InstructionPointer> instruction_ptrs_;
+    std::vector<TimeSeries::ChipInfo> beat2chip_;
+};
+
+struct QRET_EXPORT SummaryBeatMetrics {
+    std::vector<const ScLsInstructionBase*> instructions;
+    TimeSeries::ChipInfo chip_info = {};
+    std::uint64_t gate_throughput = 0;
+    std::uint64_t measurement_feedback_rate = 0;
+    std::uint64_t magic_state_consumption_rate = 0;
+    std::uint64_t entanglement_consumption_rate = 0;
+};
+
+QRET_EXPORT std::vector<SummaryBeatMetrics>
+CollectLegacyTimeSeriesBeatMetrics(const MachineFunction& mf);
+QRET_EXPORT std::vector<SummaryBeatMetrics>
+CollectCompactTimeSeriesBeatMetrics(const MachineFunction& mf);
+QRET_EXPORT std::vector<SummaryBeatMetrics> CollectEventSweepBeatMetrics(const MachineFunction& mf);
+QRET_EXPORT ScLsFixedV0CompileInfo CalculateEventSweepSummaryForTest(const MachineFunction& mf);
 /**
  * @brief Calculate compile information without topology.
  * @details Calculate following statistics:
