@@ -28,6 +28,19 @@ DEFAULT_TOPOLOGY_PATH = (
 )
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "artifacts" / "qret_pre_routing_memory"
 GNU_TIME_MAXRSS_RE = re.compile(r"Maximum resident set size \(kbytes\):\s*(\d+)")
+PROC_SAMPLE_FIELDS = (
+    "timestamp_seconds",
+    "pid",
+    "vmrss_kb",
+    "vmhwm_kb",
+    "vmsize_kb",
+    "rss_anon_kb",
+    "rss_file_kb",
+    "rss_shmem_kb",
+    "smaps_rollup_rss_kb",
+    "pss_kb",
+    "private_dirty_kb",
+)
 
 TOPOLOGY_PASSES = {
     "init_only": ["sc_ls_fixed_v0::init_compile_info"],
@@ -263,7 +276,14 @@ def _parse_status_file(path: Path) -> dict[str, int]:
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
         return ret
-    key_map = {"VmRSS:": "vmrss_kb", "VmHWM:": "vmhwm_kb", "VmSize:": "vmsize_kb"}
+    key_map = {
+        "VmRSS:": "vmrss_kb",
+        "VmHWM:": "vmhwm_kb",
+        "VmSize:": "vmsize_kb",
+        "RssAnon:": "rss_anon_kb",
+        "RssFile:": "rss_file_kb",
+        "RssShmem:": "rss_shmem_kb",
+    }
     for line in lines:
         for proc_key, out_key in key_map.items():
             if line.startswith(proc_key):
@@ -280,9 +300,9 @@ def _parse_smaps_rollup(path: Path) -> dict[str, int]:
     except OSError:
         return ret
     key_map = {
-        "Rss:": "smaps_rss_kb",
-        "Pss:": "smaps_pss_kb",
-        "Private_Dirty:": "smaps_private_dirty_kb",
+        "Rss:": "smaps_rollup_rss_kb",
+        "Pss:": "pss_kb",
+        "Private_Dirty:": "private_dirty_kb",
     }
     for line in lines:
         for proc_key, out_key in key_map.items():
@@ -290,6 +310,12 @@ def _parse_smaps_rollup(path: Path) -> dict[str, int]:
                 parts = line.split()
                 if len(parts) >= 2:
                     ret[out_key] = int(parts[1])
+    if "smaps_rollup_rss_kb" in ret:
+        ret["smaps_rss_kb"] = ret["smaps_rollup_rss_kb"]
+    if "pss_kb" in ret:
+        ret["smaps_pss_kb"] = ret["pss_kb"]
+    if "private_dirty_kb" in ret:
+        ret["smaps_private_dirty_kb"] = ret["private_dirty_kb"]
     return ret
 
 
@@ -335,13 +361,17 @@ def _sample_process_tree(
             if not status:
                 continue
             smaps = _parse_smaps_rollup(proc_root / "smaps_rollup")
-            row = {
-                "sample_index": sample_index,
-                "timestamp": timestamp,
-                "pid": pid,
-                **status,
-                **smaps,
-            }
+            row = {field: None for field in PROC_SAMPLE_FIELDS}
+            row.update(
+                {
+                    "sample_index": sample_index,
+                    "timestamp": timestamp,
+                    "timestamp_seconds": timestamp,
+                    "pid": pid,
+                    **status,
+                    **smaps,
+                }
+            )
             per_pid.append(row)
             tree_vmrss_kb += int(status.get("vmrss_kb", 0))
         for row in per_pid:

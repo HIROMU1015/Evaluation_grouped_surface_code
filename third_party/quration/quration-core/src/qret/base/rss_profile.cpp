@@ -59,6 +59,12 @@ qret::Json ReadProcStatus() {
             ret["vmhwm_kb"] = *value;
         } else if (auto value = ParseKbLine(line, "VmSize:"); value.has_value()) {
             ret["vmsize_kb"] = *value;
+        } else if (auto value = ParseKbLine(line, "RssAnon:"); value.has_value()) {
+            ret["rss_anon_kb"] = *value;
+        } else if (auto value = ParseKbLine(line, "RssFile:"); value.has_value()) {
+            ret["rss_file_kb"] = *value;
+        } else if (auto value = ParseKbLine(line, "RssShmem:"); value.has_value()) {
+            ret["rss_shmem_kb"] = *value;
         }
     }
     return ret;
@@ -74,10 +80,13 @@ qret::Json ReadProcSmapsRollup() {
     auto line = std::string();
     while (std::getline(in, line)) {
         if (auto value = ParseKbLine(line, "Rss:"); value.has_value()) {
+            ret["smaps_rollup_rss_kb"] = *value;
             ret["smaps_rss_kb"] = *value;
         } else if (auto value = ParseKbLine(line, "Pss:"); value.has_value()) {
+            ret["pss_kb"] = *value;
             ret["smaps_pss_kb"] = *value;
         } else if (auto value = ParseKbLine(line, "Private_Dirty:"); value.has_value()) {
+            ret["private_dirty_kb"] = *value;
             ret["smaps_private_dirty_kb"] = *value;
         }
     }

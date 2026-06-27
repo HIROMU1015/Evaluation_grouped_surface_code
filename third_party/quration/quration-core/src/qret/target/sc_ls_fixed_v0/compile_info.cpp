@@ -8,11 +8,57 @@
 #include <fmt/core.h>
 
 #include <cassert>
+#include <string>
+#include <string_view>
+#include <vector>
 
+#include "qret/base/rss_profile.h"
 #include "qret/target/sc_ls_fixed_v0/instruction.h"
 #include "qret/target/sc_ls_fixed_v0/topology.h"
 
 namespace qret::sc_ls_fixed_v0 {
+namespace {
+template <typename T>
+qret::Json JsonVectorAssignmentStats(
+        const std::string& key,
+        const std::vector<T>& vec,
+        const qret::Json& json
+) {
+    auto extra = qret::Json::object();
+    extra["key"] = key;
+    extra["vector_size"] = vec.size();
+    extra["vector_capacity"] = vec.capacity();
+    extra["sizeof_element_bytes"] = sizeof(T);
+    extra["vector_payload_bytes"] = vec.size() * sizeof(T);
+    extra["vector_capacity_bytes"] = vec.capacity() * sizeof(T);
+    extra["json_top_level_size"] = json.size();
+    return extra;
+}
+
+template <typename T>
+void MarkJsonVectorAssignment(
+        const std::string& stage_prefix,
+        const std::string& key,
+        const std::vector<T>& vec,
+        const qret::Json& json
+) {
+    if (!qret::rss_profile::Enabled()) {
+        return;
+    }
+    qret::rss_profile::Mark(stage_prefix + key, JsonVectorAssignmentStats(key, vec, json));
+}
+
+void MarkJsonStage(std::string_view stage, const qret::Json& json) {
+    if (!qret::rss_profile::Enabled()) {
+        return;
+    }
+    auto extra = qret::Json::object();
+    extra["json_top_level_size"] = json.size();
+    extra["json_type"] = json.type_name();
+    qret::rss_profile::Mark(stage, extra);
+}
+}  // namespace
+
 double ScLsFixedV0CompileInfo::GateThroughputAve() const {
     return std::get<0>(CalcAveAndPeak(gate_throughput));
 }
@@ -63,12 +109,16 @@ double ScLsFixedV0CompileInfo::ChipCellActiveQubitAreaRatioPeak() const {
 }
 ::qret::Json ScLsFixedV0CompileInfo::Json() const {
     auto j = ::qret::Json();
+    MarkJsonStage("compile_info_json_entry", j);
 
     const auto to_json_time_series = [&j](const auto& vec, const std::string& key) {
+        MarkJsonVectorAssignment("compile_info_json_before_assign_", key, vec, j);
         const auto [ave, peak] = ScLsFixedV0CompileInfo::CalcAveAndPeak(vec);
         j[key] = vec;
+        MarkJsonVectorAssignment("compile_info_json_after_assign_", key, vec, j);
         j[key + "_ave"] = ave;
         j[key + "_peak"] = peak;
+        MarkJsonVectorAssignment("compile_info_json_after_stats_", key, vec, j);
     };
 
     // about constants
@@ -82,6 +132,7 @@ double ScLsFixedV0CompileInfo::ChipCellActiveQubitAreaRatioPeak() const {
     j["reaction_time"] = reaction_time;
     if (topology) {
         j["topology"] = *topology;
+        MarkJsonStage("compile_info_json_after_topology", j);
     }
 
     // about runtime
@@ -138,6 +189,7 @@ double ScLsFixedV0CompileInfo::ChipCellActiveQubitAreaRatioPeak() const {
     j["code_distance"] = code_distance;
     j["execution_time_sec"] = execution_time_sec;
     j["num_physical_qubits"] = num_physical_qubits;
+    MarkJsonStage("compile_info_json_exit", j);
     return j;
 }
 std::string ScLsFixedV0CompileInfo::Markdown() const {

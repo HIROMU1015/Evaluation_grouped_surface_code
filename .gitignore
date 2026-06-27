@@ -12,6 +12,7 @@ benchmark_results/
 artifacts/surface_code_cache/
 artifacts/surface_code_experiments/
 artifacts/surface_code_architecture_sweep/
+artifacts/qret_calc_info_memory/
 artifacts/implementation_visual_overview/
 artifacts/surface_code_share/quration_topology_free_memory_note_logs_*/
 artifacts/surface_code_share/quration_topology_free_memory_note_logs_*.tar.gz

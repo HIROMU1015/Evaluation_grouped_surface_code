@@ -9,6 +9,8 @@
 #include <fmt/format.h>
 #include <fmt/ostream.h>
 
+#include <cstddef>
+
 #include "qret/base/graph.h"
 #include "qret/codegen/machine_function.h"
 #include "qret/codegen/machine_function_pass.h"
@@ -48,6 +50,18 @@ public:
     DiGraph::Length CalcLongest() const {
         const auto& [length, _path, _depth_of_each_node] = FindLongestPath(graph_);
         return length;
+    }
+    std::size_t NumNodes() const {
+        return graph_.NumNodes();
+    }
+    std::size_t NumEdges() const {
+        return graph_.NumEdges();
+    }
+    std::size_t PointerMapSize() const {
+        return ptr2id_.size();
+    }
+    std::size_t IdMapSize() const {
+        return id2ptr_.size();
     }
 
 private:
@@ -94,6 +108,20 @@ public:
     }
     const ChipInfo& GetChipInfo(std::uint64_t beat) const {
         return beat2chip_[beat];
+    }
+    std::size_t InstructionBucketCount() const {
+        return beat2inst_.size();
+    }
+    std::size_t InstructionBucketCapacity() const {
+        return beat2inst_.capacity();
+    }
+    std::size_t InstructionPointerCount() const;
+    std::size_t InstructionPointerCapacity() const;
+    std::size_t ChipInfoCount() const {
+        return beat2chip_.size();
+    }
+    std::size_t ChipInfoCapacity() const {
+        return beat2chip_.capacity();
     }
 
     auto begin() const {

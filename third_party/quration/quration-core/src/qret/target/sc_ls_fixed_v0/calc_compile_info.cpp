@@ -8,12 +8,16 @@
 #include <fmt/core.h>
 #include <fmt/ranges.h>
 
+#include <cstddef>
 #include <cmath>
 #include <fstream>
 #include <limits>
 #include <numeric>
 #include <set>
+#include <sstream>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -21,6 +25,7 @@
 #include "qret/base/graph.h"
 #include "qret/base/log.h"
 #include "qret/base/option.h"
+#include "qret/base/rss_profile.h"
 #include "qret/codegen/machine_function.h"
 #include "qret/target/sc_ls_fixed_v0/compile_info.h"
 #include "qret/target/sc_ls_fixed_v0/constants.h"
@@ -64,6 +69,311 @@ static Opt<std::string> DumpCompileInfoToMarkdown(
         "Dump compile information to markdown",
         OptionHidden::NotHidden
 );
+
+std::size_t CountMachineInstructions(const MachineFunction& mf) {
+    auto ret = std::size_t{0};
+    for (const auto& mbb : mf) {
+        ret += mbb.NumInstructions();
+    }
+    return ret;
+}
+
+std::size_t CountLogicalQubits(const MachineFunction& mf) {
+    auto symbols = std::set<QSymbol>();
+    for (const auto& bb : mf) {
+        for (const auto& minst : bb) {
+            const auto& inst = *static_cast<const ScLsInstructionBase*>(minst.get());
+            for (const auto q : inst.QTarget()) {
+                symbols.insert(q);
+            }
+        }
+    }
+    return symbols.size();
+}
+
+template <typename T>
+void AddVectorStats(
+        qret::Json& parent,
+        const std::string& name,
+        const std::vector<T>& vec,
+        std::size_t& total_size,
+        std::size_t& total_capacity,
+        std::size_t& total_payload_bytes,
+        std::size_t& total_capacity_bytes
+) {
+    const auto size = vec.size();
+    const auto capacity = vec.capacity();
+    const auto payload_bytes = size * sizeof(T);
+    const auto capacity_bytes = capacity * sizeof(T);
+    auto item = qret::Json::object();
+    item["size"] = size;
+    item["capacity"] = capacity;
+    item["sizeof_element_bytes"] = sizeof(T);
+    item["payload_bytes"] = payload_bytes;
+    item["capacity_bytes"] = capacity_bytes;
+    parent[name] = item;
+
+    total_size += size;
+    total_capacity += capacity;
+    total_payload_bytes += payload_bytes;
+    total_capacity_bytes += capacity_bytes;
+}
+
+qret::Json CompileInfoStats(const ScLsFixedV0CompileInfo& info) {
+    auto extra = qret::Json::object();
+    extra["compile_info_object_size_bytes"] = sizeof(ScLsFixedV0CompileInfo);
+    extra["topology_present"] = info.topology != nullptr;
+    extra["runtime"] = info.runtime;
+    extra["runtime_without_topology"] = info.runtime_without_topology;
+    extra["gate_count"] = info.gate_count;
+    extra["gate_depth"] = info.gate_depth;
+    extra["measurement_feedback_count"] = info.measurement_feedback_count;
+    extra["measurement_feedback_depth"] = info.measurement_feedback_depth;
+    extra["magic_state_consumption_count"] = info.magic_state_consumption_count;
+    extra["magic_state_consumption_depth"] = info.magic_state_consumption_depth;
+    extra["entanglement_consumption_count"] = info.entanglement_consumption_count;
+    extra["entanglement_consumption_depth"] = info.entanglement_consumption_depth;
+    extra["magic_factory_count"] = info.magic_factory_count;
+    extra["entanglement_factory_count"] = info.entanglement_factory_count;
+    extra["chip_cell_count"] = info.chip_cell_count;
+    extra["qubit_volume"] = info.qubit_volume;
+    extra["gate_count_dict_size"] = info.gate_count_dict.size();
+    extra["gate_count_dict_estimated_payload_bytes"] =
+            info.gate_count_dict.size()
+            * (sizeof(ScLsInstructionType) + sizeof(std::uint64_t));
+
+    auto vectors = qret::Json::object();
+    auto total_size = std::size_t{0};
+    auto total_capacity = std::size_t{0};
+    auto total_payload_bytes = std::size_t{0};
+    auto total_capacity_bytes = std::size_t{0};
+    AddVectorStats(
+            vectors,
+            "gate_throughput",
+            info.gate_throughput,
+            total_size,
+            total_capacity,
+            total_payload_bytes,
+            total_capacity_bytes
+    );
+    AddVectorStats(
+            vectors,
+            "measurement_feedback_rate",
+            info.measurement_feedback_rate,
+            total_size,
+            total_capacity,
+            total_payload_bytes,
+            total_capacity_bytes
+    );
+    AddVectorStats(
+            vectors,
+            "magic_state_consumption_rate",
+            info.magic_state_consumption_rate,
+            total_size,
+            total_capacity,
+            total_payload_bytes,
+            total_capacity_bytes
+    );
+    AddVectorStats(
+            vectors,
+            "entanglement_consumption_rate",
+            info.entanglement_consumption_rate,
+            total_size,
+            total_capacity,
+            total_payload_bytes,
+            total_capacity_bytes
+    );
+    AddVectorStats(
+            vectors,
+            "chip_cell_algorithmic_qubit",
+            info.chip_cell_algorithmic_qubit,
+            total_size,
+            total_capacity,
+            total_payload_bytes,
+            total_capacity_bytes
+    );
+    AddVectorStats(
+            vectors,
+            "chip_cell_algorithmic_qubit_ratio",
+            info.chip_cell_algorithmic_qubit_ratio,
+            total_size,
+            total_capacity,
+            total_payload_bytes,
+            total_capacity_bytes
+    );
+    AddVectorStats(
+            vectors,
+            "chip_cell_active_qubit_area",
+            info.chip_cell_active_qubit_area,
+            total_size,
+            total_capacity,
+            total_payload_bytes,
+            total_capacity_bytes
+    );
+    AddVectorStats(
+            vectors,
+            "chip_cell_active_qubit_area_ratio",
+            info.chip_cell_active_qubit_area_ratio,
+            total_size,
+            total_capacity,
+            total_payload_bytes,
+            total_capacity_bytes
+    );
+    extra["vectors"] = vectors;
+    extra["vector_total_size"] = total_size;
+    extra["vector_total_capacity"] = total_capacity;
+    extra["vector_total_payload_bytes"] = total_payload_bytes;
+    extra["vector_total_capacity_bytes"] = total_capacity_bytes;
+    return extra;
+}
+
+qret::Json MachineAndCompileInfoStats(
+        const MachineFunction& mf,
+        const ScLsFixedV0CompileInfo* info = nullptr
+) {
+    auto extra = qret::Json::object();
+    extra["machine_basic_blocks"] = mf.NumBBs();
+    extra["machine_instruction_count"] = CountMachineInstructions(mf);
+    extra["logical_qubit_count"] = CountLogicalQubits(mf);
+    extra["compile_info_present"] = info != nullptr;
+    if (info != nullptr) {
+        extra["compile_info"] = CompileInfoStats(*info);
+    }
+    return extra;
+}
+
+void MarkCompileInfoStage(
+        std::string_view stage,
+        const MachineFunction& mf,
+        const ScLsFixedV0CompileInfo* info = nullptr
+) {
+    if (!qret::rss_profile::Enabled()) {
+        return;
+    }
+    qret::rss_profile::Mark(stage, MachineAndCompileInfoStats(mf, info));
+}
+
+void MarkCompileInfoStage(
+        std::string_view stage,
+        const MachineFunction& mf,
+        const ScLsFixedV0CompileInfo* info,
+        qret::Json extra
+) {
+    if (!qret::rss_profile::Enabled()) {
+        return;
+    }
+    auto payload = MachineAndCompileInfoStats(mf, info);
+    for (auto it = extra.begin(); it != extra.end(); ++it) {
+        payload[it.key()] = it.value();
+    }
+    qret::rss_profile::Mark(stage, payload);
+}
+
+qret::Json DepGraphStats(const DepGraph& graph) {
+    auto extra = qret::Json::object();
+    extra["dep_graph_object_size_bytes"] = sizeof(DepGraph);
+    extra["dep_graph_nodes"] = graph.NumNodes();
+    extra["dep_graph_edges"] = graph.NumEdges();
+    extra["dep_graph_ptr2id_size"] = graph.PointerMapSize();
+    extra["dep_graph_id2ptr_size"] = graph.IdMapSize();
+    extra["dep_graph_node_estimated_payload_bytes"] = graph.NumNodes() * sizeof(DiGraph::Node);
+    extra["dep_graph_edge_estimated_payload_bytes"] = graph.NumEdges() * sizeof(DiGraph::Edge);
+    extra["dep_graph_pointer_map_estimated_payload_bytes"] =
+            graph.PointerMapSize()
+                    * (sizeof(const ScLsInstructionBase*) + sizeof(DiGraph::IdType))
+            + graph.IdMapSize()
+                    * (sizeof(DiGraph::IdType) + sizeof(const ScLsInstructionBase*));
+    return extra;
+}
+
+qret::Json InstQueueStats(const InstQueue& queue) {
+    auto extra = qret::Json::object();
+    extra["inst_queue_nodes"] = queue.NumInsts();
+    extra["inst_queue_runnables"] = queue.NumRunnables();
+    extra["inst_queue_reserved"] = queue.NumReserved();
+    extra["inst_queue_node_estimated_payload_bytes"] = queue.NumInsts() * sizeof(InstQueue::Node);
+    return extra;
+}
+
+qret::Json TimeSeriesStats(const TimeSeries& time_series) {
+    auto extra = qret::Json::object();
+    extra["time_series_runtime"] = time_series.GetRuntime();
+    extra["beat2inst_bucket_count"] = time_series.InstructionBucketCount();
+    extra["beat2inst_bucket_capacity"] = time_series.InstructionBucketCapacity();
+    extra["beat2inst_bucket_object_bytes"] =
+            time_series.InstructionBucketCapacity()
+            * sizeof(std::vector<const ScLsInstructionBase*>);
+    extra["beat2inst_pointer_count"] = time_series.InstructionPointerCount();
+    extra["beat2inst_pointer_capacity"] = time_series.InstructionPointerCapacity();
+    extra["beat2inst_pointer_payload_bytes"] =
+            time_series.InstructionPointerCount() * sizeof(const ScLsInstructionBase*);
+    extra["beat2inst_pointer_capacity_bytes"] =
+            time_series.InstructionPointerCapacity() * sizeof(const ScLsInstructionBase*);
+    extra["beat2chip_count"] = time_series.ChipInfoCount();
+    extra["beat2chip_capacity"] = time_series.ChipInfoCapacity();
+    extra["beat2chip_payload_bytes"] = time_series.ChipInfoCount() * sizeof(TimeSeries::ChipInfo);
+    extra["beat2chip_capacity_bytes"] =
+            time_series.ChipInfoCapacity() * sizeof(TimeSeries::ChipInfo);
+    return extra;
+}
+
+struct JsonValueProfileStats {
+    std::size_t node_count = 0;
+    std::size_t object_count = 0;
+    std::size_t array_count = 0;
+    std::size_t object_member_count = 0;
+    std::size_t array_element_count = 0;
+    std::size_t string_count = 0;
+    std::size_t string_bytes = 0;
+    std::size_t numeric_count = 0;
+    std::size_t boolean_count = 0;
+    std::size_t null_count = 0;
+};
+
+void AccumulateJsonValueStats(const qret::Json& value, JsonValueProfileStats& stats) {
+    ++stats.node_count;
+    if (value.is_object()) {
+        ++stats.object_count;
+        stats.object_member_count += value.size();
+        for (const auto& item : value.items()) {
+            stats.string_bytes += item.key().size();
+            AccumulateJsonValueStats(item.value(), stats);
+        }
+    } else if (value.is_array()) {
+        ++stats.array_count;
+        stats.array_element_count += value.size();
+        for (const auto& item : value) {
+            AccumulateJsonValueStats(item, stats);
+        }
+    } else if (value.is_string()) {
+        ++stats.string_count;
+        stats.string_bytes += value.get_ref<const std::string&>().size();
+    } else if (value.is_number()) {
+        ++stats.numeric_count;
+    } else if (value.is_boolean()) {
+        ++stats.boolean_count;
+    } else if (value.is_null()) {
+        ++stats.null_count;
+    }
+}
+
+qret::Json JsonValueStats(const qret::Json& value) {
+    auto stats = JsonValueProfileStats{};
+    AccumulateJsonValueStats(value, stats);
+    auto extra = qret::Json::object();
+    extra["json_node_count"] = stats.node_count;
+    extra["json_object_count"] = stats.object_count;
+    extra["json_array_count"] = stats.array_count;
+    extra["json_object_member_count"] = stats.object_member_count;
+    extra["json_array_element_count"] = stats.array_element_count;
+    extra["json_string_count"] = stats.string_count;
+    extra["json_string_bytes"] = stats.string_bytes;
+    extra["json_numeric_count"] = stats.numeric_count;
+    extra["json_boolean_count"] = stats.boolean_count;
+    extra["json_null_count"] = stats.null_count;
+    extra["json_top_level_size"] = value.size();
+    return extra;
+}
 }  // namespace
 
 DepGraph::DepGraph(const MachineFunction& mf) {
@@ -417,9 +727,22 @@ Beat CalcRuntimeWithoutTopology(MachineFunction& mf) {
     const auto& machine = *static_cast<const ScLsFixedV0TargetMachine*>(mf.GetTarget());
     const auto& option = machine.machine_option;
 
+    MarkCompileInfoStage("calc_runtime_without_topology_entry", mf);
     auto state = StateWithoutTopology{};
     auto queue = InstQueue(option, mf, InstQueue::WeightAlgorithm::InvDepth);
+    MarkCompileInfoStage(
+            "calc_runtime_without_topology_after_queue_construct",
+            mf,
+            nullptr,
+            InstQueueStats(queue)
+    );
     queue.Peek(InstQueuePeekSize);
+    MarkCompileInfoStage(
+            "calc_runtime_without_topology_after_initial_peek",
+            mf,
+            nullptr,
+            InstQueueStats(queue)
+    );
     auto current_beat = Beat{0};
     auto runtime = Beat{0};
     auto idle_beats = Beat{0};
@@ -509,6 +832,10 @@ Beat CalcRuntimeWithoutTopology(MachineFunction& mf) {
         }
     }
 
+    auto exit_extra = InstQueueStats(queue);
+    exit_extra["runtime_without_topology"] = runtime;
+    exit_extra["current_beat"] = current_beat;
+    MarkCompileInfoStage("calc_runtime_without_topology_exit", mf, nullptr, exit_extra);
     return runtime;
 }
 
@@ -577,8 +904,25 @@ TimeSeries::TimeSeries(const MachineFunction& mf) {
     }
 }
 
+std::size_t TimeSeries::InstructionPointerCount() const {
+    auto ret = std::size_t{0};
+    for (const auto& insts : beat2inst_) {
+        ret += insts.size();
+    }
+    return ret;
+}
+
+std::size_t TimeSeries::InstructionPointerCapacity() const {
+    auto ret = std::size_t{0};
+    for (const auto& insts : beat2inst_) {
+        ret += insts.capacity();
+    }
+    return ret;
+}
+
 bool CompileInfoWithoutTopology::RunOnMachineFunction(MachineFunction& mf) {
     LOG_INFO("Calculate compile information without topology.");
+    MarkCompileInfoStage("calc_info_without_topology_entry", mf);
     if (!mf.HasCompileInfo()) {
         LOG_INFO("Initialize compile information.");
         InitCompileInfo().RunOnMachineFunction(mf);
@@ -588,6 +932,7 @@ bool CompileInfoWithoutTopology::RunOnMachineFunction(MachineFunction& mf) {
 
     const auto& target = *static_cast<const ScLsFixedV0TargetMachine*>(mf.GetTarget());
     auto& compile_info = *static_cast<ScLsFixedV0CompileInfo*>(mf.GetMutCompileInfo());
+    MarkCompileInfoStage("calc_info_without_topology_after_validate", mf, &compile_info);
 
     // gate_count, gate_count_dict, magic_state_consumption_count, magic_factory_count
     compile_info.gate_count = 0;
@@ -623,6 +968,7 @@ bool CompileInfoWithoutTopology::RunOnMachineFunction(MachineFunction& mf) {
             }
         }
     }
+    MarkCompileInfoStage("calc_info_without_topology_after_instruction_scan", mf, &compile_info);
 
     // runtime_estimation_magic_state_consumption_count
     compile_info.runtime_estimation_magic_state_consumption_count =
@@ -643,10 +989,29 @@ bool CompileInfoWithoutTopology::RunOnMachineFunction(MachineFunction& mf) {
             * target.machine_option.entanglement_generation_period;
 
     // dependency graph of instruction
+    MarkCompileInfoStage("calc_info_without_topology_before_dep_graph", mf, &compile_info);
     auto graph = DepGraph(mf);
+    MarkCompileInfoStage(
+            "calc_info_without_topology_after_dep_graph",
+            mf,
+            &compile_info,
+            DepGraphStats(graph)
+    );
 
     // runtime_without_topology
+    MarkCompileInfoStage(
+            "calc_info_without_topology_before_runtime_without_topology",
+            mf,
+            &compile_info,
+            DepGraphStats(graph)
+    );
     compile_info.runtime_without_topology = CalcRuntimeWithoutTopology(mf);
+    MarkCompileInfoStage(
+            "calc_info_without_topology_after_runtime_without_topology",
+            mf,
+            &compile_info,
+            DepGraphStats(graph)
+    );
 
     // gate_depth
     for (const auto& bb : mf) {
@@ -656,6 +1021,12 @@ bool CompileInfoWithoutTopology::RunOnMachineFunction(MachineFunction& mf) {
         }
     }
     compile_info.gate_depth = graph.CalcHeaviest();
+    MarkCompileInfoStage(
+            "calc_info_without_topology_after_gate_depth",
+            mf,
+            &compile_info,
+            DepGraphStats(graph)
+    );
 
     // magic_state_consumption_depth
     for (const auto& bb : mf) {
@@ -670,6 +1041,12 @@ bool CompileInfoWithoutTopology::RunOnMachineFunction(MachineFunction& mf) {
     compile_info.runtime_estimation_magic_state_consumption_depth =
             compile_info.magic_state_consumption_depth
             * target.machine_option.magic_generation_period;
+    MarkCompileInfoStage(
+            "calc_info_without_topology_after_magic_depth",
+            mf,
+            &compile_info,
+            DepGraphStats(graph)
+    );
 
     // entanglement_consumption_depth
     for (const auto& bb : mf) {
@@ -684,6 +1061,12 @@ bool CompileInfoWithoutTopology::RunOnMachineFunction(MachineFunction& mf) {
     compile_info.runtime_estimation_entanglement_consumption_depth =
             compile_info.entanglement_consumption_depth
             * target.machine_option.entanglement_generation_period;
+    MarkCompileInfoStage(
+            "calc_info_without_topology_after_entanglement_depth",
+            mf,
+            &compile_info,
+            DepGraphStats(graph)
+    );
 
     // measurement_feedback_count, runtime_estimation_measurement_feedback_count
     compile_info.measurement_feedback_count = [&mf]() {
@@ -700,6 +1083,12 @@ bool CompileInfoWithoutTopology::RunOnMachineFunction(MachineFunction& mf) {
     }();
     compile_info.runtime_estimation_measurement_feedback_count =
             compile_info.measurement_feedback_count * target.machine_option.reaction_time;
+    MarkCompileInfoStage(
+            "calc_info_without_topology_after_measurement_feedback_count",
+            mf,
+            &compile_info,
+            DepGraphStats(graph)
+    );
 
     // measurement_feedback_depth
     {
@@ -739,16 +1128,29 @@ bool CompileInfoWithoutTopology::RunOnMachineFunction(MachineFunction& mf) {
         }
     }
     compile_info.measurement_feedback_depth = graph.CalcLongest();
+    MarkCompileInfoStage(
+            "calc_info_without_topology_after_measurement_feedback_depth",
+            mf,
+            &compile_info,
+            DepGraphStats(graph)
+    );
 
     // runtime_estimation_measurement_feedback_depth
     compile_info.runtime_estimation_measurement_feedback_depth =
             compile_info.measurement_feedback_depth * target.machine_option.reaction_time;
 
+    MarkCompileInfoStage(
+            "calc_info_without_topology_exit",
+            mf,
+            &compile_info,
+            DepGraphStats(graph)
+    );
     return false;
 }
 
 bool CompileInfoWithTopology::RunOnMachineFunction(MachineFunction& mf) {
     LOG_INFO("Calculate compile information with topology.");
+    MarkCompileInfoStage("calc_info_with_topology_entry", mf);
     if (!mf.HasCompileInfo()) {
         LOG_INFO("Initialize compile information.");
         InitCompileInfo().RunOnMachineFunction(mf);
@@ -757,13 +1159,27 @@ bool CompileInfoWithTopology::RunOnMachineFunction(MachineFunction& mf) {
     Validate(mf);
 
     auto& compile_info = *static_cast<ScLsFixedV0CompileInfo*>(mf.GetMutCompileInfo());
+    MarkCompileInfoStage("calc_info_with_topology_after_validate", mf, &compile_info);
 
+    MarkCompileInfoStage("calc_info_with_topology_before_time_series", mf, &compile_info);
     const auto time_series = TimeSeries(mf);
+    MarkCompileInfoStage(
+            "calc_info_with_topology_after_time_series",
+            mf,
+            &compile_info,
+            TimeSeriesStats(time_series)
+    );
 
     // runtime
     compile_info.runtime = time_series.GetRuntime();
 
     if (compile_info.runtime == 0) {
+        MarkCompileInfoStage(
+                "calc_info_with_topology_exit_empty_runtime",
+                mf,
+                &compile_info,
+                TimeSeriesStats(time_series)
+        );
         return false;
     }
 
@@ -781,6 +1197,12 @@ bool CompileInfoWithTopology::RunOnMachineFunction(MachineFunction& mf) {
     compile_info.measurement_feedback_rate.resize(compile_info.runtime, 0);
     compile_info.magic_state_consumption_rate.resize(compile_info.runtime, 0);
     compile_info.entanglement_consumption_rate.resize(compile_info.runtime, 0);
+    MarkCompileInfoStage(
+            "calc_info_with_topology_after_rate_vector_resize",
+            mf,
+            &compile_info,
+            TimeSeriesStats(time_series)
+    );
     for (auto beat = Beat{0}; beat < compile_info.runtime; ++beat) {
         const auto& insts = time_series.GetInstructions(beat);
 
@@ -832,6 +1254,11 @@ bool CompileInfoWithTopology::RunOnMachineFunction(MachineFunction& mf) {
             }
         }
     }
+    auto rate_extra = TimeSeriesStats(time_series);
+    rate_extra["feedback_info_size"] = feedback_info.size();
+    rate_extra["feedback_info_estimated_payload_bytes"] =
+            feedback_info.size() * (sizeof(CSymbol) + sizeof(FeedbackInfo));
+    MarkCompileInfoStage("calc_info_with_topology_after_rate_fill", mf, &compile_info, rate_extra);
 
     // chip_cell_count
     compile_info.chip_cell_count = time_series.GetChipInfo(0).ChipCellCount();
@@ -842,6 +1269,12 @@ bool CompileInfoWithTopology::RunOnMachineFunction(MachineFunction& mf) {
     compile_info.chip_cell_algorithmic_qubit_ratio.resize(compile_info.runtime);
     compile_info.chip_cell_active_qubit_area.resize(compile_info.runtime);
     compile_info.chip_cell_active_qubit_area_ratio.resize(compile_info.runtime);
+    MarkCompileInfoStage(
+            "calc_info_with_topology_after_cell_vector_resize",
+            mf,
+            &compile_info,
+            TimeSeriesStats(time_series)
+    );
     for (auto beat = Beat{0}; beat < compile_info.runtime; ++beat) {
         compile_info.chip_cell_algorithmic_qubit[beat] =
                 time_series.GetChipInfo(beat).ChipCellAlgorithmicQubit();
@@ -852,6 +1285,12 @@ bool CompileInfoWithTopology::RunOnMachineFunction(MachineFunction& mf) {
         compile_info.chip_cell_active_qubit_area_ratio[beat] =
                 time_series.GetChipInfo(beat).ChipCellActiveQubitAreaRatio();
     }
+    MarkCompileInfoStage(
+            "calc_info_with_topology_after_cell_fill",
+            mf,
+            &compile_info,
+            TimeSeriesStats(time_series)
+    );
 
     // qubit_volume
     compile_info.qubit_volume = std::accumulate(
@@ -860,6 +1299,11 @@ bool CompileInfoWithTopology::RunOnMachineFunction(MachineFunction& mf) {
             std::uint64_t{0}
     );
 
+    auto exit_extra = TimeSeriesStats(time_series);
+    exit_extra["feedback_info_size"] = feedback_info.size();
+    exit_extra["feedback_info_estimated_payload_bytes"] =
+            feedback_info.size() * (sizeof(CSymbol) + sizeof(FeedbackInfo));
+    MarkCompileInfoStage("calc_info_with_topology_exit", mf, &compile_info, exit_extra);
     return false;
 }
 
@@ -959,6 +1403,7 @@ bool CompileInfoWithQecResourceEstimation::RunOnMachineFunction(MachineFunction&
 
 bool InitCompileInfo::RunOnMachineFunction(MachineFunction& mf) {
     LOG_INFO("Initialize compile information");
+    MarkCompileInfoStage("init_compile_info_entry", mf);
     mf.InitializeCompileInfo(std::unique_ptr<ScLsFixedV0CompileInfo>(new ScLsFixedV0CompileInfo()));
 
     const auto& target = *static_cast<const ScLsFixedV0TargetMachine*>(mf.GetTarget());
@@ -977,11 +1422,13 @@ bool InitCompileInfo::RunOnMachineFunction(MachineFunction& mf) {
     compile_info.reaction_time = target.machine_option.reaction_time;
     compile_info.topology = target.topology;
 
+    MarkCompileInfoStage("init_compile_info_exit", mf, &compile_info);
     return false;
 }
 
 bool DumpCompileInfo::RunOnMachineFunction(MachineFunction& mf) {
     LOG_INFO("Dump compile information");
+    MarkCompileInfoStage("dump_compile_info_entry", mf);
     if (!mf.HasCompileInfo()) {
         LOG_ERROR(
                 "MachineFunction does not have compile information. Run "
@@ -993,13 +1440,54 @@ bool DumpCompileInfo::RunOnMachineFunction(MachineFunction& mf) {
     }
 
     const auto& compile_info = *static_cast<const ScLsFixedV0CompileInfo*>(mf.GetCompileInfo());
+    MarkCompileInfoStage("dump_compile_info_after_compile_info_ref", mf, &compile_info);
+    MarkCompileInfoStage("dump_compile_info_before_stdout", mf, &compile_info);
     std::cout << compile_info << std::endl;
+    MarkCompileInfoStage("dump_compile_info_after_stdout", mf, &compile_info);
 
     if (!DumpCompileInfoToJson.Get().empty()) {
         const auto& path = DumpCompileInfoToJson.Get();
         auto fs = std::ofstream(path);
         if (fs.good()) {
-            fs << compile_info.Json() << std::endl;
+            if (qret::rss_profile::Enabled()) {
+                auto json_start_extra = MachineAndCompileInfoStats(mf, &compile_info);
+                json_start_extra["json_output_path"] = path;
+                qret::rss_profile::Mark(
+                        "dump_compile_info_before_json_dom_create",
+                        json_start_extra
+                );
+                {
+                    auto j = compile_info.Json();
+                    auto json_extra = MachineAndCompileInfoStats(mf, &compile_info);
+                    json_extra["json_output_path"] = path;
+                    json_extra["json_dom"] = JsonValueStats(j);
+                    qret::rss_profile::Mark(
+                            "dump_compile_info_after_json_dom_create",
+                            json_extra
+                    );
+
+                    qret::rss_profile::Mark(
+                            "dump_compile_info_before_json_stream_write",
+                            json_extra
+                    );
+                    fs << j << std::endl;
+                    fs.flush();
+                    auto write_extra = json_extra;
+                    write_extra["stream_good"] = fs.good();
+                    qret::rss_profile::Mark(
+                            "dump_compile_info_after_json_stream_write",
+                            write_extra
+                    );
+                }
+                auto after_destroy_extra = MachineAndCompileInfoStats(mf, &compile_info);
+                after_destroy_extra["json_output_path"] = path;
+                qret::rss_profile::Mark(
+                        "dump_compile_info_after_json_dom_destroy",
+                        after_destroy_extra
+                );
+            } else {
+                fs << compile_info.Json() << std::endl;
+            }
         } else {
             LOG_ERROR("Failed to open: {}", path);
         }
@@ -1013,6 +1501,7 @@ bool DumpCompileInfo::RunOnMachineFunction(MachineFunction& mf) {
             LOG_ERROR("Failed to open: {}", path);
         }
     }
+    MarkCompileInfoStage("dump_compile_info_exit", mf, &compile_info);
     return false;
 }
 }  // namespace qret::sc_ls_fixed_v0
