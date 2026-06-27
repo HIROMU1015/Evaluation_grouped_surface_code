@@ -9,10 +9,18 @@
 #include <fmt/format.h>
 #include <fmt/ostream.h>
 
+#include <cstdint>
+#include <string_view>
+
 #include "qret/qret_export.h"
 #include "qret/target/sc_ls_fixed_v0/instruction.h"
 
 namespace qret::sc_ls_fixed_v0 {
+enum class CompileInfoOutputMode : std::uint8_t { Full, Summary };
+
+QRET_EXPORT std::string_view ToString(CompileInfoOutputMode mode);
+QRET_EXPORT CompileInfoOutputMode CompileInfoOutputModeFromString(std::string_view value);
+
 struct QRET_EXPORT ScLsFixedV0CompileInfo : CompileInfo {
     // constant
     bool use_magic_state_cultivation = false;
@@ -104,6 +112,7 @@ struct QRET_EXPORT ScLsFixedV0CompileInfo : CompileInfo {
     double ChipCellActiveQubitAreaRatioPeak() const;
 
     ::qret::Json Json() const override;
+    ::qret::Json Json(CompileInfoOutputMode mode) const;
     std::string Markdown() const override;
 };
 

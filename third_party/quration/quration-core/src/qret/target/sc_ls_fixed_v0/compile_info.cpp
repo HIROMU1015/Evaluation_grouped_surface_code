@@ -8,6 +8,7 @@
 #include <fmt/core.h>
 
 #include <cassert>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -22,7 +23,8 @@ template <typename T>
 qret::Json JsonVectorAssignmentStats(
         const std::string& key,
         const std::vector<T>& vec,
-        const qret::Json& json
+        const qret::Json& json,
+        std::string_view output_mode
 ) {
     auto extra = qret::Json::object();
     extra["key"] = key;
@@ -32,6 +34,7 @@ qret::Json JsonVectorAssignmentStats(
     extra["vector_payload_bytes"] = vec.size() * sizeof(T);
     extra["vector_capacity_bytes"] = vec.capacity() * sizeof(T);
     extra["json_top_level_size"] = json.size();
+    extra["output_mode"] = std::string(output_mode);
     return extra;
 }
 
@@ -40,24 +43,53 @@ void MarkJsonVectorAssignment(
         const std::string& stage_prefix,
         const std::string& key,
         const std::vector<T>& vec,
-        const qret::Json& json
+        const qret::Json& json,
+        std::string_view output_mode
 ) {
     if (!qret::rss_profile::Enabled()) {
         return;
     }
-    qret::rss_profile::Mark(stage_prefix + key, JsonVectorAssignmentStats(key, vec, json));
+    qret::rss_profile::Mark(
+            stage_prefix + key,
+            JsonVectorAssignmentStats(key, vec, json, output_mode)
+    );
 }
 
-void MarkJsonStage(std::string_view stage, const qret::Json& json) {
+void MarkJsonStage(std::string_view stage, const qret::Json& json, std::string_view output_mode) {
     if (!qret::rss_profile::Enabled()) {
         return;
     }
     auto extra = qret::Json::object();
     extra["json_top_level_size"] = json.size();
     extra["json_type"] = json.type_name();
+    extra["output_mode"] = std::string(output_mode);
     qret::rss_profile::Mark(stage, extra);
 }
 }  // namespace
+
+std::string_view ToString(CompileInfoOutputMode mode) {
+    switch (mode) {
+        case CompileInfoOutputMode::Full:
+            return "full";
+        case CompileInfoOutputMode::Summary:
+            return "summary";
+        default:
+            throw std::invalid_argument("unknown compile-info output mode enum value");
+    }
+}
+
+CompileInfoOutputMode CompileInfoOutputModeFromString(std::string_view value) {
+    if (value == "full") {
+        return CompileInfoOutputMode::Full;
+    }
+    if (value == "summary") {
+        return CompileInfoOutputMode::Summary;
+    }
+    throw std::invalid_argument(fmt::format(
+            "invalid sc_ls_fixed_v0_compile_info_output_mode '{}'; expected 'full' or 'summary'",
+            value
+    ));
+}
 
 double ScLsFixedV0CompileInfo::GateThroughputAve() const {
     return std::get<0>(CalcAveAndPeak(gate_throughput));
@@ -108,17 +140,44 @@ double ScLsFixedV0CompileInfo::ChipCellActiveQubitAreaRatioPeak() const {
     return std::get<1>(CalcAveAndPeak(chip_cell_active_qubit_area_ratio));
 }
 ::qret::Json ScLsFixedV0CompileInfo::Json() const {
+    return Json(CompileInfoOutputMode::Full);
+}
+::qret::Json ScLsFixedV0CompileInfo::Json(CompileInfoOutputMode mode) const {
+    const auto output_mode = ToString(mode);
     auto j = ::qret::Json();
-    MarkJsonStage("compile_info_json_entry", j);
+    MarkJsonStage("compile_info_json_entry", j, output_mode);
 
-    const auto to_json_time_series = [&j](const auto& vec, const std::string& key) {
-        MarkJsonVectorAssignment("compile_info_json_before_assign_", key, vec, j);
+    const auto to_json_time_series = [&j, mode, output_mode](
+                                             const auto& vec,
+                                             const std::string& key
+                                     ) {
         const auto [ave, peak] = ScLsFixedV0CompileInfo::CalcAveAndPeak(vec);
-        j[key] = vec;
-        MarkJsonVectorAssignment("compile_info_json_after_assign_", key, vec, j);
+        if (mode == CompileInfoOutputMode::Full) {
+            MarkJsonVectorAssignment("compile_info_json_before_assign_", key, vec, j, output_mode);
+            j[key] = vec;
+            MarkJsonVectorAssignment("compile_info_json_after_assign_", key, vec, j, output_mode);
+        } else {
+            MarkJsonVectorAssignment(
+                    "compile_info_summary_before_stats_",
+                    key,
+                    vec,
+                    j,
+                    output_mode
+            );
+        }
         j[key + "_ave"] = ave;
         j[key + "_peak"] = peak;
-        MarkJsonVectorAssignment("compile_info_json_after_stats_", key, vec, j);
+        if (mode == CompileInfoOutputMode::Full) {
+            MarkJsonVectorAssignment("compile_info_json_after_stats_", key, vec, j, output_mode);
+        } else {
+            MarkJsonVectorAssignment(
+                    "compile_info_summary_after_stats_",
+                    key,
+                    vec,
+                    j,
+                    output_mode
+            );
+        }
     };
 
     // about constants
@@ -132,7 +191,7 @@ double ScLsFixedV0CompileInfo::ChipCellActiveQubitAreaRatioPeak() const {
     j["reaction_time"] = reaction_time;
     if (topology) {
         j["topology"] = *topology;
-        MarkJsonStage("compile_info_json_after_topology", j);
+        MarkJsonStage("compile_info_json_after_topology", j, output_mode);
     }
 
     // about runtime
@@ -189,7 +248,7 @@ double ScLsFixedV0CompileInfo::ChipCellActiveQubitAreaRatioPeak() const {
     j["code_distance"] = code_distance;
     j["execution_time_sec"] = execution_time_sec;
     j["num_physical_qubits"] = num_physical_qubits;
-    MarkJsonStage("compile_info_json_exit", j);
+    MarkJsonStage("compile_info_json_exit", j, output_mode);
     return j;
 }
 std::string ScLsFixedV0CompileInfo::Markdown() const {

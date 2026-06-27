@@ -28,6 +28,7 @@ from .config import (
     PF_RZ_LAYER,
     P_DIR,
     SURFACE_CODE_CACHE_DIR,
+    SURFACE_CODE_COMPILE_INFO_OUTPUT_MODE,
     SURFACE_CODE_COMPILE_MODE,
     SURFACE_CODE_COMPILE_SKIP_OUTPUT,
     SURFACE_CODE_COMPILE_SKIP_REDUNDANT_IR_PREPROCESS,
@@ -62,6 +63,13 @@ from .config import (
 from .io_cache import load_data
 
 
+def _normalize_compile_info_output_mode(value: str) -> str:
+    mode = str(value).strip().lower().replace("-", "_")
+    if mode in {"full", "summary"}:
+        return mode
+    raise ValueError("compile_info_output_mode must be 'full' or 'summary'")
+
+
 @dataclass(frozen=True)
 class SurfaceCodeArchitecture:
     name: str = "default"
@@ -79,7 +87,15 @@ class SurfaceCodeArchitecture:
     code_cycle_time_sec: float = SURFACE_CODE_QEC_CODE_CYCLE_TIME_SECONDS
     allowed_failure_prob: float = SURFACE_CODE_QEC_ALLOWED_FAILURE_PROB
     skip_compile_output: bool = SURFACE_CODE_COMPILE_SKIP_OUTPUT
+    compile_info_output_mode: str = SURFACE_CODE_COMPILE_INFO_OUTPUT_MODE
     save_mapping_result: bool = SURFACE_CODE_SAVE_MAPPING_RESULT
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "compile_info_output_mode",
+            _normalize_compile_info_output_mode(self.compile_info_output_mode),
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -98,6 +114,7 @@ class SurfaceCodeArchitecture:
             "code_cycle_time_sec": float(self.code_cycle_time_sec),
             "allowed_failure_prob": float(self.allowed_failure_prob),
             "skip_compile_output": bool(self.skip_compile_output),
+            "compile_info_output_mode": self.compile_info_output_mode,
             "save_mapping_result": bool(self.save_mapping_result),
         }
 
@@ -347,12 +364,32 @@ _SURFACE_CODE_STEP_METRIC_OPTIONAL_FIELDS = (
     "t_count",
     "t_depth",
 )
+_SURFACE_CODE_STEP_METRIC_NUMERIC_FIELDS = (
+    "gate_throughput_ave",
+    "gate_throughput_peak",
+    "measurement_feedback_rate_ave",
+    "measurement_feedback_rate_peak",
+    "magic_state_consumption_rate_ave",
+    "magic_state_consumption_rate_peak",
+    "entanglement_consumption_rate_ave",
+    "entanglement_consumption_rate_peak",
+    "chip_cell_algorithmic_qubit_ave",
+    "chip_cell_algorithmic_qubit_peak",
+    "chip_cell_algorithmic_qubit_ratio_ave",
+    "chip_cell_algorithmic_qubit_ratio_peak",
+    "chip_cell_active_qubit_area_ave",
+    "chip_cell_active_qubit_area_peak",
+    "chip_cell_active_qubit_area_ratio_ave",
+    "chip_cell_active_qubit_area_ratio_peak",
+)
 _SURFACE_CODE_STEP_METRIC_PASSTHROUGH_FIELDS = ("execution_time_sec",)
 _SURFACE_CODE_COMPILE_INFO_METRIC_FIELDS = frozenset(
     [
         *_SURFACE_CODE_STEP_METRIC_REQUIRED_FIELDS,
         *_SURFACE_CODE_STEP_METRIC_OPTIONAL_FIELDS,
+        *_SURFACE_CODE_STEP_METRIC_NUMERIC_FIELDS,
         *_SURFACE_CODE_STEP_METRIC_PASSTHROUGH_FIELDS,
+        "gate_count_detail",
     ]
 )
 
@@ -634,6 +671,25 @@ def _decode_json_scalar_value_at(
         raise _json_scan_error(path, index, str(exc)) from exc
 
 
+def _decode_json_value_at(
+    data: mmap.mmap,
+    index: int,
+    *,
+    path: Path,
+) -> tuple[Any, int]:
+    index = _skip_json_whitespace(data, index)
+    if index >= len(data):
+        raise _json_scan_error(path, index, "expected value")
+    char = data[index]
+    if char in (_JSON_OBJECT_OPEN, _JSON_ARRAY_OPEN, _JSON_QUOTE):
+        end = _skip_json_value(data, index, path=path)
+        try:
+            return json.loads(bytes(data[index:end]).decode("utf-8")), end
+        except json.JSONDecodeError as exc:
+            raise _json_scan_error(path, index, str(exc)) from exc
+    return _decode_json_scalar_value_at(data, index, path=path)
+
+
 def _load_compile_info_metric_fields_from_json(
     compile_info_path: str | Path,
     *,
@@ -663,7 +719,7 @@ def _load_compile_info_metric_fields_from_json(
                         raise _json_scan_error(path, cursor, "expected ':'")
                     cursor += 1
                     if key in field_names:
-                        metrics[key], cursor = _decode_json_scalar_value_at(
+                        metrics[key], cursor = _decode_json_value_at(
                             data,
                             cursor,
                             path=path,
@@ -949,6 +1005,19 @@ def _artifact_nonnegative_int(value: Any, *, field: str, context: str) -> int:
     if not math.isclose(scalar, rounded, rel_tol=0.0, abs_tol=1.0e-9):
         raise ValueError(f"Invalid non-integer {field}={scalar!r} in {context}")
     return rounded
+
+
+def _artifact_nonnegative_number(value: Any, *, field: str, context: str) -> float | int:
+    try:
+        scalar = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid {field}={value!r} in {context}") from exc
+    if not np.isfinite(scalar) or scalar < 0:
+        raise ValueError(f"Invalid {field}={scalar!r} in {context}")
+    rounded = int(round(scalar))
+    if math.isclose(scalar, rounded, rel_tol=0.0, abs_tol=1.0e-9):
+        return rounded
+    return scalar
 
 
 def load_grouped_alpha_and_order(
@@ -4393,6 +4462,7 @@ def compile_pipeline_yaml(
         f"sc_ls_fixed_v0_entanglement_generation_period: {int(architecture.entanglement_generation_period)}",
         f"sc_ls_fixed_v0_maximum_entangled_state_stock: {int(architecture.maximum_entangled_state_stock)}",
         f"sc_ls_fixed_v0_reaction_time: {int(architecture.reaction_time)}",
+        f"sc_ls_fixed_v0_compile_info_output_mode: {architecture.compile_info_output_mode}",
     ]
     if _compile_uses_qec(architecture.compile_mode):
         lines.extend(
@@ -4987,6 +5057,7 @@ def surface_code_compile_cache_payload(
         "qret_path": str(qret_path),
         "qret_hash": file_sha256(qret_path),
         "skip_compile_output": bool(architecture.skip_compile_output),
+        "compile_info_output_mode": architecture.compile_info_output_mode,
     }
 
 
@@ -5258,6 +5329,7 @@ def compile_prepared_surface_code_step_artifact(
                 input_path=str(artifact.optimized_ir_path),
                 output_path=str(compile_output_path),
                 compile_info_path=str(compile_info_path),
+                compile_info_output_mode=architecture.compile_info_output_mode,
             ) as span:
                 compile_yaml = compile_pipeline_yaml(
                     opt_path=artifact.optimized_ir_path,
@@ -5302,6 +5374,7 @@ def compile_prepared_surface_code_step_artifact(
                     "compile_info_path": str(compile_info_path),
                     "pipeline_path": str(compile_yaml_path),
                     "compile_mode": architecture.compile_mode,
+                    "compile_info_output_mode": architecture.compile_info_output_mode,
                     "mapping_routing_elapsed_available": False,
                 },
             )
@@ -5497,6 +5570,18 @@ def normalize_surface_code_step_metrics(
                 field=field_name,
                 context=context,
             )
+    for field_name in _SURFACE_CODE_STEP_METRIC_NUMERIC_FIELDS:
+        if field_name in metrics:
+            out[field_name] = _artifact_nonnegative_number(
+                metrics.get(field_name),
+                field=field_name,
+                context=context,
+            )
+    if isinstance(metrics.get("gate_count_detail"), Mapping):
+        out["gate_count_dict"] = {
+            str(key): _artifact_nonnegative_int(value, field=str(key), context=context)
+            for key, value in metrics["gate_count_detail"].items()
+        }
     if "execution_time_sec" in metrics:
         out["execution_time_sec"] = float(metrics["execution_time_sec"])
     for key in (

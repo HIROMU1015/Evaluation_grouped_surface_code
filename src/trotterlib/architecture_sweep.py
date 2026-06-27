@@ -257,6 +257,12 @@ def build_architecture_for_case(
         skip_compile_output=bool(
             case.get("skip_compile_output", defaults.get("skip_compile_output", True))
         ),
+        compile_info_output_mode=str(
+            case.get(
+                "compile_info_output_mode",
+                defaults.get("compile_info_output_mode", "summary"),
+            )
+        ),
         save_mapping_result=bool(
             case.get("save_mapping_result", defaults.get("save_mapping_result", False))
         ),

@@ -74,6 +74,13 @@ static Opt<std::string> DumpCompileInfoToMarkdown(
         "Dump compile information to markdown",
         OptionHidden::NotHidden
 );
+static Opt<std::string> CompileInfoOutputModeOption(
+        "sc_ls_fixed_v0_compile_info_output_mode",
+        "full",
+        "Compile-info JSON output mode: 'full' keeps time-series arrays; "
+        "'summary' omits them and keeps scalar plus _ave/_peak fields.",
+        OptionHidden::NotHidden
+);
 
 std::size_t CountMachineInstructions(const MachineFunction& mf) {
     auto ret = std::size_t{0};
@@ -1856,19 +1863,22 @@ bool DumpCompileInfo::RunOnMachineFunction(MachineFunction& mf) {
 
     if (!DumpCompileInfoToJson.Get().empty()) {
         const auto& path = DumpCompileInfoToJson.Get();
+        const auto output_mode = CompileInfoOutputModeFromString(CompileInfoOutputModeOption.Get());
         auto fs = std::ofstream(path);
         if (fs.good()) {
             if (qret::rss_profile::Enabled()) {
                 auto json_start_extra = MachineAndCompileInfoStats(mf, &compile_info);
                 json_start_extra["json_output_path"] = path;
+                json_start_extra["compile_info_output_mode"] = std::string(ToString(output_mode));
                 qret::rss_profile::Mark(
                         "dump_compile_info_before_json_dom_create",
                         json_start_extra
                 );
                 {
-                    auto j = compile_info.Json();
+                    auto j = compile_info.Json(output_mode);
                     auto json_extra = MachineAndCompileInfoStats(mf, &compile_info);
                     json_extra["json_output_path"] = path;
+                    json_extra["compile_info_output_mode"] = std::string(ToString(output_mode));
                     json_extra["json_dom"] = JsonValueStats(j);
                     qret::rss_profile::Mark(
                             "dump_compile_info_after_json_dom_create",
@@ -1890,12 +1900,14 @@ bool DumpCompileInfo::RunOnMachineFunction(MachineFunction& mf) {
                 }
                 auto after_destroy_extra = MachineAndCompileInfoStats(mf, &compile_info);
                 after_destroy_extra["json_output_path"] = path;
+                after_destroy_extra["compile_info_output_mode"] =
+                        std::string(ToString(output_mode));
                 qret::rss_profile::Mark(
                         "dump_compile_info_after_json_dom_destroy",
                         after_destroy_extra
                 );
             } else {
-                fs << compile_info.Json() << std::endl;
+                fs << compile_info.Json(output_mode) << std::endl;
             }
         } else {
             LOG_ERROR("Failed to open: {}", path);
