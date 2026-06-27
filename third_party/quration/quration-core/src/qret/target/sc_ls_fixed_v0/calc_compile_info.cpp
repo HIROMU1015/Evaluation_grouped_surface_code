@@ -82,6 +82,27 @@ static Opt<std::string> CompileInfoOutputModeOption(
         OptionHidden::NotHidden
 );
 
+SummaryTimeSeriesImplementation ParseSummaryTimeSeriesImplementation() {
+    const auto* raw = std::getenv("QRET_SUMMARY_TIME_SERIES_IMPL");
+    if (raw == nullptr || std::string(raw).empty()) {
+        return SummaryTimeSeriesImplementation::Aggregate;
+    }
+    return SummaryTimeSeriesImplementationFromString(raw);
+}
+
+qret::Json CompileInfoModeStats(
+        CompileInfoOutputMode output_mode,
+        SummaryTimeSeriesImplementation summary_impl
+) {
+    auto extra = qret::Json::object();
+    extra["compile_info_output_mode"] = std::string(ToString(output_mode));
+    extra["summary_time_series_impl"] = std::string(ToString(summary_impl));
+    extra["summary_aggregate_enabled"] =
+            output_mode == CompileInfoOutputMode::Summary
+            && summary_impl == SummaryTimeSeriesImplementation::Aggregate;
+    return extra;
+}
+
 std::size_t CountMachineInstructions(const MachineFunction& mf) {
     auto ret = std::size_t{0};
     for (const auto& mbb : mf) {
@@ -129,6 +150,28 @@ void AddVectorStats(
     total_capacity += capacity;
     total_payload_bytes += payload_bytes;
     total_capacity_bytes += capacity_bytes;
+}
+
+template <typename T>
+void AddSummaryStats(
+        qret::Json& parent,
+        const std::string& name,
+        const TimeSeriesSummaryStats<T>& stats,
+        std::size_t& valid_count,
+        std::size_t& total_count,
+        std::size_t& total_bytes
+) {
+    auto item = qret::Json::object();
+    item["valid"] = stats.valid;
+    item["count"] = stats.count;
+    item["sum"] = stats.sum;
+    item["peak"] = stats.peak;
+    item["sizeof_stats_bytes"] = sizeof(TimeSeriesSummaryStats<T>);
+    parent[name] = item;
+
+    valid_count += stats.valid ? 1 : 0;
+    total_count += stats.count;
+    total_bytes += sizeof(TimeSeriesSummaryStats<T>);
 }
 
 qret::Json CompileInfoStats(const ScLsFixedV0CompileInfo& info) {
@@ -236,6 +279,79 @@ qret::Json CompileInfoStats(const ScLsFixedV0CompileInfo& info) {
     extra["vector_total_capacity"] = total_capacity;
     extra["vector_total_payload_bytes"] = total_payload_bytes;
     extra["vector_total_capacity_bytes"] = total_capacity_bytes;
+
+    auto summaries = qret::Json::object();
+    auto summary_valid_count = std::size_t{0};
+    auto summary_total_count = std::size_t{0};
+    auto summary_total_bytes = std::size_t{0};
+    AddSummaryStats(
+            summaries,
+            "gate_throughput",
+            info.gate_throughput_summary,
+            summary_valid_count,
+            summary_total_count,
+            summary_total_bytes
+    );
+    AddSummaryStats(
+            summaries,
+            "measurement_feedback_rate",
+            info.measurement_feedback_rate_summary,
+            summary_valid_count,
+            summary_total_count,
+            summary_total_bytes
+    );
+    AddSummaryStats(
+            summaries,
+            "magic_state_consumption_rate",
+            info.magic_state_consumption_rate_summary,
+            summary_valid_count,
+            summary_total_count,
+            summary_total_bytes
+    );
+    AddSummaryStats(
+            summaries,
+            "entanglement_consumption_rate",
+            info.entanglement_consumption_rate_summary,
+            summary_valid_count,
+            summary_total_count,
+            summary_total_bytes
+    );
+    AddSummaryStats(
+            summaries,
+            "chip_cell_algorithmic_qubit",
+            info.chip_cell_algorithmic_qubit_summary,
+            summary_valid_count,
+            summary_total_count,
+            summary_total_bytes
+    );
+    AddSummaryStats(
+            summaries,
+            "chip_cell_algorithmic_qubit_ratio",
+            info.chip_cell_algorithmic_qubit_ratio_summary,
+            summary_valid_count,
+            summary_total_count,
+            summary_total_bytes
+    );
+    AddSummaryStats(
+            summaries,
+            "chip_cell_active_qubit_area",
+            info.chip_cell_active_qubit_area_summary,
+            summary_valid_count,
+            summary_total_count,
+            summary_total_bytes
+    );
+    AddSummaryStats(
+            summaries,
+            "chip_cell_active_qubit_area_ratio",
+            info.chip_cell_active_qubit_area_ratio_summary,
+            summary_valid_count,
+            summary_total_count,
+            summary_total_bytes
+    );
+    extra["summary_stats"] = summaries;
+    extra["summary_stats_valid_count"] = summary_valid_count;
+    extra["summary_stats_total_count"] = summary_total_count;
+    extra["summary_stats_estimated_bytes"] = summary_total_bytes;
     return extra;
 }
 
@@ -1566,7 +1682,17 @@ bool CompileInfoWithoutTopology::RunOnMachineFunction(MachineFunction& mf) {
 
 bool CompileInfoWithTopology::RunOnMachineFunction(MachineFunction& mf) {
     LOG_INFO("Calculate compile information with topology.");
-    MarkCompileInfoStage("calc_info_with_topology_entry", mf);
+    const auto output_mode = CompileInfoOutputModeFromString(CompileInfoOutputModeOption.Get());
+    const auto summary_impl = ParseSummaryTimeSeriesImplementation();
+    const auto keep_full_vectors =
+            output_mode == CompileInfoOutputMode::Full
+            || summary_impl == SummaryTimeSeriesImplementation::Vector;
+    MarkCompileInfoStage(
+            "calc_info_with_topology_entry",
+            mf,
+            nullptr,
+            CompileInfoModeStats(output_mode, summary_impl)
+    );
     if (!mf.HasCompileInfo()) {
         LOG_INFO("Initialize compile information.");
         InitCompileInfo().RunOnMachineFunction(mf);
@@ -1575,151 +1701,439 @@ bool CompileInfoWithTopology::RunOnMachineFunction(MachineFunction& mf) {
     Validate(mf);
 
     auto& compile_info = *static_cast<ScLsFixedV0CompileInfo*>(mf.GetMutCompileInfo());
-    MarkCompileInfoStage("calc_info_with_topology_after_validate", mf, &compile_info);
-
-    MarkCompileInfoStage("calc_info_with_topology_before_time_series", mf, &compile_info);
-    const auto time_series = TimeSeries(mf);
     MarkCompileInfoStage(
-            "calc_info_with_topology_after_time_series",
+            "calc_info_with_topology_after_validate",
             mf,
             &compile_info,
-            TimeSeriesStats(time_series)
+            CompileInfoModeStats(output_mode, summary_impl)
     );
 
-    // runtime
-    compile_info.runtime = time_series.GetRuntime();
+    compile_info.gate_throughput = {};
+    compile_info.gate_throughput_summary = {};
+    compile_info.measurement_feedback_rate = {};
+    compile_info.measurement_feedback_rate_summary = {};
+    compile_info.magic_state_consumption_rate = {};
+    compile_info.magic_state_consumption_rate_summary = {};
+    compile_info.entanglement_consumption_rate = {};
+    compile_info.entanglement_consumption_rate_summary = {};
+    compile_info.chip_cell_algorithmic_qubit = {};
+    compile_info.chip_cell_algorithmic_qubit_summary = {};
+    compile_info.chip_cell_algorithmic_qubit_ratio = {};
+    compile_info.chip_cell_algorithmic_qubit_ratio_summary = {};
+    compile_info.chip_cell_active_qubit_area = {};
+    compile_info.chip_cell_active_qubit_area_summary = {};
+    compile_info.chip_cell_active_qubit_area_ratio = {};
+    compile_info.chip_cell_active_qubit_area_ratio_summary = {};
+    compile_info.qubit_volume = 0;
 
-    if (compile_info.runtime == 0) {
+    MarkCompileInfoStage(
+            "calc_info_with_topology_before_time_series_construct",
+            mf,
+            &compile_info,
+            CompileInfoModeStats(output_mode, summary_impl)
+    );
+    {
         MarkCompileInfoStage(
-                "calc_info_with_topology_exit_empty_runtime",
+                "calc_info_with_topology_before_time_series",
                 mf,
                 &compile_info,
-                TimeSeriesStats(time_series)
+                CompileInfoModeStats(output_mode, summary_impl)
         );
-        return false;
-    }
-
-    // gate_throughput, measurement_feedback_rate, magic_state_consumption_rate,
-    // entanglement_consumption_rate
-    struct FeedbackInfo {
-        Beat beat;
-        bool counted;
-    };
-    auto feedback_info = std::map<CSymbol, FeedbackInfo>();
-    for (std::uint64_t i = 0; i < NumReservedCSymbols; ++i) {
-        feedback_info.emplace(CSymbol{i}, FeedbackInfo{.beat = 0, .counted = false});
-    }
-    compile_info.gate_throughput.resize(compile_info.runtime, 0);
-    compile_info.measurement_feedback_rate.resize(compile_info.runtime, 0);
-    compile_info.magic_state_consumption_rate.resize(compile_info.runtime, 0);
-    compile_info.entanglement_consumption_rate.resize(compile_info.runtime, 0);
-    MarkCompileInfoStage(
-            "calc_info_with_topology_after_rate_vector_resize",
-            mf,
-            &compile_info,
-            TimeSeriesStats(time_series)
-    );
-    for (auto beat = Beat{0}; beat < compile_info.runtime; ++beat) {
-        const auto& insts = time_series.GetInstructions(beat);
-
-        // gate_throughput
-        compile_info.gate_throughput[beat] = insts.size();
-
-        // measurement_feedback_rate
-        for (const auto& inst : insts) {
-            for (const auto& c : inst->CCreate()) {
-                if (feedback_info.contains(c)) {
-                    throw std::runtime_error(
-                            fmt::format(
-                                    "Store the measurement results to the same c-symbol ({}) "
-                                    "more than once",
-                                    c.ToString()
-                            )
-                    );
-                }
-                feedback_info.emplace(c, FeedbackInfo{beat + inst->StartCorrecting(), false});
-            }
+        const auto time_series = TimeSeries(mf);
+        auto time_series_extra = TimeSeriesStats(time_series);
+        auto mode_extra = CompileInfoModeStats(output_mode, summary_impl);
+        for (auto it = time_series_extra.begin(); it != time_series_extra.end(); ++it) {
+            mode_extra[it.key()] = it.value();
         }
-        for (const auto& inst : insts) {
-            for (const auto& c : inst->Condition()) {
-                if (!feedback_info.contains(c)) {
-                    throw std::runtime_error(
-                            fmt::format(
-                                    "Instruction ({}) is conditioned by unknown c-symbol ({})",
-                                    inst->ToString(),
-                                    c.ToString()
-                            )
-                    );
-                }
+        MarkCompileInfoStage(
+                "calc_info_with_topology_after_time_series_construct",
+                mf,
+                &compile_info,
+                mode_extra
+        );
+        MarkCompileInfoStage(
+                "calc_info_with_topology_after_time_series",
+                mf,
+                &compile_info,
+                mode_extra
+        );
 
-                auto& info = feedback_info.at(c);
-                if (!info.counted) {
-                    compile_info.measurement_feedback_rate[info.beat]++;
-                    info.counted = true;
-                }
+        // runtime
+        compile_info.runtime = time_series.GetRuntime();
+
+        if (compile_info.runtime == 0) {
+            auto empty_extra = TimeSeriesStats(time_series);
+            auto empty_mode_extra = CompileInfoModeStats(output_mode, summary_impl);
+            for (auto it = empty_extra.begin(); it != empty_extra.end(); ++it) {
+                empty_mode_extra[it.key()] = it.value();
             }
+            MarkCompileInfoStage(
+                    "calc_info_with_topology_exit_empty_runtime",
+                    mf,
+                    &compile_info,
+                    empty_mode_extra
+            );
+            MarkCompileInfoStage(
+                    "calc_info_with_topology_before_time_series_destroy",
+                    mf,
+                    &compile_info,
+                    empty_mode_extra
+            );
+            return false;
         }
 
-        // magic_state_consumption_rate, entanglement_consumption_rate
-        for (const auto& inst : insts) {
-            if (inst->UseMagicState()) {
-                compile_info.magic_state_consumption_rate[beat]++;
-            }
-            if (inst->UseEntanglement()) {
-                compile_info.entanglement_consumption_rate[beat] += inst->CountEntanglement();
-            }
+        // gate_throughput, measurement_feedback_rate, magic_state_consumption_rate,
+        // entanglement_consumption_rate
+        struct FeedbackInfo {
+            Beat beat;
+            bool counted;
+        };
+        auto feedback_info = std::map<CSymbol, FeedbackInfo>();
+        for (std::uint64_t i = 0; i < NumReservedCSymbols; ++i) {
+            feedback_info.emplace(CSymbol{i}, FeedbackInfo{.beat = 0, .counted = false});
         }
+
+        auto with_time_series_stats = [&](qret::Json extra = qret::Json::object()) {
+            auto ret = CompileInfoModeStats(output_mode, summary_impl);
+            const auto time_series_stats = TimeSeriesStats(time_series);
+            for (auto it = time_series_stats.begin(); it != time_series_stats.end(); ++it) {
+                ret[it.key()] = it.value();
+            }
+            for (auto it = extra.begin(); it != extra.end(); ++it) {
+                ret[it.key()] = it.value();
+            }
+            return ret;
+        };
+
+        if (keep_full_vectors) {
+            MarkCompileInfoStage(
+                    "calc_info_with_topology_before_compile_info_vector_resize",
+                    mf,
+                    &compile_info,
+                    with_time_series_stats()
+            );
+            compile_info.gate_throughput.resize(compile_info.runtime, 0);
+            MarkCompileInfoStage(
+                    "calc_info_with_topology_after_vector_resize_gate_throughput",
+                    mf,
+                    &compile_info,
+                    with_time_series_stats()
+            );
+            compile_info.measurement_feedback_rate.resize(compile_info.runtime, 0);
+            MarkCompileInfoStage(
+                    "calc_info_with_topology_after_vector_resize_measurement_feedback_rate",
+                    mf,
+                    &compile_info,
+                    with_time_series_stats()
+            );
+            compile_info.magic_state_consumption_rate.resize(compile_info.runtime, 0);
+            MarkCompileInfoStage(
+                    "calc_info_with_topology_after_vector_resize_magic_state_consumption_rate",
+                    mf,
+                    &compile_info,
+                    with_time_series_stats()
+            );
+            compile_info.entanglement_consumption_rate.resize(compile_info.runtime, 0);
+            MarkCompileInfoStage(
+                    "calc_info_with_topology_after_vector_resize_entanglement_consumption_rate",
+                    mf,
+                    &compile_info,
+                    with_time_series_stats()
+            );
+            MarkCompileInfoStage(
+                    "calc_info_with_topology_after_rate_vector_resize",
+                    mf,
+                    &compile_info,
+                    with_time_series_stats()
+            );
+            compile_info.chip_cell_algorithmic_qubit.resize(compile_info.runtime);
+            MarkCompileInfoStage(
+                    "calc_info_with_topology_after_vector_resize_chip_cell_algorithmic_qubit",
+                    mf,
+                    &compile_info,
+                    with_time_series_stats()
+            );
+            compile_info.chip_cell_algorithmic_qubit_ratio.resize(compile_info.runtime);
+            MarkCompileInfoStage(
+                    "calc_info_with_topology_after_vector_resize_chip_cell_algorithmic_qubit_ratio",
+                    mf,
+                    &compile_info,
+                    with_time_series_stats()
+            );
+            compile_info.chip_cell_active_qubit_area.resize(compile_info.runtime);
+            MarkCompileInfoStage(
+                    "calc_info_with_topology_after_vector_resize_chip_cell_active_qubit_area",
+                    mf,
+                    &compile_info,
+                    with_time_series_stats()
+            );
+            compile_info.chip_cell_active_qubit_area_ratio.resize(compile_info.runtime);
+            MarkCompileInfoStage(
+                    "calc_info_with_topology_after_vector_resize_chip_cell_active_qubit_area_ratio",
+                    mf,
+                    &compile_info,
+                    with_time_series_stats()
+            );
+            MarkCompileInfoStage(
+                    "calc_info_with_topology_after_cell_vector_resize",
+                    mf,
+                    &compile_info,
+                    with_time_series_stats()
+            );
+            MarkCompileInfoStage(
+                    "calc_info_with_topology_after_all_vector_resize",
+                    mf,
+                    &compile_info,
+                    with_time_series_stats()
+            );
+
+            MarkCompileInfoStage(
+                    "calc_info_with_topology_before_time_series_fill",
+                    mf,
+                    &compile_info,
+                    with_time_series_stats()
+            );
+            for (auto beat = Beat{0}; beat < compile_info.runtime; ++beat) {
+                const auto& insts = time_series.GetInstructions(beat);
+
+                // gate_throughput
+                compile_info.gate_throughput[beat] = insts.size();
+
+                // measurement_feedback_rate
+                for (const auto& inst : insts) {
+                    for (const auto& c : inst->CCreate()) {
+                        if (feedback_info.contains(c)) {
+                            throw std::runtime_error(
+                                    fmt::format(
+                                            "Store the measurement results to the same c-symbol ({}) "
+                                            "more than once",
+                                            c.ToString()
+                                    )
+                            );
+                        }
+                        feedback_info.emplace(
+                                c,
+                                FeedbackInfo{beat + inst->StartCorrecting(), false}
+                        );
+                    }
+                }
+                for (const auto& inst : insts) {
+                    for (const auto& c : inst->Condition()) {
+                        if (!feedback_info.contains(c)) {
+                            throw std::runtime_error(
+                                    fmt::format(
+                                            "Instruction ({}) is conditioned by unknown c-symbol ({})",
+                                            inst->ToString(),
+                                            c.ToString()
+                                    )
+                            );
+                        }
+
+                        auto& info = feedback_info.at(c);
+                        if (!info.counted) {
+                            compile_info.measurement_feedback_rate[info.beat]++;
+                            info.counted = true;
+                        }
+                    }
+                }
+
+                // magic_state_consumption_rate, entanglement_consumption_rate
+                for (const auto& inst : insts) {
+                    if (inst->UseMagicState()) {
+                        compile_info.magic_state_consumption_rate[beat]++;
+                    }
+                    if (inst->UseEntanglement()) {
+                        compile_info.entanglement_consumption_rate[beat] +=
+                                inst->CountEntanglement();
+                    }
+                }
+            }
+            auto rate_extra = qret::Json::object();
+            rate_extra["feedback_info_size"] = feedback_info.size();
+            rate_extra["feedback_info_estimated_payload_bytes"] =
+                    feedback_info.size() * (sizeof(CSymbol) + sizeof(FeedbackInfo));
+            MarkCompileInfoStage(
+                    "calc_info_with_topology_after_rate_fill",
+                    mf,
+                    &compile_info,
+                    with_time_series_stats(rate_extra)
+            );
+
+            // chip_cell_count
+            compile_info.chip_cell_count = time_series.GetChipInfo(0).ChipCellCount();
+
+            for (auto beat = Beat{0}; beat < compile_info.runtime; ++beat) {
+                compile_info.chip_cell_algorithmic_qubit[beat] =
+                        time_series.GetChipInfo(beat).ChipCellAlgorithmicQubit();
+                compile_info.chip_cell_algorithmic_qubit_ratio[beat] =
+                        time_series.GetChipInfo(beat).ChipCellAlgorithmicQubitRatio();
+                compile_info.chip_cell_active_qubit_area[beat] =
+                        time_series.GetChipInfo(beat).ChipCellActiveQubitArea();
+                compile_info.chip_cell_active_qubit_area_ratio[beat] =
+                        time_series.GetChipInfo(beat).ChipCellActiveQubitAreaRatio();
+            }
+            MarkCompileInfoStage(
+                    "calc_info_with_topology_after_cell_fill",
+                    mf,
+                    &compile_info,
+                    with_time_series_stats()
+            );
+
+            // qubit_volume
+            compile_info.qubit_volume = std::accumulate(
+                    compile_info.chip_cell_active_qubit_area.begin(),
+                    compile_info.chip_cell_active_qubit_area.end(),
+                    std::uint64_t{0}
+            );
+            MarkCompileInfoStage(
+                    "calc_info_with_topology_after_time_series_fill",
+                    mf,
+                    &compile_info,
+                    with_time_series_stats()
+            );
+        } else {
+            MarkCompileInfoStage(
+                    "calc_info_with_topology_before_summary_accumulation",
+                    mf,
+                    &compile_info,
+                    with_time_series_stats()
+            );
+
+            auto measurement_feedback_by_beat = std::map<Beat, std::uint64_t>();
+            auto measurement_feedback_sum = std::uint64_t{0};
+            auto measurement_feedback_peak = std::uint64_t{0};
+            for (auto beat = Beat{0}; beat < compile_info.runtime; ++beat) {
+                const auto& insts = time_series.GetInstructions(beat);
+
+                compile_info.gate_throughput_summary.Add(
+                        static_cast<std::uint64_t>(insts.size())
+                );
+
+                for (const auto& inst : insts) {
+                    for (const auto& c : inst->CCreate()) {
+                        if (feedback_info.contains(c)) {
+                            throw std::runtime_error(
+                                    fmt::format(
+                                            "Store the measurement results to the same c-symbol ({}) "
+                                            "more than once",
+                                            c.ToString()
+                                    )
+                            );
+                        }
+                        feedback_info.emplace(
+                                c,
+                                FeedbackInfo{beat + inst->StartCorrecting(), false}
+                        );
+                    }
+                }
+                for (const auto& inst : insts) {
+                    for (const auto& c : inst->Condition()) {
+                        if (!feedback_info.contains(c)) {
+                            throw std::runtime_error(
+                                    fmt::format(
+                                            "Instruction ({}) is conditioned by unknown c-symbol ({})",
+                                            inst->ToString(),
+                                            c.ToString()
+                                    )
+                            );
+                        }
+
+                        auto& info = feedback_info.at(c);
+                        if (!info.counted) {
+                            auto& count = measurement_feedback_by_beat[info.beat];
+                            ++count;
+                            ++measurement_feedback_sum;
+                            measurement_feedback_peak =
+                                    std::max(measurement_feedback_peak, count);
+                            info.counted = true;
+                        }
+                    }
+                }
+
+                auto magic_rate = std::uint64_t{0};
+                auto entanglement_rate = std::uint64_t{0};
+                for (const auto& inst : insts) {
+                    if (inst->UseMagicState()) {
+                        ++magic_rate;
+                    }
+                    if (inst->UseEntanglement()) {
+                        entanglement_rate += inst->CountEntanglement();
+                    }
+                }
+                compile_info.magic_state_consumption_rate_summary.Add(magic_rate);
+                compile_info.entanglement_consumption_rate_summary.Add(entanglement_rate);
+
+                const auto& chip = time_series.GetChipInfo(beat);
+                const auto algorithmic_qubit =
+                        static_cast<std::uint64_t>(chip.ChipCellAlgorithmicQubit());
+                const auto algorithmic_qubit_ratio = chip.ChipCellAlgorithmicQubitRatio();
+                const auto active_qubit_area =
+                        static_cast<std::uint64_t>(chip.ChipCellActiveQubitArea());
+                const auto active_qubit_area_ratio = chip.ChipCellActiveQubitAreaRatio();
+                compile_info.chip_cell_algorithmic_qubit_summary.Add(algorithmic_qubit);
+                compile_info.chip_cell_algorithmic_qubit_ratio_summary.Add(
+                        algorithmic_qubit_ratio
+                );
+                compile_info.chip_cell_active_qubit_area_summary.Add(active_qubit_area);
+                compile_info.chip_cell_active_qubit_area_ratio_summary.Add(
+                        active_qubit_area_ratio
+                );
+                compile_info.qubit_volume += active_qubit_area;
+            }
+
+            compile_info.measurement_feedback_rate_summary.Set(
+                    measurement_feedback_sum,
+                    measurement_feedback_peak,
+                    compile_info.runtime
+            );
+            compile_info.chip_cell_count = time_series.GetChipInfo(0).ChipCellCount();
+
+            auto summary_extra = qret::Json::object();
+            summary_extra["feedback_info_size"] = feedback_info.size();
+            summary_extra["feedback_info_estimated_payload_bytes"] =
+                    feedback_info.size() * (sizeof(CSymbol) + sizeof(FeedbackInfo));
+            summary_extra["measurement_feedback_nonzero_beats"] =
+                    measurement_feedback_by_beat.size();
+            summary_extra["measurement_feedback_sparse_map_estimated_payload_bytes"] =
+                    measurement_feedback_by_beat.size()
+                    * (sizeof(Beat) + sizeof(std::uint64_t));
+            MarkCompileInfoStage(
+                    "calc_info_with_topology_after_summary_accumulation",
+                    mf,
+                    &compile_info,
+                    with_time_series_stats(summary_extra)
+            );
+            MarkCompileInfoStage(
+                    "calc_info_with_topology_after_summary_stats_store",
+                    mf,
+                    &compile_info,
+                    with_time_series_stats(summary_extra)
+            );
+        }
+
+        auto exit_extra = qret::Json::object();
+        exit_extra["feedback_info_size"] = feedback_info.size();
+        exit_extra["feedback_info_estimated_payload_bytes"] =
+                feedback_info.size() * (sizeof(CSymbol) + sizeof(FeedbackInfo));
+        MarkCompileInfoStage(
+                "calc_info_with_topology_before_time_series_destroy",
+                mf,
+                &compile_info,
+                with_time_series_stats(exit_extra)
+        );
     }
-    auto rate_extra = TimeSeriesStats(time_series);
-    rate_extra["feedback_info_size"] = feedback_info.size();
-    rate_extra["feedback_info_estimated_payload_bytes"] =
-            feedback_info.size() * (sizeof(CSymbol) + sizeof(FeedbackInfo));
-    MarkCompileInfoStage("calc_info_with_topology_after_rate_fill", mf, &compile_info, rate_extra);
-
-    // chip_cell_count
-    compile_info.chip_cell_count = time_series.GetChipInfo(0).ChipCellCount();
-
-    // chip_cell_algorithmic_qubit, chip_cell_algorithmic_qubit_ratio, chip_cell_active_qubit_area,
-    // chip_cell_active_qubit_area_ratio
-    compile_info.chip_cell_algorithmic_qubit.resize(compile_info.runtime);
-    compile_info.chip_cell_algorithmic_qubit_ratio.resize(compile_info.runtime);
-    compile_info.chip_cell_active_qubit_area.resize(compile_info.runtime);
-    compile_info.chip_cell_active_qubit_area_ratio.resize(compile_info.runtime);
     MarkCompileInfoStage(
-            "calc_info_with_topology_after_cell_vector_resize",
+            "calc_info_with_topology_after_time_series_destroy",
             mf,
             &compile_info,
-            TimeSeriesStats(time_series)
+            CompileInfoModeStats(output_mode, summary_impl)
     );
-    for (auto beat = Beat{0}; beat < compile_info.runtime; ++beat) {
-        compile_info.chip_cell_algorithmic_qubit[beat] =
-                time_series.GetChipInfo(beat).ChipCellAlgorithmicQubit();
-        compile_info.chip_cell_algorithmic_qubit_ratio[beat] =
-                time_series.GetChipInfo(beat).ChipCellAlgorithmicQubitRatio();
-        compile_info.chip_cell_active_qubit_area[beat] =
-                time_series.GetChipInfo(beat).ChipCellActiveQubitArea();
-        compile_info.chip_cell_active_qubit_area_ratio[beat] =
-                time_series.GetChipInfo(beat).ChipCellActiveQubitAreaRatio();
-    }
     MarkCompileInfoStage(
-            "calc_info_with_topology_after_cell_fill",
+            "calc_info_with_topology_exit",
             mf,
             &compile_info,
-            TimeSeriesStats(time_series)
+            CompileInfoModeStats(output_mode, summary_impl)
     );
-
-    // qubit_volume
-    compile_info.qubit_volume = std::accumulate(
-            compile_info.chip_cell_active_qubit_area.begin(),
-            compile_info.chip_cell_active_qubit_area.end(),
-            std::uint64_t{0}
-    );
-
-    auto exit_extra = TimeSeriesStats(time_series);
-    exit_extra["feedback_info_size"] = feedback_info.size();
-    exit_extra["feedback_info_estimated_payload_bytes"] =
-            feedback_info.size() * (sizeof(CSymbol) + sizeof(FeedbackInfo));
-    MarkCompileInfoStage("calc_info_with_topology_exit", mf, &compile_info, exit_extra);
     return false;
 }
 

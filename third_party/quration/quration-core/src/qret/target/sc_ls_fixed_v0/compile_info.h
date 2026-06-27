@@ -9,17 +9,57 @@
 #include <fmt/format.h>
 #include <fmt/ostream.h>
 
+#include <algorithm>
 #include <cstdint>
+#include <limits>
+#include <stdexcept>
 #include <string_view>
+#include <tuple>
 
 #include "qret/qret_export.h"
 #include "qret/target/sc_ls_fixed_v0/instruction.h"
 
 namespace qret::sc_ls_fixed_v0 {
 enum class CompileInfoOutputMode : std::uint8_t { Full, Summary };
+enum class SummaryTimeSeriesImplementation : std::uint8_t { Vector, Aggregate };
 
 QRET_EXPORT std::string_view ToString(CompileInfoOutputMode mode);
 QRET_EXPORT CompileInfoOutputMode CompileInfoOutputModeFromString(std::string_view value);
+QRET_EXPORT std::string_view ToString(SummaryTimeSeriesImplementation mode);
+QRET_EXPORT SummaryTimeSeriesImplementation
+SummaryTimeSeriesImplementationFromString(std::string_view value);
+
+template <typename T>
+struct TimeSeriesSummaryStats {
+    T sum = T{0};
+    T peak = T{0};
+    std::uint64_t count = 0;
+    bool valid = false;
+
+    void Add(T value) {
+        if (count == std::numeric_limits<std::uint64_t>::max()) {
+            throw std::overflow_error("time-series summary count overflow");
+        }
+        sum += value;
+        peak = std::max(peak, value);
+        ++count;
+        valid = true;
+    }
+
+    void Set(T new_sum, T new_peak, std::uint64_t new_count) {
+        sum = new_sum;
+        peak = new_peak;
+        count = new_count;
+        valid = true;
+    }
+
+    [[nodiscard]] std::tuple<double, T> AveAndPeak() const {
+        if (!valid || count == 0) {
+            return {0.0, T{0}};
+        }
+        return {static_cast<double>(sum) / static_cast<double>(count), peak};
+    }
+};
 
 struct QRET_EXPORT ScLsFixedV0CompileInfo : CompileInfo {
     // constant
@@ -42,11 +82,13 @@ struct QRET_EXPORT ScLsFixedV0CompileInfo : CompileInfo {
     std::map<ScLsInstructionType, std::uint64_t> gate_count_dict = {};
     std::uint64_t gate_depth = 0;
     std::vector<std::uint64_t> gate_throughput = {};
+    TimeSeriesSummaryStats<std::uint64_t> gate_throughput_summary = {};
 
     // info about measurement depth
     std::uint64_t measurement_feedback_count = 0;
     std::uint64_t measurement_feedback_depth = 0;
     std::vector<std::uint64_t> measurement_feedback_rate = {};
+    TimeSeriesSummaryStats<std::uint64_t> measurement_feedback_rate_summary = {};
     std::uint64_t runtime_estimation_measurement_feedback_count = 0;
     std::uint64_t runtime_estimation_measurement_feedback_depth = 0;
 
@@ -54,6 +96,7 @@ struct QRET_EXPORT ScLsFixedV0CompileInfo : CompileInfo {
     std::uint64_t magic_state_consumption_count = 0;
     std::uint64_t magic_state_consumption_depth = 0;
     std::vector<std::uint64_t> magic_state_consumption_rate = {};
+    TimeSeriesSummaryStats<std::uint64_t> magic_state_consumption_rate_summary = {};
     std::uint64_t runtime_estimation_magic_state_consumption_count = 0;
     std::uint64_t runtime_estimation_magic_state_consumption_depth = 0;
     std::uint64_t magic_factory_count = 0;
@@ -62,6 +105,7 @@ struct QRET_EXPORT ScLsFixedV0CompileInfo : CompileInfo {
     std::uint64_t entanglement_consumption_count = 0;
     std::uint64_t entanglement_consumption_depth = 0;
     std::vector<std::uint64_t> entanglement_consumption_rate = {};
+    TimeSeriesSummaryStats<std::uint64_t> entanglement_consumption_rate_summary = {};
     std::uint64_t runtime_estimation_entanglement_consumption_count = 0;
     std::uint64_t runtime_estimation_entanglement_consumption_depth = 0;
     std::uint64_t entanglement_factory_count = 0;
@@ -69,9 +113,13 @@ struct QRET_EXPORT ScLsFixedV0CompileInfo : CompileInfo {
     // info about cell consumption
     std::uint64_t chip_cell_count = 0;
     std::vector<std::uint64_t> chip_cell_algorithmic_qubit = {};
+    TimeSeriesSummaryStats<std::uint64_t> chip_cell_algorithmic_qubit_summary = {};
     std::vector<double> chip_cell_algorithmic_qubit_ratio = {};
+    TimeSeriesSummaryStats<double> chip_cell_algorithmic_qubit_ratio_summary = {};
     std::vector<std::uint64_t> chip_cell_active_qubit_area = {};
+    TimeSeriesSummaryStats<std::uint64_t> chip_cell_active_qubit_area_summary = {};
     std::vector<double> chip_cell_active_qubit_area_ratio = {};
+    TimeSeriesSummaryStats<double> chip_cell_active_qubit_area_ratio_summary = {};
     std::uint64_t qubit_volume = 0;
 
     // info about QEC resource estimation
@@ -92,6 +140,17 @@ struct QRET_EXPORT ScLsFixedV0CompileInfo : CompileInfo {
             peak = std::max(peak, x);
         }
         return {static_cast<double>(sum) / static_cast<double>(vec.size()), peak};
+    }
+
+    template <typename T>
+    static std::tuple<double, T> CalcAveAndPeak(
+            const TimeSeriesSummaryStats<T>& stats,
+            const std::vector<T>& vec
+    ) {
+        if (stats.valid) {
+            return stats.AveAndPeak();
+        }
+        return CalcAveAndPeak(vec);
     }
 
     double GateThroughputAve() const;

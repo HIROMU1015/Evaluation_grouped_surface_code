@@ -91,53 +91,109 @@ CompileInfoOutputMode CompileInfoOutputModeFromString(std::string_view value) {
     ));
 }
 
+std::string_view ToString(SummaryTimeSeriesImplementation mode) {
+    switch (mode) {
+        case SummaryTimeSeriesImplementation::Vector:
+            return "vector";
+        case SummaryTimeSeriesImplementation::Aggregate:
+            return "aggregate";
+        default:
+            throw std::invalid_argument("unknown summary time-series implementation enum value");
+    }
+}
+
+SummaryTimeSeriesImplementation SummaryTimeSeriesImplementationFromString(std::string_view value) {
+    if (value == "vector") {
+        return SummaryTimeSeriesImplementation::Vector;
+    }
+    if (value == "aggregate") {
+        return SummaryTimeSeriesImplementation::Aggregate;
+    }
+    throw std::invalid_argument(fmt::format(
+            "invalid QRET_SUMMARY_TIME_SERIES_IMPL '{}'; expected 'vector' or 'aggregate'",
+            value
+    ));
+}
+
 double ScLsFixedV0CompileInfo::GateThroughputAve() const {
-    return std::get<0>(CalcAveAndPeak(gate_throughput));
+    return std::get<0>(CalcAveAndPeak(gate_throughput_summary, gate_throughput));
 }
 std::uint64_t ScLsFixedV0CompileInfo::GateThroughputPeak() const {
-    return std::get<1>(CalcAveAndPeak(gate_throughput));
+    return std::get<1>(CalcAveAndPeak(gate_throughput_summary, gate_throughput));
 }
 double ScLsFixedV0CompileInfo::MeasurementFeedbackRateAve() const {
-    return std::get<0>(CalcAveAndPeak(measurement_feedback_rate));
+    return std::get<0>(
+            CalcAveAndPeak(measurement_feedback_rate_summary, measurement_feedback_rate)
+    );
 }
 std::uint64_t ScLsFixedV0CompileInfo::MeasurementFeedbackRatePeak() const {
-    return std::get<1>(CalcAveAndPeak(measurement_feedback_rate));
+    return std::get<1>(
+            CalcAveAndPeak(measurement_feedback_rate_summary, measurement_feedback_rate)
+    );
 }
 double ScLsFixedV0CompileInfo::MagicStateConsumptionRateAve() const {
-    return std::get<0>(CalcAveAndPeak(magic_state_consumption_rate));
+    return std::get<0>(
+            CalcAveAndPeak(magic_state_consumption_rate_summary, magic_state_consumption_rate)
+    );
 }
 std::uint64_t ScLsFixedV0CompileInfo::MagicStateConsumptionRatePeak() const {
-    return std::get<1>(CalcAveAndPeak(magic_state_consumption_rate));
+    return std::get<1>(
+            CalcAveAndPeak(magic_state_consumption_rate_summary, magic_state_consumption_rate)
+    );
 }
 double ScLsFixedV0CompileInfo::EntanglementConsumptionRateAve() const {
-    return std::get<0>(CalcAveAndPeak(entanglement_consumption_rate));
+    return std::get<0>(
+            CalcAveAndPeak(entanglement_consumption_rate_summary, entanglement_consumption_rate)
+    );
 }
 std::uint64_t ScLsFixedV0CompileInfo::EntanglementConsumptionRatePeak() const {
-    return std::get<1>(CalcAveAndPeak(entanglement_consumption_rate));
+    return std::get<1>(
+            CalcAveAndPeak(entanglement_consumption_rate_summary, entanglement_consumption_rate)
+    );
 }
 double ScLsFixedV0CompileInfo::ChipCellAlgorithmicQubitAve() const {
-    return std::get<0>(CalcAveAndPeak(chip_cell_algorithmic_qubit));
+    return std::get<0>(
+            CalcAveAndPeak(chip_cell_algorithmic_qubit_summary, chip_cell_algorithmic_qubit)
+    );
 }
 std::uint64_t ScLsFixedV0CompileInfo::ChipCellAlgorithmicQubitPeak() const {
-    return std::get<1>(CalcAveAndPeak(chip_cell_algorithmic_qubit));
+    return std::get<1>(
+            CalcAveAndPeak(chip_cell_algorithmic_qubit_summary, chip_cell_algorithmic_qubit)
+    );
 }
 double ScLsFixedV0CompileInfo::ChipCellAlgorithmicQubitRatioAve() const {
-    return std::get<0>(CalcAveAndPeak(chip_cell_algorithmic_qubit_ratio));
+    return std::get<0>(CalcAveAndPeak(
+            chip_cell_algorithmic_qubit_ratio_summary,
+            chip_cell_algorithmic_qubit_ratio
+    ));
 }
 double ScLsFixedV0CompileInfo::ChipCellAlgorithmicQubitRatioPeak() const {
-    return std::get<1>(CalcAveAndPeak(chip_cell_algorithmic_qubit_ratio));
+    return std::get<1>(CalcAveAndPeak(
+            chip_cell_algorithmic_qubit_ratio_summary,
+            chip_cell_algorithmic_qubit_ratio
+    ));
 }
 double ScLsFixedV0CompileInfo::ChipCellActiveQubitAreaAve() const {
-    return std::get<0>(CalcAveAndPeak(chip_cell_active_qubit_area));
+    return std::get<0>(
+            CalcAveAndPeak(chip_cell_active_qubit_area_summary, chip_cell_active_qubit_area)
+    );
 }
 std::uint64_t ScLsFixedV0CompileInfo::ChipCellActiveQubitAreaPeak() const {
-    return std::get<1>(CalcAveAndPeak(chip_cell_active_qubit_area));
+    return std::get<1>(
+            CalcAveAndPeak(chip_cell_active_qubit_area_summary, chip_cell_active_qubit_area)
+    );
 }
 double ScLsFixedV0CompileInfo::ChipCellActiveQubitAreaRatioAve() const {
-    return std::get<0>(CalcAveAndPeak(chip_cell_active_qubit_area_ratio));
+    return std::get<0>(CalcAveAndPeak(
+            chip_cell_active_qubit_area_ratio_summary,
+            chip_cell_active_qubit_area_ratio
+    ));
 }
 double ScLsFixedV0CompileInfo::ChipCellActiveQubitAreaRatioPeak() const {
-    return std::get<1>(CalcAveAndPeak(chip_cell_active_qubit_area_ratio));
+    return std::get<1>(CalcAveAndPeak(
+            chip_cell_active_qubit_area_ratio_summary,
+            chip_cell_active_qubit_area_ratio
+    ));
 }
 ::qret::Json ScLsFixedV0CompileInfo::Json() const {
     return Json(CompileInfoOutputMode::Full);
@@ -149,9 +205,13 @@ double ScLsFixedV0CompileInfo::ChipCellActiveQubitAreaRatioPeak() const {
 
     const auto to_json_time_series = [&j, mode, output_mode](
                                              const auto& vec,
+                                             const auto& stats,
                                              const std::string& key
                                      ) {
-        const auto [ave, peak] = ScLsFixedV0CompileInfo::CalcAveAndPeak(vec);
+        const auto [ave, peak] =
+                mode == CompileInfoOutputMode::Full
+                        ? ScLsFixedV0CompileInfo::CalcAveAndPeak(vec)
+                        : ScLsFixedV0CompileInfo::CalcAveAndPeak(stats, vec);
         if (mode == CompileInfoOutputMode::Full) {
             MarkJsonVectorAssignment("compile_info_json_before_assign_", key, vec, j, output_mode);
             j[key] = vec;
@@ -205,12 +265,16 @@ double ScLsFixedV0CompileInfo::ChipCellActiveQubitAreaRatioPeak() const {
         j["gate_count_detail"][ToString(type)] = count;
     }
     j["gate_depth"] = gate_depth;
-    to_json_time_series(gate_throughput, "gate_throughput");
+    to_json_time_series(gate_throughput, gate_throughput_summary, "gate_throughput");
 
     // about measurement depth
     j["measurement_feedback_count"] = measurement_feedback_count;
     j["measurement_feedback_depth"] = measurement_feedback_depth;
-    to_json_time_series(measurement_feedback_rate, "measurement_feedback_rate");
+    to_json_time_series(
+            measurement_feedback_rate,
+            measurement_feedback_rate_summary,
+            "measurement_feedback_rate"
+    );
     j["runtime_estimation_measurement_feedback_count"] =
             runtime_estimation_measurement_feedback_count;
     j["runtime_estimation_measurement_feedback_depth"] =
@@ -219,7 +283,11 @@ double ScLsFixedV0CompileInfo::ChipCellActiveQubitAreaRatioPeak() const {
     // about magic state consumption
     j["magic_state_consumption_count"] = magic_state_consumption_count;
     j["magic_state_consumption_depth"] = magic_state_consumption_depth;
-    to_json_time_series(magic_state_consumption_rate, "magic_state_consumption_rate");
+    to_json_time_series(
+            magic_state_consumption_rate,
+            magic_state_consumption_rate_summary,
+            "magic_state_consumption_rate"
+    );
     j["runtime_estimation_magic_state_consumption_count"] =
             runtime_estimation_magic_state_consumption_count;
     j["runtime_estimation_magic_state_consumption_depth"] =
@@ -229,7 +297,11 @@ double ScLsFixedV0CompileInfo::ChipCellActiveQubitAreaRatioPeak() const {
     // about entanglement consumption
     j["entanglement_consumption_count"] = entanglement_consumption_count;
     j["entanglement_consumption_depth"] = entanglement_consumption_depth;
-    to_json_time_series(entanglement_consumption_rate, "entanglement_consumption_rate");
+    to_json_time_series(
+            entanglement_consumption_rate,
+            entanglement_consumption_rate_summary,
+            "entanglement_consumption_rate"
+    );
     j["runtime_estimation_entanglement_consumption_count"] =
             runtime_estimation_entanglement_consumption_count;
     j["runtime_estimation_entanglement_consumption_depth"] =
@@ -238,10 +310,26 @@ double ScLsFixedV0CompileInfo::ChipCellActiveQubitAreaRatioPeak() const {
 
     // about cell consumption
     j["chip_cell_count"] = chip_cell_count;
-    to_json_time_series(chip_cell_algorithmic_qubit, "chip_cell_algorithmic_qubit");
-    to_json_time_series(chip_cell_algorithmic_qubit_ratio, "chip_cell_algorithmic_qubit_ratio");
-    to_json_time_series(chip_cell_active_qubit_area, "chip_cell_active_qubit_area");
-    to_json_time_series(chip_cell_active_qubit_area_ratio, "chip_cell_active_qubit_area_ratio");
+    to_json_time_series(
+            chip_cell_algorithmic_qubit,
+            chip_cell_algorithmic_qubit_summary,
+            "chip_cell_algorithmic_qubit"
+    );
+    to_json_time_series(
+            chip_cell_algorithmic_qubit_ratio,
+            chip_cell_algorithmic_qubit_ratio_summary,
+            "chip_cell_algorithmic_qubit_ratio"
+    );
+    to_json_time_series(
+            chip_cell_active_qubit_area,
+            chip_cell_active_qubit_area_summary,
+            "chip_cell_active_qubit_area"
+    );
+    to_json_time_series(
+            chip_cell_active_qubit_area_ratio,
+            chip_cell_active_qubit_area_ratio_summary,
+            "chip_cell_active_qubit_area_ratio"
+    );
     j["qubit_volume"] = qubit_volume;
 
     // about QEC resource estimation
@@ -262,24 +350,29 @@ std::string ScLsFixedV0CompileInfo::Markdown() const {
     ss << prefix << "entanglement_generation_period: " << entanglement_generation_period << '\n';
     ss << prefix << "maximum_entangled_state_stock: " << maximum_entangled_state_stock << '\n';
     ss << prefix << "reaction_time: " << reaction_time << '\n';
-    for (const auto& grid : *topology) {
-        if (grid.IsPlane()) {
-            ss << prefix << fmt::format("plane (z: {}, index: {})", grid.GetMinZ(), grid.GetIndex())
-               << '\n';
-            ss << indent << prefix << "chip_x: " << grid.GetMaxX() << '\n';
-            ss << indent << prefix << "chip_y: " << grid.GetMaxY() << '\n';
-        } else {
-            ss << prefix
-               << fmt::format(
-                          "grid (z: [{}, {}], index: {})",
-                          grid.GetMinZ(),
-                          grid.GetMaxZ(),
-                          grid.GetIndex()
-                  )
-               << '\n';
-            ss << indent << prefix << "chip_x: " << grid.GetMaxX() << '\n';
-            ss << indent << prefix << "chip_y: " << grid.GetMaxY() << '\n';
+    if (topology) {
+        for (const auto& grid : *topology) {
+            if (grid.IsPlane()) {
+                ss << prefix
+                   << fmt::format("plane (z: {}, index: {})", grid.GetMinZ(), grid.GetIndex())
+                   << '\n';
+                ss << indent << prefix << "chip_x: " << grid.GetMaxX() << '\n';
+                ss << indent << prefix << "chip_y: " << grid.GetMaxY() << '\n';
+            } else {
+                ss << prefix
+                   << fmt::format(
+                              "grid (z: [{}, {}], index: {})",
+                              grid.GetMinZ(),
+                              grid.GetMaxZ(),
+                              grid.GetIndex()
+                      )
+                   << '\n';
+                ss << indent << prefix << "chip_x: " << grid.GetMaxX() << '\n';
+                ss << indent << prefix << "chip_y: " << grid.GetMaxY() << '\n';
+            }
         }
+    } else {
+        ss << prefix << "topology: null\n";
     }
     ss << '\n';
 
@@ -456,24 +549,29 @@ std::ostream& operator<<(std::ostream& out, const ScLsFixedV0CompileInfo& info) 
         << '\n'
         << indent << "maximum_entangled_state_stock: " << info.maximum_entangled_state_stock << '\n'
         << indent << "reaction_time: " << info.reaction_time << '\n';
-    for (const auto& grid : *info.topology) {
-        if (grid.IsPlane()) {
-            out << indent
-                << fmt::format("plane (z: {}, index: {})", grid.GetMinZ(), grid.GetIndex()) << '\n';
-            out << indent << "  chip_x: " << grid.GetMaxX() << '\n';
-            out << indent << "  chip_y: " << grid.GetMaxY() << '\n';
-        } else {
-            out << indent
-                << fmt::format(
-                           "grid (z: [{}, {}], index: {})",
-                           grid.GetMinZ(),
-                           grid.GetMaxZ(),
-                           grid.GetIndex()
-                   )
-                << '\n';
-            out << indent << "  chip_x: " << grid.GetMaxX() << '\n';
-            out << indent << "  chip_y: " << grid.GetMaxY() << '\n';
+    if (info.topology) {
+        for (const auto& grid : *info.topology) {
+            if (grid.IsPlane()) {
+                out << indent
+                    << fmt::format("plane (z: {}, index: {})", grid.GetMinZ(), grid.GetIndex())
+                    << '\n';
+                out << indent << "  chip_x: " << grid.GetMaxX() << '\n';
+                out << indent << "  chip_y: " << grid.GetMaxY() << '\n';
+            } else {
+                out << indent
+                    << fmt::format(
+                               "grid (z: [{}, {}], index: {})",
+                               grid.GetMinZ(),
+                               grid.GetMaxZ(),
+                               grid.GetIndex()
+                       )
+                    << '\n';
+                out << indent << "  chip_x: " << grid.GetMaxX() << '\n';
+                out << indent << "  chip_y: " << grid.GetMaxY() << '\n';
+            }
         }
+    } else {
+        out << indent << "topology: null\n";
     }
     out << "about runtime\n"
         << indent << "runtime: " << info.runtime << '\n'

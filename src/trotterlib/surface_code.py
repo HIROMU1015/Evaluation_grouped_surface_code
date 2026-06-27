@@ -269,6 +269,43 @@ def file_sha256(path: str | Path) -> str:
     return digest.hexdigest()
 
 
+def qret_runtime_hashes(qret_path: str | Path) -> Dict[str, Any]:
+    qret = Path(qret_path).expanduser().resolve()
+    hashes: Dict[str, Any] = {
+        "qret_executable_path": str(qret),
+        "qret_executable_hash": file_sha256(qret),
+        "qret_core_library_path": None,
+        "qret_core_library_hash": None,
+    }
+    candidate: Path | None = None
+    try:
+        ldd_output = subprocess.check_output(
+            ["ldd", str(qret)],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        ldd_output = ""
+    for line in ldd_output.splitlines():
+        if "libqret-core.so" not in line or "=>" not in line:
+            continue
+        path_text = line.split("=>", 1)[1].strip().split(maxsplit=1)[0]
+        path = Path(path_text)
+        if path.exists():
+            candidate = path.resolve()
+            break
+    if candidate is None:
+        for name in ("libqret-core.so.1", "libqret-core.so"):
+            path = qret.parent / name
+            if path.exists():
+                candidate = path.resolve()
+                break
+    if candidate is not None:
+        hashes["qret_core_library_path"] = str(candidate)
+        hashes["qret_core_library_hash"] = file_sha256(candidate)
+    return hashes
+
+
 def _atomic_temp_path(path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(
@@ -381,6 +418,8 @@ _SURFACE_CODE_STEP_METRIC_NUMERIC_FIELDS = (
     "chip_cell_active_qubit_area_peak",
     "chip_cell_active_qubit_area_ratio_ave",
     "chip_cell_active_qubit_area_ratio_peak",
+    "estimated_execution_time_sec",
+    "compile_wall_time_sec",
 )
 _SURFACE_CODE_STEP_METRIC_PASSTHROUGH_FIELDS = ("execution_time_sec",)
 _SURFACE_CODE_COMPILE_INFO_METRIC_FIELDS = frozenset(
@@ -5033,6 +5072,7 @@ def surface_code_compile_cache_payload(
     architecture: SurfaceCodeArchitecture,
 ) -> Dict[str, Any]:
     qret_path = Path(architecture.qret_path).expanduser().resolve()
+    qret_hashes = qret_runtime_hashes(qret_path)
     topology_path = Path(architecture.topology_path).expanduser().resolve()
     topology_hash = (
         file_sha256(topology_path) if _compile_uses_topology(architecture.compile_mode) else None
@@ -5055,7 +5095,9 @@ def surface_code_compile_cache_payload(
         "allowed_failure_prob": float(architecture.allowed_failure_prob),
         "rotation_precision": float(artifact.rotation_precision),
         "qret_path": str(qret_path),
-        "qret_hash": file_sha256(qret_path),
+        "qret_hash": qret_hashes["qret_executable_hash"],
+        "qret_core_library_path": qret_hashes.get("qret_core_library_path"),
+        "qret_core_library_hash": qret_hashes.get("qret_core_library_hash"),
         "skip_compile_output": bool(architecture.skip_compile_output),
         "compile_info_output_mode": architecture.compile_info_output_mode,
     }
@@ -5267,6 +5309,7 @@ def compile_prepared_surface_code_step_artifact(
         raise FileNotFoundError(f"quration binary not found: {qret_path}")
     if _compile_uses_topology(architecture.compile_mode) and not topology_path.exists():
         raise FileNotFoundError(f"quration topology file not found: {topology_path}")
+    qret_hashes = qret_runtime_hashes(qret_path)
 
     runtime_root = _compile_runtime_root(artifact, architecture)
     runtime_root.mkdir(parents=True, exist_ok=True)
@@ -5300,7 +5343,9 @@ def compile_prepared_surface_code_step_artifact(
             "rotation_precision": float(artifact.rotation_precision),
             "compile_mode": architecture.compile_mode,
             "qret_path": str(qret_path),
-            "qret_hash": file_sha256(qret_path),
+            "qret_hash": qret_hashes["qret_executable_hash"],
+            "qret_core_library_path": qret_hashes.get("qret_core_library_path"),
+            "qret_core_library_hash": qret_hashes.get("qret_core_library_hash"),
             "topology_path": str(topology_path)
             if _compile_uses_topology(architecture.compile_mode)
             else None,
@@ -5423,6 +5468,7 @@ def compile_prepared_surface_code_step_artifact(
                 context=str(compile_info_path.resolve()),
             )
             metrics["compile_info_json"] = str(compile_info_path.resolve())
+            estimated_execution_time_sec = metrics.get("estimated_execution_time_sec")
             release_before = _current_rss_kb()
             del compile_info
             release_after = _current_rss_kb()
@@ -5444,36 +5490,43 @@ def compile_prepared_surface_code_step_artifact(
             )
 
         cache_key = surface_code_compile_cache_key(artifact, architecture)
-        metrics.update(
-            {
-                "target_error": float(artifact.target_error),
-                "step_time": float(artifact.step_time),
-                "rotation_precision": float(artifact.rotation_precision),
-                "cache_key": cache_key,
-                "generator": "grouped_surface_code_qret",
-                "auto_generated": True,
-                "source": "gr",
-                "compile_mode": architecture.compile_mode,
-                "execution_time_sec": elapsed,
-                "compile_cache_hit": cache_hit,
-                "compile_runtime_config": architecture.to_dict(),
-                "compile_runtime_config_source": "architecture",
-                "qasm_hash": artifact.qasm_hash,
-                "optimized_ir_hash": artifact.optimized_ir_hash,
-                "compiler_executable_path": str(qret_path),
-                "compiler_executable_hash": file_sha256(qret_path),
-                "topology_hash": file_sha256(topology_path)
-                if _compile_uses_topology(architecture.compile_mode)
-                else None,
-                **mapping_metadata,
-                "step_rz_count": int(artifact.step_rz_count),
-                "step_rz_layer": artifact.step_rz_layer,
-                "step_magic_state_count": int(artifact.step_magic_state_count),
-                "step_magic_state_depth": int(artifact.step_magic_state_depth),
-                "peak_magic_layer": int(artifact.peak_magic_layer),
-                "rz_call_cache": dict(artifact.rz_call_cache),
-            }
-        )
+        generated_metrics = {
+            "target_error": float(artifact.target_error),
+            "step_time": float(artifact.step_time),
+            "rotation_precision": float(artifact.rotation_precision),
+            "cache_key": cache_key,
+            "generator": "grouped_surface_code_qret",
+            "auto_generated": True,
+            "source": "gr",
+            "compile_mode": architecture.compile_mode,
+            "compile_wall_time_sec": elapsed,
+            # Backward-compatible alias for generated step metrics. Raw
+            # compile-info parsing keeps execution_time_sec as qret's
+            # physical execution-time estimate.
+            "execution_time_sec": elapsed,
+            "compile_cache_hit": cache_hit,
+            "compile_runtime_config": architecture.to_dict(),
+            "compile_runtime_config_source": "architecture",
+            "qasm_hash": artifact.qasm_hash,
+            "optimized_ir_hash": artifact.optimized_ir_hash,
+            "compiler_executable_path": str(qret_path),
+            "compiler_executable_hash": qret_hashes["qret_executable_hash"],
+            "compiler_core_library_path": qret_hashes.get("qret_core_library_path"),
+            "compiler_core_library_hash": qret_hashes.get("qret_core_library_hash"),
+            "topology_hash": file_sha256(topology_path)
+            if _compile_uses_topology(architecture.compile_mode)
+            else None,
+            **mapping_metadata,
+            "step_rz_count": int(artifact.step_rz_count),
+            "step_rz_layer": artifact.step_rz_layer,
+            "step_magic_state_count": int(artifact.step_magic_state_count),
+            "step_magic_state_depth": int(artifact.step_magic_state_depth),
+            "peak_magic_layer": int(artifact.peak_magic_layer),
+            "rz_call_cache": dict(artifact.rz_call_cache),
+        }
+        if estimated_execution_time_sec is not None:
+            generated_metrics["estimated_execution_time_sec"] = estimated_execution_time_sec
+        metrics.update(generated_metrics)
         with stage_recorder.stage("normalize_step_metrics") as span:
             normalized = normalize_surface_code_step_metrics(
                 metrics,
@@ -5486,6 +5539,8 @@ def compile_prepared_surface_code_step_artifact(
             "optimized_ir_hash",
             "compiler_executable_path",
             "compiler_executable_hash",
+            "compiler_core_library_path",
+            "compiler_core_library_hash",
             "topology_hash",
             "mapping_result_json",
             "mapping_result_hash",
@@ -5584,6 +5639,7 @@ def normalize_surface_code_step_metrics(
         }
     if "execution_time_sec" in metrics:
         out["execution_time_sec"] = float(metrics["execution_time_sec"])
+        out.setdefault("estimated_execution_time_sec", out["execution_time_sec"])
     for key in (
         "source",
         "compile_info_json",

@@ -457,7 +457,10 @@ def _compile_info_row(
     row["failure_probability"] = failure_value
     row["failure_probability_unavailable_reason"] = failure_reason
 
-    row["compile_elapsed_time"] = metrics.get("execution_time_sec")
+    row["compile_elapsed_time"] = metrics.get(
+        "compile_wall_time_sec",
+        metrics.get("execution_time_sec"),
+    )
     row["compile_elapsed_time_unavailable_reason"] = (
         None if row["compile_elapsed_time"] is not None else "not_collected"
     )
