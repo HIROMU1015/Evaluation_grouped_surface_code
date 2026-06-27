@@ -14,6 +14,9 @@ SKIP_SCRIPT_PATH = (
 CALC_INFO_SCRIPT_PATH = (
     Path(__file__).resolve().parents[1] / "scripts" / "profile_qret_calc_info_memory.py"
 )
+DEP_GRAPH_SCRIPT_PATH = (
+    Path(__file__).resolve().parents[1] / "scripts" / "profile_qret_dep_graph_memory.py"
+)
 
 
 def _load_script_module(path: Path = SCRIPT_PATH, name: str = "profile_qret_pre_routing_memory"):
@@ -238,3 +241,64 @@ def test_calc_info_profile_summary_extracts_pass_and_container_stats() -> None:
     )
     assert summary["post_calc_info_without_topology_rss_kb"] == 220
     assert summary["container_snapshots"][0]["dep_graph_nodes"] == 11
+
+
+def test_dep_graph_profile_defaults_to_legacy_vs_compact() -> None:
+    _load_script_module()
+    _load_script_module(CALC_INFO_SCRIPT_PATH, "profile_qret_calc_info_memory")
+    module = _load_script_module(
+        DEP_GRAPH_SCRIPT_PATH,
+        "profile_qret_dep_graph_memory",
+    )
+    assert module.DEFAULT_IMPLEMENTATIONS == ("legacy", "compact")
+    assert "legacy_dense" in module.IMPLEMENTATIONS
+    assert "legacy_no_id2ptr" in module.IMPLEMENTATIONS
+
+
+def test_dep_graph_profile_summary_reports_requested_fields() -> None:
+    _load_script_module()
+    _load_script_module(CALC_INFO_SCRIPT_PATH, "profile_qret_calc_info_memory")
+    module = _load_script_module(
+        DEP_GRAPH_SCRIPT_PATH,
+        "profile_qret_dep_graph_memory",
+    )
+    summary = module._summarize_results(
+        [
+            {
+                "case": "h4_2nd",
+                "implementation": "compact",
+                "gnu_time_maxrss_kb": 100,
+                "elapsed_seconds": 1.0,
+                "depgraph_delta_rss_kb": 20,
+                "depgraph_nodes": 3,
+                "depgraph_edges": 2,
+                "depgraph_duplicate_edge_count": 0,
+                "depgraph_maximum_indegree": 1,
+                "depgraph_average_indegree": 2 / 3,
+                "compact_payload_capacity_bytes": 64,
+                "returncode": 0,
+            },
+            {
+                "case": "h4_2nd",
+                "implementation": "compact",
+                "gnu_time_maxrss_kb": 120,
+                "elapsed_seconds": 3.0,
+                "depgraph_delta_rss_kb": 40,
+                "depgraph_nodes": 3,
+                "depgraph_edges": 2,
+                "depgraph_duplicate_edge_count": 0,
+                "depgraph_maximum_indegree": 1,
+                "depgraph_average_indegree": 2 / 3,
+                "compact_payload_capacity_bytes": 64,
+                "returncode": 0,
+            },
+        ]
+    )
+    row = summary["h4_2nd"]["compact"]
+    assert row["run_count"] == 2
+    assert row["median_peak_rss_kb"] == 110
+    assert row["median_elapsed_seconds"] == 2.0
+    assert row["median_depgraph_delta_rss_kb"] == 30
+    assert row["node_count"] == 3
+    assert row["edge_count"] == 2
+    assert row["returncodes"] == [0, 0]

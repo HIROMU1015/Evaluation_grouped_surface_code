@@ -8,11 +8,16 @@
 #include <fmt/core.h>
 #include <fmt/ranges.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cmath>
+#include <cstdlib>
 #include <fstream>
 #include <limits>
+#include <map>
+#include <memory>
 #include <numeric>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -270,20 +275,7 @@ void MarkCompileInfoStage(
 }
 
 qret::Json DepGraphStats(const DepGraph& graph) {
-    auto extra = qret::Json::object();
-    extra["dep_graph_object_size_bytes"] = sizeof(DepGraph);
-    extra["dep_graph_nodes"] = graph.NumNodes();
-    extra["dep_graph_edges"] = graph.NumEdges();
-    extra["dep_graph_ptr2id_size"] = graph.PointerMapSize();
-    extra["dep_graph_id2ptr_size"] = graph.IdMapSize();
-    extra["dep_graph_node_estimated_payload_bytes"] = graph.NumNodes() * sizeof(DiGraph::Node);
-    extra["dep_graph_edge_estimated_payload_bytes"] = graph.NumEdges() * sizeof(DiGraph::Edge);
-    extra["dep_graph_pointer_map_estimated_payload_bytes"] =
-            graph.PointerMapSize()
-                    * (sizeof(const ScLsInstructionBase*) + sizeof(DiGraph::IdType))
-            + graph.IdMapSize()
-                    * (sizeof(DiGraph::IdType) + sizeof(const ScLsInstructionBase*));
-    return extra;
+    return graph.ProfileStats();
 }
 
 qret::Json InstQueueStats(const InstQueue& queue) {
@@ -376,30 +368,327 @@ qret::Json JsonValueStats(const qret::Json& value) {
 }
 }  // namespace
 
-DepGraph::DepGraph(const MachineFunction& mf) {
+CompactDepGraph::CompactDepGraph()
+    : parent_offsets_{0} {}
+
+CompactDepGraph::IdType CompactDepGraph::AddNode(Weight weight) {
+    if (finalized_) {
+        throw std::logic_error("Cannot add node after finalizing CompactDepGraph.");
+    }
+    SealCurrentNodeIfNeeded();
+    if (node_weights_.size() >= std::numeric_limits<IdType>::max()) {
+        throw std::overflow_error("CompactDepGraph node id overflow.");
+    }
+    node_weights_.push_back(weight);
+    current_node_open_ = true;
+    return static_cast<IdType>(node_weights_.size() - 1);
+}
+
+void CompactDepGraph::AddEdgeToCurrentNode(IdType from, Length length) {
+    if (!current_node_open_ || node_weights_.empty()) {
+        throw std::logic_error("CompactDepGraph has no current node.");
+    }
+    const auto to = static_cast<IdType>(node_weights_.size() - 1);
+    if (from >= to) {
+        topological_order_invariant_ = false;
+        throw std::logic_error("CompactDepGraph requires from_id < to_id.");
+    }
+    const auto start = static_cast<std::size_t>(parent_offsets_.back());
+    const auto end = parent_ids_.size();
+    for (auto i = start; i < end; ++i) {
+        if (parent_ids_[i] == from) {
+            edge_lengths_[i] = length;
+            ++duplicate_edge_count_;
+            return;
+        }
+    }
+    parent_ids_.push_back(from);
+    edge_lengths_.push_back(length);
+    max_indegree_ = std::max(max_indegree_, parent_ids_.size() - start);
+}
+
+void CompactDepGraph::Finalize() {
+    if (finalized_) {
+        return;
+    }
+    SealCurrentNodeIfNeeded();
+    finalized_ = true;
+    if (parent_offsets_.size() != node_weights_.size() + 1) {
+        throw std::logic_error("CompactDepGraph parent offset invariant failed.");
+    }
+}
+
+void CompactDepGraph::SetNodeWeight(IdType id, Weight weight) {
+    CheckNode(id);
+    node_weights_[id] = weight;
+}
+
+void CompactDepGraph::SetAllLength(Length length) {
+    Finalize();
+    std::fill(edge_lengths_.begin(), edge_lengths_.end(), length);
+}
+
+void CompactDepGraph::SetLength(IdType from, IdType to, Length length) {
+    Finalize();
+    CheckNode(from);
+    CheckNode(to);
+    const auto start = parent_offsets_[to];
+    const auto end = parent_offsets_[static_cast<std::size_t>(to) + 1];
+    for (auto i = start; i < end; ++i) {
+        if (parent_ids_[i] == from) {
+            edge_lengths_[i] = length;
+            return;
+        }
+    }
+    throw std::out_of_range("CompactDepGraph edge is not found.");
+}
+
+CompactDepGraph::Weight CompactDepGraph::CalcHeaviest() const {
+    CheckFinalized();
+    working_dp_.assign(node_weights_.size(), 0);
+    auto ret = Weight{0};
+    for (auto id = std::size_t{0}; id < node_weights_.size(); ++id) {
+        auto parent_max = Weight{0};
+        for (auto edge_i = parent_offsets_[id]; edge_i < parent_offsets_[id + 1]; ++edge_i) {
+            parent_max = std::max(parent_max, working_dp_[parent_ids_[edge_i]]);
+        }
+        working_dp_[id] = parent_max + node_weights_[id];
+        ret = std::max(ret, working_dp_[id]);
+    }
+    return ret;
+}
+
+CompactDepGraph::Length CompactDepGraph::CalcLongest() const {
+    CheckFinalized();
+    working_dp_.assign(node_weights_.size(), 0);
+    auto ret = Length{0};
+    for (auto id = std::size_t{0}; id < node_weights_.size(); ++id) {
+        auto parent_max = Length{0};
+        for (auto edge_i = parent_offsets_[id]; edge_i < parent_offsets_[id + 1]; ++edge_i) {
+            const auto parent = parent_ids_[edge_i];
+            parent_max = std::max(parent_max, working_dp_[parent] + edge_lengths_[edge_i]);
+        }
+        working_dp_[id] = parent_max;
+        ret = std::max(ret, working_dp_[id]);
+    }
+    return ret;
+}
+
+std::size_t CompactDepGraph::NumNodes() const {
+    return node_weights_.size();
+}
+
+std::size_t CompactDepGraph::NumEdges() const {
+    return parent_ids_.size();
+}
+
+std::size_t CompactDepGraph::DuplicateEdgeCount() const {
+    return duplicate_edge_count_;
+}
+
+std::size_t CompactDepGraph::MaxIndegree() const {
+    return max_indegree_;
+}
+
+double CompactDepGraph::AverageIndegree() const {
+    if (node_weights_.empty()) {
+        return 0.0;
+    }
+    return static_cast<double>(parent_ids_.size()) / static_cast<double>(node_weights_.size());
+}
+
+bool CompactDepGraph::TopologicalOrderInvariant() const {
+    return topological_order_invariant_;
+}
+
+qret::Json CompactDepGraph::ProfileStats() const {
+    auto extra = qret::Json::object();
+    extra["node_count"] = node_weights_.size();
+    extra["edge_count"] = parent_ids_.size();
+    extra["parent_offsets_size"] = parent_offsets_.size();
+    extra["parent_offsets_capacity"] = parent_offsets_.capacity();
+    extra["parent_ids_size"] = parent_ids_.size();
+    extra["parent_ids_capacity"] = parent_ids_.capacity();
+    extra["edge_lengths_size"] = edge_lengths_.size();
+    extra["edge_lengths_capacity"] = edge_lengths_.capacity();
+    extra["node_weights_size"] = node_weights_.size();
+    extra["node_weights_capacity"] = node_weights_.capacity();
+    extra["working_dp_size"] = working_dp_.size();
+    extra["working_dp_capacity"] = working_dp_.capacity();
+    extra["parent_offsets_capacity_bytes"] =
+            parent_offsets_.capacity() * sizeof(std::uint32_t);
+    extra["parent_ids_capacity_bytes"] = parent_ids_.capacity() * sizeof(IdType);
+    extra["edge_lengths_capacity_bytes"] = edge_lengths_.capacity() * sizeof(Length);
+    extra["node_weights_capacity_bytes"] = node_weights_.capacity() * sizeof(Weight);
+    extra["working_dp_capacity_bytes"] = working_dp_.capacity() * sizeof(std::uint64_t);
+    extra["temporary_dedup_buffer_max_size"] = max_indegree_;
+    extra["duplicate_edge_count"] = duplicate_edge_count_;
+    extra["maximum_indegree"] = max_indegree_;
+    extra["average_indegree"] = AverageIndegree();
+    extra["topological_order_invariant"] = topological_order_invariant_;
+    extra["finalized"] = finalized_;
+    return extra;
+}
+
+void CompactDepGraph::SealCurrentNodeIfNeeded() {
+    if (!current_node_open_) {
+        return;
+    }
+    if (parent_ids_.size() > std::numeric_limits<std::uint32_t>::max()) {
+        throw std::overflow_error("CompactDepGraph edge offset overflow.");
+    }
+    parent_offsets_.push_back(static_cast<std::uint32_t>(parent_ids_.size()));
+    current_node_open_ = false;
+}
+
+void CompactDepGraph::CheckFinalized() const {
+    if (!finalized_) {
+        throw std::logic_error("CompactDepGraph must be finalized before querying.");
+    }
+}
+
+void CompactDepGraph::CheckNode(IdType id) const {
+    if (id >= node_weights_.size()) {
+        throw std::out_of_range("CompactDepGraph node is not found.");
+    }
+}
+
+namespace {
+enum class DepGraphImplementation : std::uint8_t {
+    Legacy,
+    LegacyNoId2Ptr,
+    LegacyDense,
+    Compact,
+};
+
+DepGraphImplementation ParseDepGraphImplementation() {
+    const auto* raw = std::getenv("QRET_DEP_GRAPH_IMPL");
+    if (raw == nullptr || std::string(raw).empty() || std::string(raw) == "compact") {
+        return DepGraphImplementation::Compact;
+    }
+    const auto value = std::string(raw);
+    if (value == "legacy") {
+        return DepGraphImplementation::Legacy;
+    }
+    if (value == "legacy_no_id2ptr") {
+        return DepGraphImplementation::LegacyNoId2Ptr;
+    }
+    if (value == "legacy_dense") {
+        return DepGraphImplementation::LegacyDense;
+    }
+    throw std::runtime_error(
+            fmt::format(
+                    "Invalid QRET_DEP_GRAPH_IMPL '{}'. Expected one of: legacy, "
+                    "legacy_no_id2ptr, legacy_dense, compact.",
+                    value
+            )
+    );
+}
+
+std::string ToString(DepGraphImplementation mode) {
+    switch (mode) {
+        case DepGraphImplementation::Legacy:
+            return "legacy";
+        case DepGraphImplementation::LegacyNoId2Ptr:
+            return "legacy_no_id2ptr";
+        case DepGraphImplementation::LegacyDense:
+            return "legacy_dense";
+        case DepGraphImplementation::Compact:
+            return "compact";
+        default:
+            break;
+    }
+    throw std::runtime_error("unknown DepGraphImplementation");
+}
+
+bool UsesLegacyGraph(DepGraphImplementation mode) {
+    return mode == DepGraphImplementation::Legacy
+            || mode == DepGraphImplementation::LegacyNoId2Ptr
+            || mode == DepGraphImplementation::LegacyDense;
+}
+
+bool StoresPtrMap(DepGraphImplementation mode) {
+    return mode == DepGraphImplementation::Legacy
+            || mode == DepGraphImplementation::LegacyNoId2Ptr;
+}
+
+bool StoresIdMap(DepGraphImplementation mode) {
+    return mode == DepGraphImplementation::Legacy;
+}
+}  // namespace
+
+struct DepGraph::Impl {
+    explicit Impl(DepGraphImplementation tmp_mode)
+        : mode(tmp_mode) {}
+
+    void AddNode(IdType id, Weight weight, const ScLsInstructionBase& inst) {
+        if (UsesLegacyGraph(mode)) {
+            legacy_graph.AddNode(id, weight);
+            if (StoresPtrMap(mode)) {
+                ptr2id[&inst] = id;
+            }
+            if (StoresIdMap(mode)) {
+                id2ptr[id] = &inst;
+            }
+        } else {
+            const auto compact_id = compact_graph.AddNode(weight);
+            if (compact_id != id) {
+                throw std::logic_error("CompactDepGraph dense ID invariant failed.");
+            }
+        }
+    }
+
+    void AddEdge(IdType from, IdType to, Length length = 0) {
+        if (UsesLegacyGraph(mode)) {
+            legacy_graph.AddEdge(from, to, length);
+        } else {
+            compact_graph.AddEdgeToCurrentNode(from, length);
+        }
+    }
+
+    void Finalize() {
+        if (UsesLegacyGraph(mode)) {
+            const auto is_dag = legacy_graph.Topsort();
+            if (!is_dag) {
+                throw std::logic_error("instruction graph is not DAG");
+            }
+        } else {
+            compact_graph.Finalize();
+        }
+    }
+
+    DepGraphImplementation mode;
+    std::map<const ScLsInstructionBase*, IdType> ptr2id = {};
+    std::map<IdType, const ScLsInstructionBase*> id2ptr = {};
+    DiGraph legacy_graph = {};
+    CompactDepGraph compact_graph = {};
+};
+
+DepGraph::DepGraph(const MachineFunction& mf)
+    : impl_(std::make_unique<Impl>(ParseDepGraphImplementation())) {
     const auto& target = *static_cast<const ScLsFixedV0TargetMachine*>(mf.GetTarget());
 
-    // Construct graph (DAG)
-    graph_ = DiGraph();
-    auto q2id = std::map<QSymbol, DiGraph::IdType>();
-    auto c2id = std::map<CSymbol, DiGraph::IdType>();
+    auto q2id = std::map<QSymbol, IdType>();
+    auto c2id = std::map<CSymbol, IdType>();
     for (CSymbol::IdType i = 0; i < NumReservedCSymbols; ++i) {
-        c2id[CSymbol{i}] = std::numeric_limits<DiGraph::IdType>::max();
+        c2id[CSymbol{i}] = std::numeric_limits<IdType>::max();
     }
     auto measurement_c = std::unordered_set<CSymbol>{};
 
     auto add_edge = [&q2id, &c2id, &measurement_c, &target, this](
-                            const DiGraph::IdType id,
+                            const IdType id,
                             const ScLsInstructionBase& inst
                     ) {
         // Check qtarget.
         for (const auto& q : inst.QTarget()) {
             if (q2id.contains(q)) {
                 const auto old = q2id.at(q);
-                graph_.AddEdge(old, id);
+                impl_->AddEdge(old, id);
             }
             q2id[q] = id;
         }
+
+        // Check Move and MoveTrans.
         if (const auto* i = DynCast<Move>(&inst)) {
             const auto src = i->Qubit();
             const auto dst = i->QDest();
@@ -420,9 +709,9 @@ DepGraph::DepGraph(const MachineFunction& mf) {
         for (const auto& c : inst.Condition()) {
             const auto old = c2id.at(c);
             if (measurement_c.contains(c)) {
-                graph_.AddEdge(old, id, target.machine_option.reaction_time);
+                impl_->AddEdge(old, id, target.machine_option.reaction_time);
             } else if (c.Id() >= NumReservedCSymbols) {
-                graph_.AddEdge(old, id, 0);
+                impl_->AddEdge(old, id, 0);
             }
         }
 
@@ -440,13 +729,13 @@ DepGraph::DepGraph(const MachineFunction& mf) {
             }
             const auto old = c2id.at(c);
             if (measurement_c.contains(c)) {
-                graph_.AddEdge(old, id, target.machine_option.reaction_time);
+                impl_->AddEdge(old, id, target.machine_option.reaction_time);
             } else if (c.Id() >= NumReservedCSymbols) {
-                graph_.AddEdge(old, id, 0);
+                impl_->AddEdge(old, id, 0);
             }
         }
 
-        // Check CCreate.
+        // Check ccreate.
         for (const auto& c : inst.CCreate()) {
             if (c2id.contains(c)) {
                 throw std::runtime_error(
@@ -460,29 +749,136 @@ DepGraph::DepGraph(const MachineFunction& mf) {
                 );
             }
             c2id[c] = id;
-
             if (inst.IsMeasurement()) {
                 measurement_c.emplace(c);
             }
         }
     };
 
+    auto id = IdType{0};
     for (const auto& bb : mf) {
         for (const auto& minst : bb) {
             const auto& inst = *static_cast<const ScLsInstructionBase*>(minst.get());
-            const auto id = static_cast<DiGraph::IdType>(ptr2id_.size());
-            ptr2id_[&inst] = id;
-            id2ptr_[id] = &inst;
-            graph_.AddNode(id, inst.Latency());
+            impl_->AddNode(id, inst.Latency(), inst);
             add_edge(id, inst);
+            ++id;
         }
     }
 
-    // Sort topologically
-    const auto is_dag = graph_.Topsort();
-    if (!is_dag) {
-        throw std::logic_error("instruction graph is not DAG");
+    impl_->Finalize();
+}
+
+DepGraph::~DepGraph() = default;
+DepGraph::DepGraph(DepGraph&&) noexcept = default;
+DepGraph& DepGraph::operator=(DepGraph&&) noexcept = default;
+
+void DepGraph::SetInstWeight(const ScLsInstructionBase& inst, Weight weight) {
+    if (!StoresPtrMap(impl_->mode)) {
+        throw std::logic_error("SetInstWeight requires a DepGraph pointer map.");
     }
+    SetNodeWeight(impl_->ptr2id.at(&inst), weight);
+}
+
+void DepGraph::SetNodeWeight(IdType id, Weight weight) {
+    if (UsesLegacyGraph(impl_->mode)) {
+        impl_->legacy_graph.SetNodeWeight(id, weight);
+    } else {
+        impl_->compact_graph.SetNodeWeight(id, weight);
+    }
+}
+
+void DepGraph::SetAllLength(Length length) {
+    if (UsesLegacyGraph(impl_->mode)) {
+        for (const auto& node : impl_->legacy_graph) {
+            for (const auto& from : node.parent) {
+                impl_->legacy_graph.SetEdgeLength(from, node.id, length);
+            }
+        }
+    } else {
+        impl_->compact_graph.SetAllLength(length);
+    }
+}
+
+void DepGraph::SetLength(
+        const ScLsInstructionBase& from,
+        const ScLsInstructionBase& to,
+        Length length
+) {
+    if (!StoresPtrMap(impl_->mode)) {
+        throw std::logic_error("SetLength by instruction requires a DepGraph pointer map.");
+    }
+    SetLength(impl_->ptr2id.at(&from), impl_->ptr2id.at(&to), length);
+}
+
+void DepGraph::SetLength(IdType from, IdType to, Length length) {
+    if (UsesLegacyGraph(impl_->mode)) {
+        impl_->legacy_graph.SetEdgeLength(from, to, length);
+    } else {
+        impl_->compact_graph.SetLength(from, to, length);
+    }
+}
+
+DepGraph::Weight DepGraph::CalcHeaviest() const {
+    if (UsesLegacyGraph(impl_->mode)) {
+        const auto& [weight, _path, _depth_of_each_node] = FindHeaviestPath(impl_->legacy_graph);
+        return weight;
+    }
+    return impl_->compact_graph.CalcHeaviest();
+}
+
+DepGraph::Length DepGraph::CalcLongest() const {
+    if (UsesLegacyGraph(impl_->mode)) {
+        const auto& [length, _path, _depth_of_each_node] = FindLongestPath(impl_->legacy_graph);
+        return length;
+    }
+    return impl_->compact_graph.CalcLongest();
+}
+
+std::size_t DepGraph::NumNodes() const {
+    return UsesLegacyGraph(impl_->mode) ? impl_->legacy_graph.NumNodes()
+                                        : impl_->compact_graph.NumNodes();
+}
+
+std::size_t DepGraph::NumEdges() const {
+    return UsesLegacyGraph(impl_->mode) ? impl_->legacy_graph.NumEdges()
+                                        : impl_->compact_graph.NumEdges();
+}
+
+std::size_t DepGraph::PointerMapSize() const {
+    return impl_->ptr2id.size();
+}
+
+std::size_t DepGraph::IdMapSize() const {
+    return impl_->id2ptr.size();
+}
+
+std::string DepGraph::ImplementationMode() const {
+    return ToString(impl_->mode);
+}
+
+qret::Json DepGraph::ProfileStats() const {
+    auto extra = qret::Json::object();
+    extra["dep_graph_implementation"] = ImplementationMode();
+    extra["dep_graph_object_size_bytes"] = sizeof(DepGraph);
+    extra["dep_graph_nodes"] = NumNodes();
+    extra["dep_graph_edges"] = NumEdges();
+    extra["dep_graph_ptr2id_size"] = PointerMapSize();
+    extra["dep_graph_id2ptr_size"] = IdMapSize();
+    if (UsesLegacyGraph(impl_->mode)) {
+        extra["dep_graph_node_estimated_payload_bytes"] = NumNodes() * sizeof(DiGraph::Node);
+        extra["dep_graph_edge_estimated_payload_bytes"] = NumEdges() * sizeof(DiGraph::Edge);
+        extra["dep_graph_pointer_map_estimated_payload_bytes"] =
+                PointerMapSize() * (sizeof(const ScLsInstructionBase*) + sizeof(IdType))
+                + IdMapSize() * (sizeof(IdType) + sizeof(const ScLsInstructionBase*));
+        extra["topological_order_invariant"] = true;
+        return extra;
+    }
+
+    auto compact = impl_->compact_graph.ProfileStats();
+    for (auto it = compact.begin(); it != compact.end(); ++it) {
+        extra[fmt::format("compact_{}", it.key())] = it.value();
+    }
+    return extra;
 }
 
 class StateWithoutTopology {
@@ -1014,10 +1410,12 @@ bool CompileInfoWithoutTopology::RunOnMachineFunction(MachineFunction& mf) {
     );
 
     // gate_depth
+    auto inst_id = DepGraph::IdType{0};
     for (const auto& bb : mf) {
         for (const auto& minst : bb) {
             const auto& inst = *static_cast<const ScLsInstructionBase*>(minst.get());
-            graph.SetInstWeight(inst, inst.Latency() == 0 ? 0 : 1);
+            graph.SetNodeWeight(inst_id, inst.Latency() == 0 ? 0 : 1);
+            ++inst_id;
         }
     }
     compile_info.gate_depth = graph.CalcHeaviest();
@@ -1029,10 +1427,12 @@ bool CompileInfoWithoutTopology::RunOnMachineFunction(MachineFunction& mf) {
     );
 
     // magic_state_consumption_depth
+    inst_id = DepGraph::IdType{0};
     for (const auto& bb : mf) {
         for (const auto& minst : bb) {
             const auto& inst = *static_cast<const ScLsInstructionBase*>(minst.get());
-            graph.SetInstWeight(inst, inst.UseMagicState() ? 1 : 0);
+            graph.SetNodeWeight(inst_id, inst.UseMagicState() ? 1 : 0);
+            ++inst_id;
         }
     }
     compile_info.magic_state_consumption_depth = graph.CalcHeaviest();
@@ -1049,10 +1449,12 @@ bool CompileInfoWithoutTopology::RunOnMachineFunction(MachineFunction& mf) {
     );
 
     // entanglement_consumption_depth
+    inst_id = DepGraph::IdType{0};
     for (const auto& bb : mf) {
         for (const auto& minst : bb) {
             const auto& inst = *static_cast<const ScLsInstructionBase*>(minst.get());
-            graph.SetInstWeight(inst, inst.UseEntanglement() ? 1 : 0);
+            graph.SetNodeWeight(inst_id, inst.UseEntanglement() ? 1 : 0);
+            ++inst_id;
         }
     }
     compile_info.entanglement_consumption_depth = graph.CalcHeaviest();
@@ -1094,36 +1496,43 @@ bool CompileInfoWithoutTopology::RunOnMachineFunction(MachineFunction& mf) {
     {
         graph.SetAllLength(0);
 
-        auto c2inst = std::map<CSymbol, const ScLsInstructionBase*>();
+        struct FeedbackSource {
+            DepGraph::IdType id = 0;
+            bool is_measurement = false;
+        };
+
+        auto c2inst = std::map<CSymbol, std::optional<FeedbackSource>>();
         for (CSymbol::IdType i = 0; i < NumReservedCSymbols; ++i) {
-            c2inst[CSymbol{i}] = nullptr;
+            c2inst[CSymbol{i}] = std::nullopt;
         }
+        inst_id = DepGraph::IdType{0};
         for (const auto& bb : mf) {
             for (const auto& minst : bb) {
                 const auto& inst = *static_cast<const ScLsInstructionBase*>(minst.get());
 
                 // If condition is measurement result, set length to 1.
                 for (const auto& c : inst.Condition()) {
-                    const auto* from = c2inst.at(c);
-                    if (from != nullptr && from->IsMeasurement()) {
+                    const auto& from = c2inst.at(c);
+                    if (from.has_value() && from->is_measurement) {
                         // Measurement.
-                        graph.SetLength(*from, inst, 1);
+                        graph.SetLength(from->id, inst_id, 1);
                     }
                 }
 
                 // Check CDepend.
                 for (const auto& c : inst.CDepend()) {
-                    const auto* from = c2inst.at(c);
-                    if (from != nullptr && from->IsMeasurement()) {
+                    const auto& from = c2inst.at(c);
+                    if (from.has_value() && from->is_measurement) {
                         // c is measurement result.
-                        graph.SetLength(*from, inst, 1);
+                        graph.SetLength(from->id, inst_id, 1);
                     }
                 }
 
                 // Check CCreate.
                 for (const auto& c : inst.CCreate()) {
-                    c2inst[c] = &inst;
+                    c2inst[c] = FeedbackSource{.id = inst_id, .is_measurement = inst.IsMeasurement()};
                 }
+                ++inst_id;
             }
         }
     }

@@ -8,14 +8,17 @@ __pycache__/
 .ruff_cache/
 .ipynb_checkpoints/
 /build/quration/
+/build/quration-tests/
 benchmark_results/
 artifacts/surface_code_cache/
 artifacts/surface_code_experiments/
 artifacts/surface_code_architecture_sweep/
 artifacts/qret_calc_info_memory/
+artifacts/qret_dep_graph_memory/
 artifacts/implementation_visual_overview/
 artifacts/surface_code_share/quration_topology_free_memory_note_logs_*/
 artifacts/surface_code_share/quration_topology_free_memory_note_logs_*.tar.gz
 docs/quration_memory_measurement_plan.md
 docs/quration_topology_free_memory_note.md
 Quration_QS18*.pdf
+third_party/quration/cmake_test_discovery_*.json

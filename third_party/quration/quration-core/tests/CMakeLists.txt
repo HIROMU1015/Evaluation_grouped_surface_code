@@ -72,6 +72,7 @@ add_test(runtime toffoli_state)
 # target
 add_test(target/sc_ls_fixed_v0 asm_printer)
 add_test(target/sc_ls_fixed_v0 calc_compile_info_qec)
+add_test(target/sc_ls_fixed_v0 compact_dep_graph)
 add_test(target/sc_ls_fixed_v0 geometry)
 add_test(target/sc_ls_fixed_v0 pipeline_state)
 add_test(target/sc_ls_fixed_v0 lowering)

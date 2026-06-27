@@ -10,64 +10,94 @@
 #include <fmt/ostream.h>
 
 #include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
 
 #include "qret/base/graph.h"
+#include "qret/base/json.h"
 #include "qret/codegen/machine_function.h"
 #include "qret/codegen/machine_function_pass.h"
 #include "qret/qret_export.h"
 #include "qret/target/sc_ls_fixed_v0/instruction.h"
 
 namespace qret::sc_ls_fixed_v0 {
-class QRET_EXPORT DepGraph {
+class QRET_EXPORT CompactDepGraph {
 public:
-    explicit DepGraph(const MachineFunction& mf);
+    using IdType = DiGraph::IdType;
+    using Weight = DiGraph::Weight;
+    using Length = DiGraph::Length;
 
-    void SetInstWeight(const ScLsInstructionBase& inst, DiGraph::Weight weight) {
-        const auto id = ptr2id_.at(&inst);
-        graph_.SetNodeWeight(id, weight);
-    }
-    void SetAllLength(DiGraph::Length length) {
-        for (const auto& node : graph_) {
-            for (const auto& from : node.parent) {
-                graph_.SetEdgeLength(from, node.id, length);
-            }
-        }
-    }
-    void SetLength(
-            const ScLsInstructionBase& from,
-            const ScLsInstructionBase& to,
-            DiGraph::Length length
-    ) {
-        const auto from_id = ptr2id_.at(&from);
-        const auto to_id = ptr2id_.at(&to);
-        graph_.SetEdgeLength(from_id, to_id, length);
-    }
+    CompactDepGraph();
 
-    DiGraph::Weight CalcHeaviest() const {
-        const auto& [weight, _path, _depth_of_each_node] = FindHeaviestPath(graph_);
-        return weight;
-    }
-    DiGraph::Length CalcLongest() const {
-        const auto& [length, _path, _depth_of_each_node] = FindLongestPath(graph_);
-        return length;
-    }
-    std::size_t NumNodes() const {
-        return graph_.NumNodes();
-    }
-    std::size_t NumEdges() const {
-        return graph_.NumEdges();
-    }
-    std::size_t PointerMapSize() const {
-        return ptr2id_.size();
-    }
-    std::size_t IdMapSize() const {
-        return id2ptr_.size();
-    }
+    IdType AddNode(Weight weight = 0);
+    void AddEdgeToCurrentNode(IdType from, Length length = 0);
+    void Finalize();
+
+    void SetNodeWeight(IdType id, Weight weight);
+    void SetAllLength(Length length);
+    void SetLength(IdType from, IdType to, Length length);
+
+    [[nodiscard]] Weight CalcHeaviest() const;
+    [[nodiscard]] Length CalcLongest() const;
+
+    [[nodiscard]] std::size_t NumNodes() const;
+    [[nodiscard]] std::size_t NumEdges() const;
+    [[nodiscard]] std::size_t DuplicateEdgeCount() const;
+    [[nodiscard]] std::size_t MaxIndegree() const;
+    [[nodiscard]] double AverageIndegree() const;
+    [[nodiscard]] bool TopologicalOrderInvariant() const;
+    [[nodiscard]] qret::Json ProfileStats() const;
 
 private:
-    std::map<const ScLsInstructionBase*, DiGraph::IdType> ptr2id_;
-    std::map<DiGraph::IdType, const ScLsInstructionBase*> id2ptr_;
-    DiGraph graph_;
+    void SealCurrentNodeIfNeeded();
+    void CheckFinalized() const;
+    void CheckNode(IdType id) const;
+
+    std::vector<Weight> node_weights_;
+    std::vector<std::uint32_t> parent_offsets_;
+    std::vector<IdType> parent_ids_;
+    std::vector<Length> edge_lengths_;
+    mutable std::vector<std::uint64_t> working_dp_;
+    std::size_t duplicate_edge_count_ = 0;
+    std::size_t max_indegree_ = 0;
+    bool current_node_open_ = false;
+    bool finalized_ = false;
+    bool topological_order_invariant_ = true;
+};
+
+class QRET_EXPORT DepGraph {
+public:
+    using IdType = DiGraph::IdType;
+    using Weight = DiGraph::Weight;
+    using Length = DiGraph::Length;
+
+    explicit DepGraph(const MachineFunction& mf);
+    ~DepGraph();
+    DepGraph(const DepGraph&) = delete;
+    DepGraph& operator=(const DepGraph&) = delete;
+    DepGraph(DepGraph&&) noexcept;
+    DepGraph& operator=(DepGraph&&) noexcept;
+
+    void SetInstWeight(const ScLsInstructionBase& inst, Weight weight);
+    void SetNodeWeight(IdType id, Weight weight);
+    void SetAllLength(Length length);
+    void SetLength(const ScLsInstructionBase& from, const ScLsInstructionBase& to, Length length);
+    void SetLength(IdType from, IdType to, Length length);
+
+    [[nodiscard]] Weight CalcHeaviest() const;
+    [[nodiscard]] Length CalcLongest() const;
+    [[nodiscard]] std::size_t NumNodes() const;
+    [[nodiscard]] std::size_t NumEdges() const;
+    [[nodiscard]] std::size_t PointerMapSize() const;
+    [[nodiscard]] std::size_t IdMapSize() const;
+    [[nodiscard]] std::string ImplementationMode() const;
+    [[nodiscard]] qret::Json ProfileStats() const;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
 };
 class QRET_EXPORT TimeSeries {
 public:
