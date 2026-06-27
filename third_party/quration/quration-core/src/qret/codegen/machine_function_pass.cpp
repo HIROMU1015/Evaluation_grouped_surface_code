@@ -37,6 +37,22 @@ qret::Json PassExtra(
     extra["has_compile_info"] = mf.HasCompileInfo();
     return extra;
 }
+
+std::string_view BoundaryStage(std::string_view pass_argument, bool before) {
+    if (pass_argument == "sc_ls_fixed_v0::mapping") {
+        return before ? "before_mapping" : "after_mapping";
+    }
+    if (pass_argument == "sc_ls_fixed_v0::routing") {
+        return before ? "routing_entry_from_pass_manager" : "routing_pass_exit";
+    }
+    if (pass_argument == "sc_ls_fixed_v0::calc_info_without_topology") {
+        return before ? "before_calc_info_without_topology" : "after_calc_info_without_topology";
+    }
+    if (pass_argument == "sc_ls_fixed_v0::calc_info_with_topology") {
+        return before ? "before_calc_info_with_topology" : "after_calc_info_with_topology";
+    }
+    return "";
+}
 }  // namespace
 
 void MFPassManager::Run(MachineFunction& mf) {
@@ -46,7 +62,11 @@ void MFPassManager::Run(MachineFunction& mf) {
 
         auto* ptr = static_cast<MachineFunctionPass*>(pass.get());
         LOG_INFO("Run {}", std::string(ptr->GetPassName()));
-        qret::rss_profile::Mark("mf_pass_before", PassExtra(mf, *ptr, i));
+        auto before_extra = PassExtra(mf, *ptr, i);
+        qret::rss_profile::Mark("mf_pass_before", before_extra);
+        if (const auto boundary = BoundaryStage(ptr->GetPassArgument(), true); !boundary.empty()) {
+            qret::rss_profile::Mark(boundary, before_extra);
+        }
         ptr->RunOnMachineFunction(mf);
 
         const auto finish = std::chrono::high_resolution_clock::now();
@@ -55,6 +75,9 @@ void MFPassManager::Run(MachineFunction& mf) {
         analysis_.elapsed_ms[ptr] = elapsed_ms;
         auto extra = PassExtra(mf, *ptr, i);
         extra["elapsed_ms"] = elapsed_ms.count();
+        if (const auto boundary = BoundaryStage(ptr->GetPassArgument(), false); !boundary.empty()) {
+            qret::rss_profile::Mark(boundary, extra);
+        }
         qret::rss_profile::Mark("mf_pass_after", extra);
     }
 }

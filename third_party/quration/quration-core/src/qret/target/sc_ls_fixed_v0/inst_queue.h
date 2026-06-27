@@ -10,6 +10,7 @@
 #include <tuple>
 #include <unordered_map>
 
+#include "qret/base/json.h"
 #include "qret/codegen/machine_function.h"
 #include "qret/qret_export.h"
 #include "qret/target/sc_ls_fixed_v0/instruction.h"
@@ -152,6 +153,7 @@ public:
     [[nodiscard]] bool Empty() const {
         return nodes_.empty();
     }
+    [[nodiscard]] qret::Json MemoryProfileStats() const;
 
     /**
      * @brief Insert new instruction before 'inst'.

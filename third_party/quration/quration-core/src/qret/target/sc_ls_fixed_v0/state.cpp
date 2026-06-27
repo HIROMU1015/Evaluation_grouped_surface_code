@@ -351,6 +351,94 @@ void QuantumStateBuffer::StepBeat() {
     // Update 'begin_'.
     begin_ = {curr_beat + 1, (curr_index + 1) % size_};
 }
+
+qret::Json QuantumStateBuffer::MemoryProfileStats() const {
+    auto node_count = std::size_t{0};
+    auto node_capacity = std::size_t{0};
+    auto grid_vector_capacity = std::size_t{0};
+    for (const auto& beat_nodes : nodes_) {
+        grid_vector_capacity += beat_nodes.capacity();
+        for (const auto& grid_nodes : beat_nodes) {
+            node_count += grid_nodes.size();
+            node_capacity += grid_nodes.capacity();
+        }
+    }
+
+    const auto map_stats = [](const auto& maps) {
+        auto ret = qret::Json::object();
+        auto size = std::size_t{0};
+        auto buckets = std::size_t{0};
+        for (const auto& map : maps) {
+            size += map.size();
+            buckets += map.bucket_count();
+        }
+        ret["entries"] = size;
+        ret["buckets"] = buckets;
+        return ret;
+    };
+    const auto mf_state_stats = map_stats(mf_states_);
+    const auto ef_state_stats = map_stats(ef_states_);
+    const auto q2p_stats = map_stats(q2p_);
+
+    auto static_symbol_vector_capacity = std::size_t{0};
+    auto static_symbol_count = std::size_t{0};
+    for (const auto& [_, symbols] : z2m_) {
+        static_symbol_count += symbols.size();
+        static_symbol_vector_capacity += symbols.capacity();
+    }
+    for (const auto& [_, symbols] : z2e_) {
+        static_symbol_count += symbols.size();
+        static_symbol_vector_capacity += symbols.capacity();
+    }
+
+    const auto node_capacity_bytes = node_capacity * sizeof(Node);
+    const auto beat_outer_vector_bytes = nodes_.capacity() * sizeof(std::vector<std::vector<Node>>);
+    const auto grid_vector_bytes = grid_vector_capacity * sizeof(std::vector<Node>);
+    const auto state_object_bytes = states_.capacity() * sizeof(QuantumState);
+    const auto mf_state_bytes =
+            (mf_state_stats["entries"].get<std::size_t>() * sizeof(MagicFactoryState))
+            + (mf_state_stats["buckets"].get<std::size_t>() * sizeof(void*));
+    const auto ef_state_bytes =
+            (ef_state_stats["entries"].get<std::size_t>() * sizeof(EntanglementFactoryState))
+            + (ef_state_stats["buckets"].get<std::size_t>() * sizeof(void*));
+    const auto q2p_bytes =
+            (q2p_stats["entries"].get<std::size_t>()
+             * (sizeof(QSymbol) + sizeof(std::pair<Coord3D, std::uint32_t>) + 2 * sizeof(void*)))
+            + (q2p_stats["buckets"].get<std::size_t>() * sizeof(void*));
+    const auto static_map_bytes =
+            (m2p_.size() + e2p_.size() + e_pair_.size())
+                    * (sizeof(std::uint64_t) + sizeof(Coord3D) + 2 * sizeof(void*))
+            + (m2p_.bucket_count() + e2p_.bucket_count() + e_pair_.bucket_count())
+                    * sizeof(void*)
+            + static_symbol_vector_capacity * sizeof(std::uint64_t);
+    const auto total = node_capacity_bytes + beat_outer_vector_bytes + grid_vector_bytes
+            + state_object_bytes + mf_state_bytes + ef_state_bytes + q2p_bytes + static_map_bytes;
+
+    auto ret = qret::Json::object();
+    ret["routing_state_buffer_size"] = size_;
+    ret["routing_state_initial_beat"] = begin_.first;
+    ret["routing_state_node_count"] = node_count;
+    ret["routing_state_node_capacity"] = node_capacity;
+    ret["routing_state_node_capacity_bytes_estimated"] = node_capacity_bytes;
+    ret["routing_state_nodes_outer_capacity_bytes_estimated"] =
+            beat_outer_vector_bytes + grid_vector_bytes;
+    ret["routing_state_quantum_state_capacity"] = states_.capacity();
+    ret["routing_state_quantum_state_bytes_estimated"] = state_object_bytes;
+    ret["routing_state_mf_state_entries"] = mf_state_stats["entries"];
+    ret["routing_state_mf_state_buckets"] = mf_state_stats["buckets"];
+    ret["routing_state_mf_state_bytes_estimated"] = mf_state_bytes;
+    ret["routing_state_ef_state_entries"] = ef_state_stats["entries"];
+    ret["routing_state_ef_state_buckets"] = ef_state_stats["buckets"];
+    ret["routing_state_ef_state_bytes_estimated"] = ef_state_bytes;
+    ret["routing_state_q2p_entries"] = q2p_stats["entries"];
+    ret["routing_state_q2p_buckets"] = q2p_stats["buckets"];
+    ret["routing_state_q2p_bytes_estimated"] = q2p_bytes;
+    ret["routing_state_static_symbol_count"] = static_symbol_count;
+    ret["routing_state_static_symbol_vector_capacity"] = static_symbol_vector_capacity;
+    ret["routing_state_static_maps_bytes_estimated"] = static_map_bytes;
+    ret["routing_state_total_bytes_estimated"] = total;
+    return ret;
+}
 #pragma endregion
 
 #pragma region QuantumState

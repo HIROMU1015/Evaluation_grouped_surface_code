@@ -19,6 +19,7 @@ artifacts/qret_compact_scaling/
 artifacts/qret_compile_info_output_modes/
 artifacts/qret_summary_aggregation/
 artifacts/qret_timeseries_memory/
+artifacts/qret_routing_live_memory/
 artifacts/implementation_visual_overview/
 artifacts/surface_code_share/quration_topology_free_memory_note_logs_*/
 artifacts/surface_code_share/quration_topology_free_memory_note_logs_*.tar.gz

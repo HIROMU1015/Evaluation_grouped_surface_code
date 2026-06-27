@@ -151,6 +151,7 @@ public:
     const Stats& GetStats() const {
         return stats_;
     }
+    [[nodiscard]] qret::Json MemoryProfileStats() const;
 
 private:
     static constexpr auto InfBeat = std::numeric_limits<Beat>::max();

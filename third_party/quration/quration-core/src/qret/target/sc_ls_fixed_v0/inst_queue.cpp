@@ -84,6 +84,62 @@ InstQueue::InstQueue(
     , iter_(mf)
     , algorithm_(algorithm)
     , runnable_(CompareWeight{&nodes_}) {}
+
+qret::Json InstQueue::MemoryProfileStats() const {
+    auto parent_edges = std::size_t{0};
+    auto child_edges = std::size_t{0};
+    auto nested_parent_buckets = std::size_t{0};
+    auto nested_child_buckets = std::size_t{0};
+    for (const auto& [_, node] : nodes_) {
+        parent_edges += node.parents.size();
+        child_edges += node.children.size();
+        nested_parent_buckets += node.parents.bucket_count();
+        nested_child_buckets += node.children.bucket_count();
+    }
+
+    const auto unordered_bucket_bytes =
+            (qmap_.bucket_count() + cmap_.bucket_count() + nodes_.bucket_count()
+             + nested_parent_buckets + nested_child_buckets)
+            * sizeof(void*);
+    const auto qmap_node_bytes =
+            qmap_.size() * (sizeof(QSymbol) + sizeof(ScLsInstructionBase*) + 2 * sizeof(void*));
+    const auto cmap_node_bytes =
+            cmap_.size() * (sizeof(CSymbol) + sizeof(ScLsInstructionBase*) + 2 * sizeof(void*));
+    const auto nodes_payload_bytes =
+            nodes_.size()
+            * (sizeof(ScLsInstructionBase*) + sizeof(Node) + 2 * sizeof(void*));
+    const auto edge_node_bytes =
+            (parent_edges + child_edges)
+            * (sizeof(ScLsInstructionBase*) + sizeof(Beat) + 2 * sizeof(void*));
+    const auto set_node_bytes =
+            (runnable_.size() + reserved_.size())
+            * (sizeof(ScLsInstructionBase*) + sizeof(Beat) + 3 * sizeof(void*));
+
+    auto ret = qret::Json::object();
+    ret["routing_queue_nodes"] = nodes_.size();
+    ret["routing_queue_nodes_bucket_count"] = nodes_.bucket_count();
+    ret["routing_queue_qmap_size"] = qmap_.size();
+    ret["routing_queue_qmap_bucket_count"] = qmap_.bucket_count();
+    ret["routing_queue_cmap_size"] = cmap_.size();
+    ret["routing_queue_cmap_bucket_count"] = cmap_.bucket_count();
+    ret["routing_queue_runnable_size"] = runnable_.size();
+    ret["routing_queue_reserved_size"] = reserved_.size();
+    ret["routing_queue_parent_edges"] = parent_edges;
+    ret["routing_queue_child_edges"] = child_edges;
+    ret["routing_queue_nested_parent_buckets"] = nested_parent_buckets;
+    ret["routing_queue_nested_child_buckets"] = nested_child_buckets;
+    ret["routing_queue_unordered_bucket_bytes_estimated"] = unordered_bucket_bytes;
+    ret["routing_queue_qmap_node_bytes_estimated"] = qmap_node_bytes;
+    ret["routing_queue_cmap_node_bytes_estimated"] = cmap_node_bytes;
+    ret["routing_queue_nodes_payload_bytes_estimated"] = nodes_payload_bytes;
+    ret["routing_queue_edge_node_bytes_estimated"] = edge_node_bytes;
+    ret["routing_queue_set_node_bytes_estimated"] = set_node_bytes;
+    ret["routing_queue_total_bytes_estimated"] =
+            unordered_bucket_bytes + qmap_node_bytes + cmap_node_bytes + nodes_payload_bytes
+            + edge_node_bytes + set_node_bytes;
+    return ret;
+}
+
 void InstQueue::CalculateWeight(
         WeightAlgorithm algorithm,
         std::unordered_map<ScLsInstructionBase*, Node>& nodes

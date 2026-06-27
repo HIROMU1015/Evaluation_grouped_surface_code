@@ -8,6 +8,7 @@
 #include <fmt/format.h>
 
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -31,6 +32,7 @@
 #include "qret/pass.h"
 #include "qret/target/sc_ls_fixed_v0/external_pass.h"
 #include "qret/target/sc_ls_fixed_v0/lowering.h"
+#include "qret/target/sc_ls_fixed_v0/memory_profile_stats.h"
 #include "qret/target/sc_ls_fixed_v0/pipeline_state.h"
 #include "qret/target/sc_ls_fixed_v0/sc_ls_fixed_v0_target_machine.h"
 #include "qret/target/sc_ls_fixed_v0/topology.h"
@@ -57,21 +59,8 @@ qret::Json FunctionStats(const qret::ir::Function* func) {
     return extra;
 }
 
-std::size_t CountMachineInstructions(const qret::MachineFunction& mf) {
-    auto ret = std::size_t{0};
-    for (const auto& mbb : mf) {
-        ret += mbb.NumInstructions();
-    }
-    return ret;
-}
-
 qret::Json MachineFunctionStats(const qret::MachineFunction& mf) {
-    auto extra = qret::Json::object();
-    extra["machine_basic_blocks"] = mf.NumBBs();
-    extra["machine_instructions"] = CountMachineInstructions(mf);
-    extra["has_ir"] = mf.HasIR();
-    extra["has_compile_info"] = mf.HasCompileInfo();
-    return extra;
+    return qret::sc_ls_fixed_v0::MachineFunctionMemoryStats(mf);
 }
 
 qret::Json MachineFunctionStats(
@@ -81,6 +70,12 @@ qret::Json MachineFunctionStats(
     auto extra = MachineFunctionStats(mf);
     extra["skip_pipeline_state_output"] = skip_pipeline_state_output;
     return extra;
+}
+
+void MergeJson(qret::Json& dest, const qret::Json& source) {
+    for (auto it = source.begin(); it != source.end(); ++it) {
+        dest[it.key()] = it.value();
+    }
 }
 
 // This backend depends only on CompileOptionReader, not on value sources.
@@ -104,27 +99,44 @@ std::vector<qret::PassConfig> GetDefaultPass(const CompileFormat source) {
 std::optional<qret::ir::Function*>
 LoadFunctionFromIR(const qret::CompileRequest& request, qret::ir::IRContext& context) {
     LOG_INFO("Load IR.");
-    auto parse_extra = qret::Json::object();
-    parse_extra["input"] = request.input;
-    qret::rss_profile::Mark("load_ir_before_json_parse", parse_extra);
+    auto input_extra = qret::Json::object();
+    input_extra["input"] = request.input;
+    input_extra["explicit_input_buffer_present"] = false;
+    try {
+        input_extra["ir_file_size_bytes"] = std::filesystem::file_size(request.input);
+    } catch (...) {
+        input_extra["ir_file_size_bytes"] = nullptr;
+    }
+    qret::rss_profile::Mark("before_ir_file_read", input_extra);
     auto ifs = std::ifstream(request.input);
+    qret::rss_profile::Mark("after_ir_file_read", input_extra);
+    qret::rss_profile::Mark("before_ir_json_parse", input_extra);
     auto j = qret::Json::parse(ifs);
-    auto json_extra = qret::Json::object();
-    json_extra["json_type"] = j.type_name();
-    json_extra["json_size"] = j.size();
+    auto json_extra = qret::sc_ls_fixed_v0::JsonDomMemoryStats(j);
+    json_extra["input"] = request.input;
+    json_extra["explicit_input_buffer_present"] = false;
+    json_extra["ir_file_size_bytes"] = input_extra["ir_file_size_bytes"];
+    qret::rss_profile::Mark("after_ir_json_parse", json_extra);
     qret::rss_profile::Mark("load_ir_after_json_parse_json_alive", json_extra);
 
     LOG_INFO("Find function.");
+    qret::rss_profile::Mark("before_load_json", json_extra);
     qret::ir::LoadJson(j, context);
     auto load_extra = qret::Json::object();
     load_extra["module_count"] = context.owned_module.size();
+    MergeJson(load_extra, json_extra);
+    qret::rss_profile::Mark("after_load_json_machine_function_built", load_extra);
     qret::rss_profile::Mark("load_ir_after_load_json_json_alive", load_extra);
     auto* func = context.owned_module.back()->GetFunction(request.function_name);
     if (func == nullptr) {
         std::cerr << "function of name '" << request.function_name << "' not found" << std::endl;
         return std::nullopt;
     }
-    qret::rss_profile::Mark("load_ir_before_return_json_alive", FunctionStats(func));
+    auto destroy_extra = FunctionStats(func);
+    destroy_extra["json_dom_present"] = true;
+    MergeJson(destroy_extra, json_extra);
+    qret::rss_profile::Mark("before_ir_json_dom_destroy", destroy_extra);
+    qret::rss_profile::Mark("load_ir_before_return_json_alive", destroy_extra);
     return func;
 }
 
@@ -237,6 +249,19 @@ bool RunCompilation(
         if (!func.has_value()) {
             return false;
         }
+        auto json_destroyed_extra = FunctionStats(*func);
+        json_destroyed_extra["json_dom_present"] = false;
+        json_destroyed_extra["explicit_input_buffer_present"] = false;
+        qret::rss_profile::Mark("after_ir_json_dom_destroy", json_destroyed_extra);
+        if (request.source_format == qret::CompileFormat::IR) {
+            qret::rss_profile::MaybeDiagnosticTrim("after_json_dom_destroy");
+        }
+        auto buffer_extra = qret::Json::object();
+        buffer_extra["explicit_input_buffer_present"] = false;
+        buffer_extra["input_buffer_size"] = 0;
+        buffer_extra["input_buffer_capacity"] = 0;
+        qret::rss_profile::Mark("before_input_buffer_destroy", buffer_extra);
+        qret::rss_profile::Mark("after_input_buffer_destroy", buffer_extra);
         qret::rss_profile::Mark("after_load_function_json_destroyed", FunctionStats(*func));
         mf.SetIR(*func);
         qret::rss_profile::Mark("after_set_ir", MachineFunctionStats(mf));
@@ -252,6 +277,7 @@ bool RunCompilation(
         qret::rss_profile::Mark("after_ignore_global_phase", FunctionStats(*func));
 
         LOG_INFO("Lowering IR to the machine function of SC_LS_FIXED_V0.");
+        qret::rss_profile::Mark("before_lowering", MachineFunctionStats(mf));
         qret::sc_ls_fixed_v0::Lowering().RunOnMachineFunction(mf);
         qret::rss_profile::Mark("after_lowering", MachineFunctionStats(mf));
     } else {
@@ -260,6 +286,7 @@ bool RunCompilation(
         qret::sc_ls_fixed_v0::ApplyPipelineState(state, manager, target_machine, mf);
         qret::rss_profile::Mark("after_load_pipeline_state", MachineFunctionStats(mf));
     }
+    qret::rss_profile::Mark("after_ir_context_scope", MachineFunctionStats(mf));
 
     LOG_INFO("Run passes.");
     const auto add_pass = [&manager](std::string_view arg) {
@@ -447,16 +474,25 @@ bool ScLsFixedV0CompileBackend::Compile(
     start_extra["output"] = request.output;
     start_extra["function"] = request.function_name;
     start_extra["source_format"] = static_cast<std::int32_t>(request.source_format);
+    qret::rss_profile::Mark("compile_entry", start_extra);
     qret::rss_profile::Mark("compile_backend_start", start_extra);
 
     const auto topology = LoadTopology(options);
     qret::rss_profile::Mark("compile_backend_after_load_topology");
     if (!topology.has_value()) {
+        auto exit_extra = start_extra;
+        exit_extra["success"] = false;
+        exit_extra["failure_stage"] = "load_topology";
+        qret::rss_profile::Mark("compile_exit", exit_extra);
         return false;
     }
     const auto machine_option = GetMachineOption(options, *topology.value());
     qret::rss_profile::Mark("compile_backend_after_machine_option");
     if (!machine_option.has_value()) {
+        auto exit_extra = start_extra;
+        exit_extra["success"] = false;
+        exit_extra["failure_stage"] = "machine_option";
+        qret::rss_profile::Mark("compile_exit", exit_extra);
         return false;
     }
     const auto pass_config = options.Contains("sc_ls_fixed_v0_pass")
@@ -468,12 +504,16 @@ bool ScLsFixedV0CompileBackend::Compile(
     pass_extra["pass_count"] = pass_config.size();
     pass_extra["skip_pipeline_state_output"] = skip_pipeline_state_output;
     qret::rss_profile::Mark("compile_backend_after_pass_config", pass_extra);
-    return RunCompilation(
+    const auto success = RunCompilation(
             request,
             topology.value(),
             machine_option.value(),
             pass_config,
             skip_pipeline_state_output
     );
+    auto exit_extra = pass_extra;
+    exit_extra["success"] = success;
+    qret::rss_profile::Mark("compile_exit", exit_extra);
+    return success;
 }
 }  // namespace qret::sc_ls_fixed_v0

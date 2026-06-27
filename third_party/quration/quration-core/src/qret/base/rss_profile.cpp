@@ -5,6 +5,12 @@
 
 #include "qret/base/rss_profile.h"
 
+#include <fmt/format.h>
+
+#if defined(__GLIBC__)
+#include <malloc.h>
+#endif
+
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -14,8 +20,10 @@
 #include <fstream>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <sstream>
 #include <string>
+#include <string_view>
 
 namespace qret::rss_profile {
 namespace {
@@ -92,6 +100,41 @@ qret::Json ReadProcSmapsRollup() {
     }
     return ret;
 }
+
+qret::Json ReadMallinfo2() {
+    auto ret = qret::Json::object();
+#if defined(__GLIBC__)
+    const auto info = mallinfo2();
+    ret["mallinfo2_supported"] = true;
+    ret["mallinfo2_arena"] = static_cast<std::uint64_t>(info.arena);
+    ret["mallinfo2_ordblks"] = static_cast<std::uint64_t>(info.ordblks);
+    ret["mallinfo2_hblkhd"] = static_cast<std::uint64_t>(info.hblkhd);
+    ret["mallinfo2_uordblks"] = static_cast<std::uint64_t>(info.uordblks);
+    ret["mallinfo2_fordblks"] = static_cast<std::uint64_t>(info.fordblks);
+    ret["mallinfo2_keepcost"] = static_cast<std::uint64_t>(info.keepcost);
+    ret["mallinfo2_uordblks_kb"] = static_cast<std::uint64_t>(info.uordblks / 1024);
+    ret["mallinfo2_fordblks_kb"] = static_cast<std::uint64_t>(info.fordblks / 1024);
+#else
+    ret["mallinfo2_supported"] = false;
+#endif
+    return ret;
+}
+
+std::string DiagnosticTrimMode() {
+    const auto* raw = std::getenv("QRET_RSS_DIAGNOSTIC_TRIM_STAGE");
+    if (raw == nullptr || std::string(raw).empty()) {
+        return "none";
+    }
+    const auto mode = std::string(raw);
+    if (mode == "none" || mode == "after_json_dom_destroy"
+        || mode == "after_routing_temporary_destroy" || mode == "both") {
+        return mode;
+    }
+    throw std::invalid_argument(
+            "QRET_RSS_DIAGNOSTIC_TRIM_STAGE must be one of none, "
+            "after_json_dom_destroy, after_routing_temporary_destroy, or both"
+    );
+}
 }  // namespace
 
 bool Enabled() {
@@ -124,6 +167,10 @@ void Mark(std::string_view stage, const qret::Json& extra) {
     for (auto it = smaps.begin(); it != smaps.end(); ++it) {
         payload[it.key()] = it.value();
     }
+    auto heap = ReadMallinfo2();
+    for (auto it = heap.begin(); it != heap.end(); ++it) {
+        payload[it.key()] = it.value();
+    }
     if (!extra.empty()) {
         payload["extra"] = extra;
     }
@@ -137,5 +184,40 @@ void Mark(std::string_view stage, const qret::Json& extra) {
     } catch (...) {
         // Profiling must never change compile behavior.
     }
+}
+
+bool DiagnosticTrimRequested(const std::string_view stage) {
+    const auto mode = DiagnosticTrimMode();
+    if (mode == "none") {
+        return false;
+    }
+    if (mode == "both") {
+        return stage == "after_json_dom_destroy"
+                || stage == "after_routing_temporary_destroy";
+    }
+    return mode == stage;
+}
+
+void MaybeDiagnosticTrim(const std::string_view stage) {
+    if (!DiagnosticTrimRequested(stage)) {
+        return;
+    }
+    auto extra = qret::Json::object();
+    extra["trim_stage"] = std::string(stage);
+#if defined(__GLIBC__)
+    extra["glibc_malloc_trim_supported"] = true;
+    Mark(fmt::format("diagnostic_trim_before_{}", stage), extra);
+    const auto start = std::chrono::steady_clock::now();
+    const auto result = malloc_trim(0);
+    const auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - start)
+                                 .count();
+    extra["malloc_trim_return"] = result;
+    extra["malloc_trim_elapsed_sec"] = elapsed;
+    Mark(fmt::format("diagnostic_trim_after_{}", stage), extra);
+#else
+    extra["glibc_malloc_trim_supported"] = false;
+    Mark(fmt::format("diagnostic_trim_unsupported_{}", stage), extra);
+    throw std::runtime_error("QRET_RSS_DIAGNOSTIC_TRIM_STAGE requires glibc malloc_trim support");
+#endif
 }
 }  // namespace qret::rss_profile

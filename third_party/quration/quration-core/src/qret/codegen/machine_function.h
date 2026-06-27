@@ -76,6 +76,9 @@ public:
     std::size_t NumInstructions() const {
         return instructions_.size();
     }
+    std::size_t InverseMapSize() const {
+        return mp_.size();
+    }
 
     Iterator begin() {
         return instructions_.begin();

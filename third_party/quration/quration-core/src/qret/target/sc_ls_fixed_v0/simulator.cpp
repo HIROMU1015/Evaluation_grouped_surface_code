@@ -150,6 +150,49 @@ ScLsSimulator::ScLsSimulator(
         }
     }
 }
+qret::Json ScLsSimulator::MemoryProfileStats() const {
+    const auto map_bytes = [](std::size_t size, std::size_t buckets, std::size_t value_size) {
+        return (size * (value_size + 2 * sizeof(void*))) + (buckets * sizeof(void*));
+    };
+    auto ret = qret::Json::object();
+    ret["routing_sim_avail_q_size"] = avail_.q.size();
+    ret["routing_sim_avail_q_buckets"] = avail_.q.bucket_count();
+    ret["routing_sim_avail_q_del_size"] = avail_.q_del.size();
+    ret["routing_sim_avail_q_del_buckets"] = avail_.q_del.bucket_count();
+    ret["routing_sim_avail_c_size"] = avail_.c.size();
+    ret["routing_sim_avail_c_buckets"] = avail_.c.bucket_count();
+    ret["routing_sim_avail_m_size"] = avail_.m.size();
+    ret["routing_sim_avail_m_buckets"] = avail_.m.bucket_count();
+    ret["routing_sim_avail_e_size"] = avail_.e.size();
+    ret["routing_sim_avail_e_buckets"] = avail_.e.bucket_count();
+    ret["routing_sim_avail_p_size"] = avail_.p.size();
+    ret["routing_sim_avail_p_buckets"] = avail_.p.bucket_count();
+
+    const auto avail_bytes =
+            map_bytes(avail_.q.size(), avail_.q.bucket_count(), sizeof(QSymbol) + sizeof(Beat))
+            + map_bytes(
+                    avail_.q_del.size(),
+                    avail_.q_del.bucket_count(),
+                    sizeof(QSymbol) + sizeof(Beat)
+            )
+            + map_bytes(avail_.c.size(), avail_.c.bucket_count(), sizeof(CSymbol) + sizeof(Beat))
+            + map_bytes(avail_.m.size(), avail_.m.bucket_count(), sizeof(MSymbol) + sizeof(Beat))
+            + map_bytes(avail_.e.size(), avail_.e.bucket_count(), sizeof(ESymbol) + sizeof(Beat))
+            + map_bytes(avail_.p.size(), avail_.p.bucket_count(), sizeof(Coord3D) + sizeof(Beat));
+    ret["routing_sim_avail_maps_bytes_estimated"] = avail_bytes;
+    if (buffer_) {
+        const auto buffer_stats = buffer_->MemoryProfileStats();
+        for (auto it = buffer_stats.begin(); it != buffer_stats.end(); ++it) {
+            ret[it.key()] = it.value();
+        }
+        ret["routing_sim_total_bytes_estimated"] =
+                avail_bytes
+                + buffer_stats.value("routing_state_total_bytes_estimated", std::uint64_t{0});
+    } else {
+        ret["routing_sim_total_bytes_estimated"] = avail_bytes;
+    }
+    return ret;
+}
 void ScLsSimulator::StepBeat() {
     // TODO: Implement debugging code.
 

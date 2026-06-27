@@ -19,6 +19,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "qret/base/json.h"
 #include "qret/qret_export.h"
 #include "qret/target/sc_ls_fixed_v0/beat.h"
 #include "qret/target/sc_ls_fixed_v0/sc_ls_fixed_v0_target_machine.h"
@@ -456,6 +457,7 @@ public:
     QuantumState& GetQuantumState(Beat beat);
 
     void StepBeat();
+    [[nodiscard]] qret::Json MemoryProfileStats() const;
 
 private:
     friend class QuantumState;
