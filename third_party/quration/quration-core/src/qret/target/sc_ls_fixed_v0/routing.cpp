@@ -8,10 +8,12 @@
 #include <fmt/format.h>
 
 #include <cassert>
+#include <cstdlib>
 #include <limits>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
+#include <string>
 
 #include "qret/base/log.h"
 #include "qret/base/option.h"
@@ -71,6 +73,21 @@ qret::Json QueueStats(
     extra["queue_reserved"] = queue.NumReserved();
     extra["queue_peek_finished"] = queue.IsPeekFinished();
     return extra;
+}
+
+bool ReleaseInverseMapAfterRouting() {
+    const auto* raw = std::getenv("QRET_RELEASE_INVERSE_MAP_AFTER_ROUTING");
+    if (raw == nullptr || std::string(raw).empty()) {
+        return true;
+    }
+    const auto value = std::string(raw);
+    if (value == "0") {
+        return false;
+    }
+    if (value == "1") {
+        return true;
+    }
+    throw std::invalid_argument("QRET_RELEASE_INVERSE_MAP_AFTER_ROUTING must be 0 or 1");
 }
 }  // namespace
 
@@ -289,6 +306,11 @@ bool Routing::RunOnMachineFunction(MachineFunction& mf) {
     }
     qret::rss_profile::Mark("routing_after_temporary_destroy", MachineFunctionStats(mf));
     qret::rss_profile::MaybeDiagnosticTrim("after_routing_temporary_destroy");
+    qret::rss_profile::Mark("routing_before_inverse_map_release", MachineFunctionStats(mf));
+    if (ReleaseInverseMapAfterRouting()) {
+        mf.ReleaseInverseMaps();
+    }
+    qret::rss_profile::Mark("routing_after_inverse_map_release", MachineFunctionStats(mf));
     qret::rss_profile::Mark("routing_pass_exit", MachineFunctionStats(mf));
     return changed;
 }

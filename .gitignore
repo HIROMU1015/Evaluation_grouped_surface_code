@@ -20,6 +20,7 @@ artifacts/qret_compile_info_output_modes/
 artifacts/qret_summary_aggregation/
 artifacts/qret_timeseries_memory/
 artifacts/qret_routing_live_memory/
+artifacts/qret_inverse_map_memory/
 artifacts/implementation_visual_overview/
 artifacts/surface_code_share/quration_topology_free_memory_note_logs_*/
 artifacts/surface_code_share/quration_topology_free_memory_note_logs_*.tar.gz
@@ -27,3 +28,5 @@ docs/quration_memory_measurement_plan.md
 docs/quration_topology_free_memory_note.md
 Quration_QS18*.pdf
 third_party/quration/cmake_test_discovery_*.json
+third_party/quration/output_*.asm
+third_party/quration/pipeline_state_*.json

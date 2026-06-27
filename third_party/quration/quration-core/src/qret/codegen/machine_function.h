@@ -58,10 +58,17 @@ public:
     }
 
     /**
-     * @brief This should be called before using Contain() and Insert() methods.
-     * @todo Implement a smarter method.
+     * @brief Build the instruction pointer to list iterator map.
      */
     void ConstructInverseMap();
+    void EnsureInverseMap() const;
+    void ReleaseInverseMap();
+    [[nodiscard]] bool HasInverseMap() const {
+        return inverse_map_valid_;
+    }
+    [[nodiscard]] bool InverseMapReleased() const {
+        return inverse_map_released_;
+    }
     [[nodiscard]] bool Contain(const MachineInstruction* inst) const;
     void
     InsertBefore(const MachineInstruction* inst, std::unique_ptr<MachineInstruction>&& new_inst);
@@ -70,7 +77,13 @@ public:
     void Erase(MachineInstruction* inst);
 
     void EmplaceBack(std::unique_ptr<MachineInstruction>&& inst) {
+        auto* ptr = inst.get();
         instructions_.emplace_back(std::move(inst));
+        if (inverse_map_valid_) {
+            auto itr = instructions_.end();
+            --itr;
+            mp_.emplace(ptr, itr);
+        }
     }
 
     std::size_t NumInstructions() const {
@@ -113,7 +126,9 @@ private:
 
     MachineFunction* parent_;
     std::list<std::unique_ptr<MachineInstruction>> instructions_;
-    std::map<const MachineInstruction*, ConstIterator> mp_;
+    mutable std::map<const MachineInstruction*, ConstIterator> mp_;
+    mutable bool inverse_map_valid_ = false;
+    mutable bool inverse_map_released_ = false;
     std::vector<MachineBasicBlock*> predecessors_;  //!< currently not used field
     std::vector<MachineBasicBlock*> successors_;  //!< currently not used field
 };
@@ -148,6 +163,11 @@ public:
     }
     void Clear() {
         blocks_.clear();
+    }
+    void ReleaseInverseMaps() {
+        for (auto& block : blocks_) {
+            block.ReleaseInverseMap();
+        }
     }
 
     void SetTarget(const TargetMachine* target) {

@@ -206,9 +206,36 @@ TEST(MemoryProfileStats, MachineFunctionStatsMultipleInstructionsAndContainers) 
     EXPECT_EQ(stats["machine_path_coordinate_elements"], 2);
     EXPECT_EQ(stats["machine_destination_coordinate_fields"], 1);
     EXPECT_EQ(stats["machine_metadata_objects"], 3);
+    EXPECT_EQ(stats["machine_inverse_map_valid_blocks"], 1);
+    EXPECT_EQ(stats["machine_inverse_map_released_blocks"], 0);
+    EXPECT_EQ(stats["machine_inverse_map_entries"], 3);
+    EXPECT_EQ(stats["machine_inverse_map_largest_block_entries"], 3);
+    EXPECT_TRUE(stats["machine_path_coordinate_list_node_bytes_included_in_total"].get<bool>());
+    EXPECT_TRUE(stats["machine_destination_coordinate_bytes_in_instruction_object"].get<bool>());
+    EXPECT_TRUE(stats["machine_metadata_bytes_in_instruction_object"].get<bool>());
     EXPECT_GT(stats["machine_operand_list_node_bytes_estimated"].get<std::uint64_t>(), 0);
+    EXPECT_EQ(
+            stats["machine_ancilla_path_coordinate_list_node_bytes_estimated"],
+            stats["machine_path_coordinate_list_node_bytes_estimated"]
+    );
+    EXPECT_LE(
+            stats["machine_path_coordinate_list_node_bytes_estimated"].get<std::uint64_t>(),
+            stats["machine_operand_list_node_bytes_estimated"].get<std::uint64_t>()
+    );
     EXPECT_GT(stats["machine_instruction_object_bytes_estimated"].get<std::uint64_t>(), 0);
     EXPECT_GT(stats["machine_total_bytes_estimated"].get<std::uint64_t>(), 0);
+
+    const auto corrected_total =
+            stats["machine_instruction_object_bytes_estimated"].get<std::uint64_t>()
+            + stats["machine_instruction_list_node_bytes_estimated"].get<std::uint64_t>()
+            + stats["machine_basic_block_node_bytes_estimated"].get<std::uint64_t>()
+            + stats["machine_inverse_map_bytes_estimated"].get<std::uint64_t>()
+            + stats["machine_operand_list_node_bytes_estimated"].get<std::uint64_t>()
+            + stats["machine_predecessor_successor_container_bytes_estimated"].get<std::uint64_t>()
+            + stats["machine_compile_info_bytes_estimated"].get<std::uint64_t>();
+    EXPECT_EQ(stats["machine_total_bytes_estimated"], corrected_total);
+    EXPECT_TRUE(stats["machine_instruction_type_operand_list_node_bytes_estimated"].contains("LATTICE_SURGERY"));
+    EXPECT_TRUE(stats["machine_instruction_type_ancilla_path_list_node_bytes_estimated"].contains("LATTICE_SURGERY"));
 }
 
 TEST(MemoryProfileStats, RoutingTemporaryStatsUseRealContainers) {
