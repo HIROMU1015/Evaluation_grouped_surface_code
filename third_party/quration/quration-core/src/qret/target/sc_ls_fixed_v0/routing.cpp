@@ -18,6 +18,7 @@
 #include "qret/base/log.h"
 #include "qret/base/option.h"
 #include "qret/base/rss_profile.h"
+#include "qret/codegen/inverse_map_profile.h"
 #include "qret/codegen/machine_function.h"
 #include "qret/pass.h"
 #include "qret/target/sc_ls_fixed_v0/inst_queue.h"
@@ -148,8 +149,12 @@ bool Routing::RunOnMachineFunction(MachineFunction& mf) {
     auto magic_path_interning_scope = MagicPathInterningScope(magic_path_interner);
 
     // Initialize machine function.
-    for (auto&& mbb : mf) {
-        mbb.ConstructInverseMap();
+    {
+        const auto inverse_map_stage =
+                qret::inverse_map_profile::StageScope("routing_setup_construct_inverse_map");
+        for (auto&& mbb : mf) {
+            mbb.ConstructInverseMap();
+        }
     }
     qret::rss_profile::Mark("routing_after_construct_inverse_map", MachineFunctionStats(mf));
 
@@ -210,95 +215,100 @@ bool Routing::RunOnMachineFunction(MachineFunction& mf) {
         qret::rss_profile::Mark("routing_before_main_loop", QueueStats(mf, queue, &simulator));
 
         auto loop_iterations = std::uint64_t{0};
-        while (!queue.Empty()) {
-            ++loop_iterations;
-            if (qret::rss_profile::Enabled()
-                && (loop_iterations == 1 || loop_iterations % 32768 == 0)) {
-                auto peak_extra = QueueStats(mf, queue, &simulator);
-                peak_extra["routing_loop_iterations"] = loop_iterations;
-                peak_extra["routing_current_beat"] = current_beat;
-                qret::rss_profile::Mark("routing_main_loop_peak", peak_extra);
-            }
-
-            // DEBUG.
-            if (queue.NumRunnables() == 0 && queue.NumReserved() == 0) {
-                throw std::logic_error(
-                        "No runnable or reserved instructions in queue, while queue is not empty."
-                );
-            }
-
-            // Peek instructions if needed.
-            if (!queue.IsPeekFinished() && queue.NumInsts() < InstQueuePeekSize) {
-                LOG_DEBUG("Peek instruction at beat: {}", current_beat);
-                queue.Peek(InstQueuePeekSize);
-            }
-
-            lightest_weight_of_inst_at_beat = queue.NumRunnables() == 0
-                    ? std::numeric_limits<std::int64_t>::max()
-                    : queue.GetNode(*queue.begin()).weight;
-
-            // Run an instruction.
-            auto update_inst_queue = false;
-            auto success = false;
-            for (auto* inst : queue) {
-                // The allocate instruction delays its execution as much as possible.
-                const auto type = inst->Type();
-                if (type == ScLsInstructionType::ALLOCATE
-                    && SkipAllocate(
-                            lightest_weight_of_inst_at_beat,
-                            queue.GetNode(inst).weight,
-                            weight_algorithm
-                    )) {
-                    continue;
-                }
-                if (machine_type == ScLsFixedV0MachineType::DistributedDim2
-                    && (type == ScLsInstructionType::LATTICE_SURGERY_MULTINODE
-                        || type == ScLsInstructionType::MOVE || type == ScLsInstructionType::CNOT)
-                    && splitter.Split(
-                            simulator.GetStateBuffer().GetQuantumState(current_beat),
-                            mf,
-                            queue,
-                            inst
-                    )) {
-                    // Rebuild queue dependencies first; runnability checks below should see the
-                    // split form.
-                    update_inst_queue = true;
-                    break;
+        {
+            const auto inverse_map_stage =
+                    qret::inverse_map_profile::StageScope("routing_main_loop");
+            while (!queue.Empty()) {
+                ++loop_iterations;
+                if (qret::rss_profile::Enabled()
+                    && (loop_iterations == 1 || loop_iterations % 32768 == 0)) {
+                    auto peak_extra = QueueStats(mf, queue, &simulator);
+                    peak_extra["routing_loop_iterations"] = loop_iterations;
+                    peak_extra["routing_current_beat"] = current_beat;
+                    qret::rss_profile::Mark("routing_main_loop_peak", peak_extra);
                 }
 
-                // Check if 'inst' is runnable.
-                if (simulator.Run(current_beat, queue, mf, inst)) {
-                    success = true;
-                    idle_beats = 0;
-                    LOG_DEBUG("[BEAT {}] Run", current_beat);
-                    break;
+                // DEBUG.
+                if (queue.NumRunnables() == 0 && queue.NumReserved() == 0) {
+                    throw std::logic_error(
+                            "No runnable or reserved instructions in queue, while queue is not empty."
+                    );
                 }
-            }
 
-            // If no instructions are runnable, step beat.
-            if (!update_inst_queue && !success) {
-                ++current_beat;
-                ++idle_beats;
-                if (queue.SetBeat(current_beat) > 0) {
-                    idle_beats = 0;
+                // Peek instructions if needed.
+                if (!queue.IsPeekFinished() && queue.NumInsts() < InstQueuePeekSize) {
+                    LOG_DEBUG("Peek instruction at beat: {}", current_beat);
+                    queue.Peek(InstQueuePeekSize);
                 }
-                if (simulator.GetBeat() + StateBufferWidth / 2 < current_beat) {
-                    simulator.StepBeat();
-                }
+
                 lightest_weight_of_inst_at_beat = queue.NumRunnables() == 0
                         ? std::numeric_limits<std::int64_t>::max()
                         : queue.GetNode(*queue.begin()).weight;
-            }
 
-            // Throw error if some instruction is not runnable for a long beats.
-            if (idle_beats >= AllowedMaxIdleBeats(option)) {
-                auto ss = std::stringstream();
-                ss << "Do not process any instructions for " << idle_beats << " beats\n";
-                ss << "Routing pass failed to satisfy the following instructions:\n";
-                for (const auto* inst : queue) {
-                    ss << "  * " << inst->ToString() << "\n";
+                // Run an instruction.
+                auto update_inst_queue = false;
+                auto success = false;
+                for (auto* inst : queue) {
+                    // The allocate instruction delays its execution as much as possible.
+                    const auto type = inst->Type();
+                    if (type == ScLsInstructionType::ALLOCATE
+                        && SkipAllocate(
+                                lightest_weight_of_inst_at_beat,
+                                queue.GetNode(inst).weight,
+                                weight_algorithm
+                        )) {
+                        continue;
+                    }
+                    if (machine_type == ScLsFixedV0MachineType::DistributedDim2
+                        && (type == ScLsInstructionType::LATTICE_SURGERY_MULTINODE
+                            || type == ScLsInstructionType::MOVE
+                            || type == ScLsInstructionType::CNOT)
+                        && splitter.Split(
+                                simulator.GetStateBuffer().GetQuantumState(current_beat),
+                                mf,
+                                queue,
+                                inst
+                        )) {
+                        // Rebuild queue dependencies first; runnability checks below should see the
+                        // split form.
+                        update_inst_queue = true;
+                        break;
+                    }
+
+                    // Check if 'inst' is runnable.
+                    if (simulator.Run(current_beat, queue, mf, inst)) {
+                        success = true;
+                        idle_beats = 0;
+                        LOG_DEBUG("[BEAT {}] Run", current_beat);
+                        break;
+                    }
                 }
-                throw std::runtime_error(ss.str());
+
+                // If no instructions are runnable, step beat.
+                if (!update_inst_queue && !success) {
+                    ++current_beat;
+                    ++idle_beats;
+                    if (queue.SetBeat(current_beat) > 0) {
+                        idle_beats = 0;
+                    }
+                    if (simulator.GetBeat() + StateBufferWidth / 2 < current_beat) {
+                        simulator.StepBeat();
+                    }
+                    lightest_weight_of_inst_at_beat = queue.NumRunnables() == 0
+                            ? std::numeric_limits<std::int64_t>::max()
+                            : queue.GetNode(*queue.begin()).weight;
+                }
+
+                // Throw error if some instruction is not runnable for a long beats.
+                if (idle_beats >= AllowedMaxIdleBeats(option)) {
+                    auto ss = std::stringstream();
+                    ss << "Do not process any instructions for " << idle_beats << " beats\n";
+                    ss << "Routing pass failed to satisfy the following instructions:\n";
+                    for (const auto* inst : queue) {
+                        ss << "  * " << inst->ToString() << "\n";
+                    }
+                    throw std::runtime_error(ss.str());
+                }
             }
         }
 
@@ -312,6 +322,8 @@ bool Routing::RunOnMachineFunction(MachineFunction& mf) {
     qret::rss_profile::MaybeDiagnosticTrim("after_routing_temporary_destroy");
     qret::rss_profile::Mark("routing_before_inverse_map_release", MachineFunctionStats(mf));
     if (ReleaseInverseMapAfterRouting()) {
+        const auto inverse_map_stage =
+                qret::inverse_map_profile::StageScope("routing_release_inverse_map");
         mf.ReleaseInverseMaps();
     }
     qret::rss_profile::Mark("routing_after_inverse_map_release", MachineFunctionStats(mf));

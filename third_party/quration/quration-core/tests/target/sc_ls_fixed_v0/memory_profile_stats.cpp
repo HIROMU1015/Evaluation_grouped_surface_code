@@ -19,6 +19,7 @@
 #include "qret/base/json.h"
 #include "qret/base/rss_profile.h"
 #include "qret/base/string.h"
+#include "qret/codegen/inverse_map_profile.h"
 #include "qret/codegen/machine_function.h"
 #include "qret/target/sc_ls_fixed_v0/inst_queue.h"
 #include "qret/target/sc_ls_fixed_v0/instruction.h"
@@ -236,6 +237,39 @@ TEST(MemoryProfileStats, MachineFunctionStatsMultipleInstructionsAndContainers) 
     EXPECT_EQ(stats["machine_total_bytes_estimated"], corrected_total);
     EXPECT_TRUE(stats["machine_instruction_type_operand_list_node_bytes_estimated"].contains("LATTICE_SURGERY"));
     EXPECT_TRUE(stats["machine_instruction_type_ancilla_path_list_node_bytes_estimated"].contains("LATTICE_SURGERY"));
+}
+
+TEST(MemoryProfileStats, InverseMapUsageProfileFieldsAreGated) {
+    {
+        const auto env = ScopedEnv("QRET_PROFILE_INVERSE_MAP_USAGE", std::nullopt);
+        qret::inverse_map_profile::ResetForTest();
+        auto mf = BuildSmallMachine();
+        mf.begin()->ConstructInverseMap();
+
+        const auto stats = MachineFunctionMemoryStats(mf);
+
+        EXPECT_FALSE(stats.contains("inverse_map_usage_schema"));
+        EXPECT_FALSE(stats.contains("machine_instruction_projected_stable_id_object_bytes_estimated"));
+    }
+    {
+        const auto env = ScopedEnv("QRET_PROFILE_INVERSE_MAP_USAGE", "1");
+        qret::inverse_map_profile::ResetForTest();
+        auto mf = BuildSmallMachine();
+        mf.begin()->ConstructInverseMap();
+
+        const auto stats = MachineFunctionMemoryStats(mf);
+
+        EXPECT_EQ(stats["inverse_map_usage_schema"], "qret_inverse_map_usage_profile_v1");
+        EXPECT_EQ(stats["inverse_map_usage_construct_inverse_map_count"], 1);
+        EXPECT_TRUE(stats.contains("machine_instruction_projected_stable_id_object_bytes_estimated"));
+        EXPECT_TRUE(stats.contains("machine_instruction_type_stable_id_object_delta_bytes_estimated"));
+        EXPECT_GE(
+                stats["machine_instruction_projected_stable_id_object_bytes_estimated"]
+                        .get<std::uint64_t>(),
+                stats["machine_instruction_object_bytes_estimated"].get<std::uint64_t>()
+        );
+    }
+    qret::inverse_map_profile::ResetForTest();
 }
 
 TEST(MemoryProfileStats, RoutingTemporaryStatsUseRealContainers) {

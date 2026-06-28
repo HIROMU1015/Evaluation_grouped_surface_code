@@ -87,6 +87,7 @@ list(
   qret/codegen/asm_printer.cpp
   qret/codegen/asm_streamer.cpp
   qret/codegen/dummy.cpp
+  qret/codegen/inverse_map_profile.cpp
   qret/codegen/machine_function_pass.cpp
   qret/codegen/machine_function.cpp
   # Frontend

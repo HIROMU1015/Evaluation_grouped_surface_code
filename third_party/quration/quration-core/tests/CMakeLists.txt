@@ -41,6 +41,9 @@ add_test(base portable_function)
 add_test(base string)
 add_test(base type)
 
+# codegen
+add_test(codegen inverse_map_profile)
+
 # frontend
 add_test(frontend builder)
 add_test(frontend functor)

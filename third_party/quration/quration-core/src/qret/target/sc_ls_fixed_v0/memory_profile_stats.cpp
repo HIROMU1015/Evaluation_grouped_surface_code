@@ -16,6 +16,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "qret/codegen/inverse_map_profile.h"
 #include "qret/target/sc_ls_fixed_v0/compile_info.h"
 #include "qret/target/sc_ls_fixed_v0/inst_queue.h"
 #include "qret/target/sc_ls_fixed_v0/instruction.h"
@@ -113,6 +114,76 @@ std::size_t InstructionSize(ScLsInstructionType type) {
     }
 }
 
+std::size_t InstructionAlign(ScLsInstructionType type) {
+    switch (type) {
+        case ScLsInstructionType::ALLOCATE:
+            return alignof(Allocate);
+        case ScLsInstructionType::ALLOCATE_MAGIC_FACTORY:
+            return alignof(AllocateMagicFactory);
+        case ScLsInstructionType::ALLOCATE_ENTANGLEMENT_FACTORY:
+            return alignof(AllocateEntanglementFactory);
+        case ScLsInstructionType::DEALLOCATE:
+            return alignof(DeAllocate);
+        case ScLsInstructionType::INIT_ZX:
+            return alignof(InitZX);
+        case ScLsInstructionType::MEAS_ZX:
+            return alignof(MeasZX);
+        case ScLsInstructionType::MEAS_Y:
+            return alignof(MeasY);
+        case ScLsInstructionType::TWIST:
+            return alignof(Twist);
+        case ScLsInstructionType::HADAMARD:
+            return alignof(Hadamard);
+        case ScLsInstructionType::ROTATE:
+            return alignof(Rotate);
+        case ScLsInstructionType::LATTICE_SURGERY:
+            return alignof(LatticeSurgery);
+        case ScLsInstructionType::LATTICE_SURGERY_MAGIC:
+            return alignof(LatticeSurgeryMagic);
+        case ScLsInstructionType::LATTICE_SURGERY_MULTINODE:
+            return alignof(LatticeSurgeryMultinode);
+        case ScLsInstructionType::MOVE:
+            return alignof(Move);
+        case ScLsInstructionType::MOVE_MAGIC:
+            return alignof(MoveMagic);
+        case ScLsInstructionType::MOVE_ENTANGLEMENT:
+            return alignof(MoveEntanglement);
+        case ScLsInstructionType::CNOT:
+            return alignof(Cnot);
+        case ScLsInstructionType::CNOT_TRANS:
+            return alignof(CnotTrans);
+        case ScLsInstructionType::SWAP_TRANS:
+            return alignof(SwapTrans);
+        case ScLsInstructionType::MOVE_TRANS:
+            return alignof(MoveTrans);
+        case ScLsInstructionType::XOR:
+        case ScLsInstructionType::AND:
+        case ScLsInstructionType::OR:
+            return alignof(ClassicalOperation);
+        case ScLsInstructionType::PROBABILITY_HINT:
+            return alignof(ProbabilityHint);
+        case ScLsInstructionType::AWAIT_CORRECTION:
+            return alignof(AwaitCorrection);
+        default:
+            return alignof(ScLsInstructionBase);
+    }
+}
+
+std::size_t AlignUp(const std::size_t value, const std::size_t alignment) {
+    if (alignment == 0) {
+        return value;
+    }
+    const auto remainder = value % alignment;
+    if (remainder == 0) {
+        return value;
+    }
+    return value + alignment - remainder;
+}
+
+std::size_t ProjectedInstructionSizeWithStableId(ScLsInstructionType type) {
+    return AlignUp(InstructionSize(type) + sizeof(std::uint32_t), InstructionAlign(type));
+}
+
 template <typename T>
 std::uint64_t ListBytes(const std::list<T>& values) {
     return values.size() * (sizeof(T) + 2 * sizeof(void*));
@@ -149,6 +220,8 @@ std::uint64_t CompileInfoBytes(const qret::CompileInfo* info) {
 struct TypeMemoryStats {
     std::uint64_t count = 0;
     std::uint64_t object_bytes = 0;
+    std::uint64_t stable_id_projected_object_bytes = 0;
+    std::uint64_t stable_id_object_delta_bytes = 0;
     std::uint64_t instruction_list_node_bytes = 0;
     std::uint64_t operand_list_node_bytes = 0;
     std::uint64_t ancilla_path_list_node_bytes = 0;
@@ -222,6 +295,8 @@ qret::Json JsonDomMemoryStats(const qret::Json& j) {
 qret::Json MachineFunctionMemoryStats(const qret::MachineFunction& mf) {
     auto instruction_count = std::uint64_t{0};
     auto instruction_object_bytes = std::uint64_t{0};
+    auto stable_id_projected_object_bytes = std::uint64_t{0};
+    auto stable_id_object_delta_bytes = std::uint64_t{0};
     auto instruction_list_node_bytes = std::uint64_t{0};
     auto inverse_map_entries = std::uint64_t{0};
     auto inverse_map_valid_blocks = std::uint64_t{0};
@@ -280,6 +355,8 @@ qret::Json MachineFunctionMemoryStats(const qret::MachineFunction& mf) {
             const auto& inst = *static_cast<const ScLsInstructionBase*>(minst.get());
             const auto type_name = ToString(inst.Type());
             const auto object_size = InstructionSize(inst.Type());
+            const auto stable_id_object_size = ProjectedInstructionSizeWithStableId(inst.Type());
+            const auto stable_id_delta = stable_id_object_size - object_size;
             const auto destination_count = DestinationCoordinateFields(inst.Type());
             const auto list_node_bytes =
                     sizeof(std::unique_ptr<qret::MachineInstruction>) + 2 * sizeof(void*);
@@ -320,11 +397,15 @@ qret::Json MachineFunctionMemoryStats(const qret::MachineFunction& mf) {
             auto& per_type = type_stats[type_name];
             ++instruction_count;
             instruction_object_bytes += object_size;
+            stable_id_projected_object_bytes += stable_id_object_size;
+            stable_id_object_delta_bytes += stable_id_delta;
             destination_coordinate_fields += destination_count;
             destination_coordinate_bytes += destination_count * sizeof(Coord3D);
             type_counts[type_name] = type_counts.value(type_name, std::uint64_t{0}) + 1;
             ++per_type.count;
             per_type.object_bytes += object_size;
+            per_type.stable_id_projected_object_bytes += stable_id_object_size;
+            per_type.stable_id_object_delta_bytes += stable_id_delta;
             per_type.instruction_list_node_bytes += list_node_bytes;
             per_type.operand_list_node_bytes += inst_operand_list_bytes;
             per_type.ancilla_path_list_node_bytes += inst_ancilla_path_list_bytes;
@@ -393,6 +474,17 @@ qret::Json MachineFunctionMemoryStats(const qret::MachineFunction& mf) {
             TypeStatsField(type_stats, &TypeMemoryStats::metadata_bytes);
     ret["machine_instruction_type_total_bytes_estimated"] = TypeStatsTotal(type_stats);
     ret["machine_instruction_object_bytes_estimated"] = instruction_object_bytes;
+    if (qret::inverse_map_profile::Enabled()) {
+        ret["machine_instruction_projected_stable_id_object_bytes_estimated"] =
+                stable_id_projected_object_bytes;
+        ret["machine_instruction_projected_stable_id_object_delta_bytes_estimated"] =
+                stable_id_object_delta_bytes;
+        ret["machine_instruction_type_projected_stable_id_object_bytes_estimated"] =
+                TypeStatsField(type_stats, &TypeMemoryStats::stable_id_projected_object_bytes);
+        ret["machine_instruction_type_stable_id_object_delta_bytes_estimated"] =
+                TypeStatsField(type_stats, &TypeMemoryStats::stable_id_object_delta_bytes);
+        AddPrefixed(ret, "inverse_map_usage_", qret::inverse_map_profile::SnapshotJson());
+    }
     ret["machine_instruction_list_node_bytes_estimated"] = instruction_list_node_bytes;
     ret["machine_basic_block_node_bytes_estimated"] = basic_block_node_bytes;
     ret["machine_inverse_map_entries"] = inverse_map_entries;
