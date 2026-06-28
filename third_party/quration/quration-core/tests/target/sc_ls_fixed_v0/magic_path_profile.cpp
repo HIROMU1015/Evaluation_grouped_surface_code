@@ -153,6 +153,7 @@ TEST(MagicPathProfile, SegmentCounterCoversStraightBentAndRepeatedPaths) {
 }
 
 TEST(MagicPathProfile, SmallMachineReportsDistributionAndMemoryBreakdown) {
+    const auto storage_env = ScopedEnv("QRET_MAGIC_PATH_STORAGE", "legacy_list");
     auto mf = BuildProfileMachine();
     const auto profile = LatticeSurgeryMagicPathMemoryProfile(mf);
 

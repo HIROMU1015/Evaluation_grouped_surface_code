@@ -137,6 +137,7 @@ list(
   qret/target/sc_ls_fixed_v0/lowering.cpp
   qret/target/sc_ls_fixed_v0/mapping.cpp
   qret/target/sc_ls_fixed_v0/magic_path_profile.cpp
+  qret/target/sc_ls_fixed_v0/magic_path_storage.cpp
   qret/target/sc_ls_fixed_v0/memory_profile_stats.cpp
   qret/target/sc_ls_fixed_v0/routing.cpp
   qret/target/sc_ls_fixed_v0/sc_ls_fixed_v0_compile_backend.cpp

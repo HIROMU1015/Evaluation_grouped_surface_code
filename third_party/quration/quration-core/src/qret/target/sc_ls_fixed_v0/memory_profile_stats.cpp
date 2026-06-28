@@ -13,11 +13,13 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "qret/target/sc_ls_fixed_v0/compile_info.h"
 #include "qret/target/sc_ls_fixed_v0/inst_queue.h"
 #include "qret/target/sc_ls_fixed_v0/instruction.h"
+#include "qret/target/sc_ls_fixed_v0/magic_path_storage.h"
 #include "qret/target/sc_ls_fixed_v0/simulator.h"
 
 namespace qret::sc_ls_fixed_v0 {
@@ -249,6 +251,12 @@ qret::Json MachineFunctionMemoryStats(const qret::MachineFunction& mf) {
     auto inverse_map_entries_by_basic_block = qret::Json::array();
     auto type_counts = qret::Json::object();
     auto type_stats = std::map<std::string, TypeMemoryStats>();
+    auto seen_magic_path_storage = std::unordered_set<const void*>();
+    auto magic_path_shared_handle_instructions = std::uint64_t{0};
+    auto magic_path_legacy_list_instructions = std::uint64_t{0};
+    auto magic_path_unique_storage_count = std::uint64_t{0};
+    auto magic_path_unique_logical_coordinate_count = std::uint64_t{0};
+    auto magic_path_unique_dynamic_bytes = std::uint64_t{0};
 
     for (const auto& mbb : mf) {
         const auto block_inverse_map_entries = static_cast<std::uint64_t>(mbb.InverseMapSize());
@@ -282,7 +290,28 @@ qret::Json MachineFunctionMemoryStats(const qret::MachineFunction& mf) {
             const auto inst_mtarget_list_bytes = ListBytes(inst.MTarget());
             const auto inst_etarget_list_bytes = ListBytes(inst.ETarget());
             const auto inst_ehtarget_list_bytes = ListBytes(inst.EHTarget());
-            const auto inst_ancilla_path_list_bytes = ListBytes(inst.Ancilla());
+            auto inst_ancilla_path_list_bytes = ListBytes(inst.Ancilla());
+            if (inst.Type() == ScLsInstructionType::LATTICE_SURGERY_MAGIC) {
+                const auto& magic = static_cast<const LatticeSurgeryMagic&>(inst);
+                if (magic.UsesSharedPathStorage()) {
+                    ++magic_path_shared_handle_instructions;
+                    const auto* identity = magic.PathStorageIdentity();
+                    const auto inserted = seen_magic_path_storage.insert(identity).second;
+                    if (inserted) {
+                        ++magic_path_unique_storage_count;
+                        magic_path_unique_logical_coordinate_count +=
+                                static_cast<std::uint64_t>(magic.Path().size());
+                        inst_ancilla_path_list_bytes =
+                                static_cast<std::uint64_t>(sizeof(MagicPathList))
+                                + ListBytes(magic.Path());
+                        magic_path_unique_dynamic_bytes += inst_ancilla_path_list_bytes;
+                    } else {
+                        inst_ancilla_path_list_bytes = 0;
+                    }
+                } else {
+                    ++magic_path_legacy_list_instructions;
+                }
+            }
             const auto inst_operand_list_bytes = inst_qtarget_list_bytes
                     + inst_condition_list_bytes + inst_cdepend_list_bytes
                     + inst_ccreate_list_bytes + inst_mtarget_list_bytes
@@ -411,6 +440,18 @@ qret::Json MachineFunctionMemoryStats(const qret::MachineFunction& mf) {
     ret["machine_ir_owned_by_machine_function"] = false;
     ret["machine_raw_string_live_count"] = 0;
     ret["machine_raw_string_live_capacity_bytes"] = 0;
+    ret["machine_magic_path_storage_mode"] = ToString(ParseMagicPathStorageMode());
+    ret["machine_magic_path_shared_handle_instructions"] = magic_path_shared_handle_instructions;
+    ret["machine_magic_path_legacy_list_instructions"] = magic_path_legacy_list_instructions;
+    ret["machine_magic_path_unique_storage_count"] = magic_path_unique_storage_count;
+    ret["machine_magic_path_unique_logical_coordinate_count"] =
+            magic_path_unique_logical_coordinate_count;
+    ret["machine_magic_path_unique_dynamic_bytes_estimated"] = magic_path_unique_dynamic_bytes;
+    auto interner_stats = CurrentMagicPathInternerStats();
+    if (interner_stats.empty() && magic_path_shared_handle_instructions > 0) {
+        interner_stats = LastMagicPathInternerStats();
+    }
+    AddPrefixed(ret, "", interner_stats);
     ret["machine_estimate_is_exact"] = false;
     ret["machine_total_bytes_estimated"] = total;
     return ret;

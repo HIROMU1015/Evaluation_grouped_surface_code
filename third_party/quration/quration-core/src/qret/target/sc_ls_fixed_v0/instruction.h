@@ -22,6 +22,7 @@
 #include "qret/codegen/machine_function.h"
 #include "qret/qret_export.h"
 #include "qret/target/sc_ls_fixed_v0/beat.h"
+#include "qret/target/sc_ls_fixed_v0/magic_path_storage.h"
 #include "qret/target/sc_ls_fixed_v0/pauli.h"
 #include "qret/target/sc_ls_fixed_v0/sc_ls_fixed_v0_target_machine.h"
 #include "qret/target/sc_ls_fixed_v0/symbol.h"
@@ -1194,10 +1195,19 @@ public:
         return Ancilla();
     }
     void SetPath(const std::list<Coord3D>& path) {
-        ancilla_ = path;
+        SetMagicPathStorage(ancilla_, path);
     }
     void SetPath(std::list<Coord3D>&& path) {
-        ancilla_ = std::move(path);
+        SetMagicPathStorage(ancilla_, std::move(path));
+    }
+    [[nodiscard]] bool UsesSharedPathStorage() const {
+        return MagicPathStorageUsesHandle(ancilla_);
+    }
+    [[nodiscard]] const void* PathStorageIdentity() const {
+        return MagicPathStorageIdentity(ancilla_);
+    }
+    [[nodiscard]] MagicPathHandle PathHandleForTest() const {
+        return MagicPathStorageHandleForTest(ancilla_);
     }
     [[nodiscard]] MSymbol MagicFactory() const {
         return MTarget().front();
@@ -1240,7 +1250,7 @@ public:
         return m_;
     }
     [[nodiscard]] const std::list<Coord3D>& Ancilla() const override {
-        return ancilla_;
+        return MagicPathStorageList(ancilla_);
     }
 
     // access to properties
@@ -1270,12 +1280,13 @@ private:
         : ScLsInstructionBase(condition)
         , q_(qubit_list)
         , basis_list_{basis_list}
-        , ancilla_(path)
         , c_{cdest}
-        , m_{magic_factory} {}
+        , m_{magic_factory} {
+        SetPath(path);
+    }
     std::list<QSymbol> q_;
     std::list<Pauli> basis_list_;
-    std::list<Coord3D> ancilla_;
+    MagicPathStorage ancilla_;
     std::list<CSymbol> c_;
     std::list<MSymbol> m_;
 };

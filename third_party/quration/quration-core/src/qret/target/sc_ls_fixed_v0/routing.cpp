@@ -22,6 +22,7 @@
 #include "qret/pass.h"
 #include "qret/target/sc_ls_fixed_v0/inst_queue.h"
 #include "qret/target/sc_ls_fixed_v0/instruction.h"
+#include "qret/target/sc_ls_fixed_v0/magic_path_storage.h"
 #include "qret/target/sc_ls_fixed_v0/memory_profile_stats.h"
 #include "qret/target/sc_ls_fixed_v0/sc_ls_fixed_v0_target_machine.h"
 #include "qret/target/sc_ls_fixed_v0/search_chip_comm.h"
@@ -142,6 +143,9 @@ bool Routing::RunOnMachineFunction(MachineFunction& mf) {
 
     Validate(mf);
     qret::rss_profile::Mark("routing_after_validate", MachineFunctionStats(mf));
+
+    auto magic_path_interner = MagicPathInterner();
+    auto magic_path_interning_scope = MagicPathInterningScope(magic_path_interner);
 
     // Initialize machine function.
     for (auto&& mbb : mf) {
