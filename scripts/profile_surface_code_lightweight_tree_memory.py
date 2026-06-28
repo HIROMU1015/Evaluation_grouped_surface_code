@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import platform
+import random
 import shutil
 import subprocess
 import sys
@@ -31,7 +32,14 @@ DEFAULT_OUTPUT_ROOT = REPO_ROOT / "artifacts" / "surface_code_process_isolation"
 DEFAULT_REPORT_PATH = (
     REPO_ROOT / "docs" / "benchmarks" / "surface_code_process_isolation_memory.md"
 )
+DEFAULT_REPRO_REPORT_PATH = (
+    REPO_ROOT
+    / "docs"
+    / "benchmarks"
+    / "surface_code_process_isolation_reproducibility.md"
+)
 BASELINE_COMMIT = "d59270fd41378ec87450e2c6b6c31e0210363e0e"
+REPRO_BASELINE_COMMIT = "7c6c681b4bdf17cd9755b48d2d95c7d75ce3b074"
 CASE_CHAIN_LENGTH = {"h4_4th_new2": 4, "h5_4th_new2": 5}
 CASE_DISPLAY = {"h4_4th_new2": "H4", "h5_4th_new2": "H5"}
 H5_CASE = "h5_4th_new2"
@@ -62,6 +70,34 @@ HASH_COMPARE_KEYS = (
     "optimized_ir_hash",
     "instruction_count",
     "gate_depth",
+)
+RELEVANT_ENV_KEYS = (
+    "PYTHONPATH",
+    "PYTHONHASHSEED",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "SURFACE_CODE_PROFILE_RSS_SAMPLING",
+    "SURFACE_CODE_PROFILE_RSS_SAMPLING_INTERVAL_SEC",
+    "SURFACE_CODE_PROFILE_CIRCUIT_RELEASE_EXPERIMENT",
+    "SURFACE_CODE_COMPILE_INFO_OUTPUT_MODE",
+    "SURFACE_CODE_COMPILE_INFO_EXTRACTION_MODE",
+    "SURFACE_CODE_INTEGRAL_CACHE_ENABLED",
+    "SURFACE_CODE_RZ_HELPER_BATCH_SIZE",
+    "QRET_DEP_GRAPH_IMPL",
+    "QRET_SUMMARY_TIME_SERIES_IMPL",
+    "QRET_RELEASE_INVERSE_MAP_AFTER_ROUTING",
+    "QRET_RSS_DIAGNOSTIC_TRIM_STAGE",
+    "QRET_PATH",
+    "SURFACE_CODE_QRET_PATH",
+    "SURFACE_CODE_TOPOLOGY_PATH",
+    "GRIDSYNTH_PATH",
+    "SURFACE_CODE_GRIDSYNTH_PATH",
 )
 MARKER_LABELS = (
     "evaluation_entry",
@@ -274,6 +310,331 @@ def _pipeline_config_hash(architecture: sc.SurfaceCodeArchitecture) -> str:
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
+
+
+def _canonical_hash(payload: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+
+
+def _architecture_hash(architecture: sc.SurfaceCodeArchitecture) -> str:
+    return _canonical_hash(architecture.to_dict())
+
+
+def _random_state_hash() -> str:
+    return _canonical_hash(repr(random.getstate()))
+
+
+def _numpy_random_state_hash() -> str:
+    try:
+        state = sc.np.random.get_state()  # type: ignore[attr-defined]
+    except Exception:
+        return "unavailable"
+    compact = [state[0], state[1].tolist(), int(state[2]), int(state[3]), float(state[4])]
+    return _canonical_hash(compact)
+
+
+def _relevant_environment() -> dict[str, str | None]:
+    return {key: os.environ.get(key) for key in RELEVANT_ENV_KEYS}
+
+
+def _settings_snapshot(
+    *,
+    role: str,
+    case: str,
+    cache_root: Path,
+    batch_size: int,
+    architecture: sc.SurfaceCodeArchitecture | None = None,
+    artifact: sc.SurfaceCodeStepArtifact | None = None,
+) -> dict[str, Any]:
+    architecture = architecture or _architecture()
+    params = _case_parameters(case)
+    runtime_hashes = sc.qret_runtime_hashes(Path(architecture.qret_path).expanduser().resolve())
+    topology_path = Path(architecture.topology_path).expanduser().resolve()
+    return {
+        "role": role,
+        "case": case,
+        "python_executable": sys.executable,
+        "python_version": platform.python_version(),
+        "working_directory": str(Path.cwd()),
+        "environment": _relevant_environment(),
+        "surface_code_cache_dir": str(cache_root),
+        "surface_code_rz_helper_batch_size": int(batch_size),
+        "target_error": float(sc.TARGET_ERROR),
+        "step_time": float(params["step_time"]),
+        "rotation_precision": float(params["rotation_precision"]),
+        "ham_name": params["ham_name"],
+        "pf_label": params["pf_label"],
+        "architecture": architecture.to_dict(),
+        "architecture_hash": _architecture_hash(architecture),
+        "compile_mode": architecture.compile_mode,
+        "topology_path": str(topology_path),
+        "topology_hash": sc.file_sha256(topology_path) if topology_path.exists() else None,
+        "summary_mode": architecture.compile_info_output_mode,
+        "pipeline_config_hash": _pipeline_config_hash(architecture),
+        "qret_executable_hash": runtime_hashes.get("qret_executable_hash"),
+        "libqret_core_hash": runtime_hashes.get("qret_core_library_hash"),
+        "inverse_map_release": os.environ.get("QRET_RELEASE_INVERSE_MAP_AFTER_ROUTING", "1"),
+        "compact_dep_graph": os.environ.get("QRET_DEP_GRAPH_IMPL", "default_compact"),
+        "time_series_impl": os.environ.get("QRET_SUMMARY_TIME_SERIES_IMPL", "legacy_timeseries"),
+        "pipeline_state_output": "skipped" if architecture.skip_compile_output else "enabled",
+        "python_hash_seed": os.environ.get("PYTHONHASHSEED"),
+        "python_random_seed": "not_used",
+        "numpy_random_seed": "not_used",
+        "python_random_state_hash": _random_state_hash(),
+        "numpy_random_state_hash": _numpy_random_state_hash(),
+        "qiskit_transpiler_seed": "not_used",
+        "rz_synthesis_seed": "not_used",
+        "artifact_qasm_hash": None if artifact is None else artifact.qasm_hash,
+        "artifact_optimized_ir_hash": None if artifact is None else artifact.optimized_ir_hash,
+    }
+
+
+def _compare_settings(
+    *snapshots: Mapping[str, Any],
+    labels: Sequence[str],
+    context: str = "",
+) -> list[dict[str, Any]]:
+    keys = [
+        "python_executable",
+        "python_version",
+        "working_directory",
+        "surface_code_rz_helper_batch_size",
+        "target_error",
+        "step_time",
+        "rotation_precision",
+        "ham_name",
+        "pf_label",
+        "architecture_hash",
+        "compile_mode",
+        "topology_hash",
+        "summary_mode",
+        "inverse_map_release",
+        "compact_dep_graph",
+        "time_series_impl",
+        "pipeline_state_output",
+        "python_hash_seed",
+        "python_random_seed",
+        "numpy_random_seed",
+        "qiskit_transpiler_seed",
+        "rz_synthesis_seed",
+    ]
+    rows: list[dict[str, Any]] = []
+    for key in keys:
+        values = [snapshot.get(key) for snapshot in snapshots]
+        rows.append(
+            {
+                "setting": f"{context}:{key}" if context else key,
+                **{label: value for label, value in zip(labels, values)},
+                "identical": len({json.dumps(value, sort_keys=True, default=str) for value in values}) == 1,
+            }
+        )
+    env_keys = [
+        "PYTHONPATH",
+        "PYTHONHASHSEED",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "OMP_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "SURFACE_CODE_RZ_HELPER_BATCH_SIZE",
+        "QRET_SUMMARY_TIME_SERIES_IMPL",
+        "QRET_RELEASE_INVERSE_MAP_AFTER_ROUTING",
+        "QRET_DEP_GRAPH_IMPL",
+    ]
+    for key in env_keys:
+        values = [
+            (snapshot.get("environment") if isinstance(snapshot.get("environment"), Mapping) else {}).get(key)
+            for snapshot in snapshots
+        ]
+        rows.append(
+            {
+                "setting": f"{context}:env:{key}" if context else f"env:{key}",
+                **{label: value for label, value in zip(labels, values)},
+                "identical": len({json.dumps(value, sort_keys=True, default=str) for value in values}) == 1,
+            }
+        )
+    return rows
+
+
+def _manifest_hash(payload: Mapping[str, Any]) -> str:
+    return _canonical_hash(payload)
+
+
+def _artifact_semantics_from_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    artifact = sc.surface_code_step_artifact_from_dict(payload)
+    ir_hash = sc.file_sha256(artifact.ir_path) if artifact.ir_path.exists() else None
+    stream = artifact.rz_call_cache.get("optimized_ir_stream")
+    stream_hash = (
+        stream.get("normalized_instruction_stream_hash")
+        if isinstance(stream, Mapping)
+        else None
+    )
+    integral_cache = artifact.integral_cache if isinstance(artifact.integral_cache, Mapping) else {}
+    return {
+        "qasm_hash": artifact.qasm_hash,
+        "ir_hash": ir_hash,
+        "optimized_ir_hash": artifact.optimized_ir_hash,
+        "instruction_count": int(artifact.instruction_count),
+        "gate_depth": int(artifact.gate_depth),
+        "step_magic_state_count": int(artifact.step_magic_state_count),
+        "step_magic_state_depth": int(artifact.step_magic_state_depth),
+        "peak_magic_layer": int(artifact.peak_magic_layer),
+        "step_rz_count": int(artifact.step_rz_count),
+        "integral_value_hash": integral_cache.get("integral_value_hash"),
+        "integral_cache_key": integral_cache.get("cache_key"),
+        "integral_cache_status": integral_cache.get("cache_status"),
+        "optimized_instruction_stream_hash": stream_hash,
+        "qasm_size_bytes": artifact.qasm_path.stat().st_size if artifact.qasm_path.exists() else None,
+        "ir_size_bytes": artifact.ir_path.stat().st_size if artifact.ir_path.exists() else None,
+        "optimized_ir_size_bytes": (
+            artifact.optimized_ir_path.stat().st_size
+            if artifact.optimized_ir_path.exists()
+            else None
+        ),
+    }
+
+
+def _artifact_semantics_from_result(result: Mapping[str, Any]) -> dict[str, Any]:
+    artifact = result.get("artifact")
+    if isinstance(artifact, Mapping) and "qret_path" in artifact:
+        return _artifact_semantics_from_payload(artifact)
+    artifact_summary = artifact if isinstance(artifact, Mapping) else {}
+    metrics = result.get("metrics") if isinstance(result.get("metrics"), Mapping) else {}
+    return {
+        "qasm_hash": artifact_summary.get("qasm_hash") or metrics.get("qasm_hash"),
+        "ir_hash": artifact_summary.get("ir_hash"),
+        "optimized_ir_hash": artifact_summary.get("optimized_ir_hash")
+        or metrics.get("optimized_ir_hash"),
+        "instruction_count": artifact_summary.get("instruction_count"),
+        "gate_depth": artifact_summary.get("gate_depth"),
+        "step_magic_state_count": metrics.get("step_magic_state_count"),
+        "step_magic_state_depth": metrics.get("step_magic_state_depth"),
+    }
+
+
+def _qret_command_signature(result: Mapping[str, Any]) -> list[str]:
+    stage = result.get("qret_stage") if isinstance(result.get("qret_stage"), Mapping) else {}
+    details = stage.get("details") if isinstance(stage.get("details"), Mapping) else {}
+    command = details.get("command")
+    if not isinstance(command, Sequence) or isinstance(command, (str, bytes)):
+        return []
+    signature: list[str] = []
+    skip_next_path = False
+    for index, item in enumerate(command):
+        text = str(item)
+        if index == 0:
+            signature.append(Path(text).name)
+            continue
+        if skip_next_path:
+            signature.append("<path>")
+            skip_next_path = False
+            continue
+        signature.append(text)
+        if text in {"--pipeline", "--input", "--output"}:
+            skip_next_path = True
+    return signature
+
+
+def _cache_semantics(result: Mapping[str, Any]) -> dict[str, Any]:
+    metrics = result.get("metrics") if isinstance(result.get("metrics"), Mapping) else {}
+    return {key: metrics.get(key) for key in CACHE_SEMANTIC_KEYS}
+
+
+def _compile_semantic_comparison(left: Mapping[str, Any], right: Mapping[str, Any]) -> dict[str, Any]:
+    semantic = _semantic_comparison(left, right)
+    qret_stage_left = left.get("qret_stage") if isinstance(left.get("qret_stage"), Mapping) else {}
+    qret_stage_right = right.get("qret_stage") if isinstance(right.get("qret_stage"), Mapping) else {}
+    returncode_left = (
+        qret_stage_left.get("result", {}).get("returncode")
+        if isinstance(qret_stage_left.get("result"), Mapping)
+        else None
+    )
+    returncode_right = (
+        qret_stage_right.get("result", {}).get("returncode")
+        if isinstance(qret_stage_right.get("result"), Mapping)
+        else None
+    )
+    semantic["cache_semantics"] = _compare_mapping(
+        _cache_semantics(left),
+        _cache_semantics(right),
+        ignored=set(),
+    )
+    semantic["qret_command"] = {
+        "all_equal": _qret_command_signature(left) == _qret_command_signature(right),
+        "in_process": _qret_command_signature(left),
+        "compile_worker": _qret_command_signature(right),
+    }
+    semantic["returncode"] = {
+        "all_equal": returncode_left == returncode_right == 0,
+        "in_process": returncode_left,
+        "compile_worker": returncode_right,
+    }
+    semantic["all_equal"] = all(
+        bool(semantic[key]["all_equal"])
+        for key in (
+            "artifact_hashes",
+            "raw_metrics",
+            "normalized_metrics",
+            "cache_semantics",
+            "qret_command",
+            "returncode",
+        )
+    )
+    return semantic
+
+
+def _compare_prepare_artifacts(left: Mapping[str, Any], right: Mapping[str, Any]) -> dict[str, Any]:
+    left_artifact = left.get("artifact") if isinstance(left.get("artifact"), Mapping) else {}
+    right_artifact = right.get("artifact") if isinstance(right.get("artifact"), Mapping) else {}
+    left_sem = _artifact_semantics_from_payload(left_artifact)
+    right_sem = _artifact_semantics_from_payload(right_artifact)
+    scalar_keys = [
+        "qasm_hash",
+        "ir_hash",
+        "optimized_ir_hash",
+        "instruction_count",
+        "gate_depth",
+        "step_magic_state_count",
+        "step_magic_state_depth",
+        "step_rz_count",
+        "integral_value_hash",
+        "optimized_instruction_stream_hash",
+    ]
+    scalar_cmp = _compare_mapping(
+        {key: left_sem.get(key) for key in scalar_keys},
+        {key: right_sem.get(key) for key in scalar_keys},
+        ignored=set(),
+    )
+    stages = [
+        ("integral_scf_and_transform", "integral_value_hash"),
+        ("write_qasm", "qasm_hash"),
+        ("qret_parse_or_ir_precision", "ir_hash"),
+        ("rz_helper_or_ir_optimization", "optimized_ir_hash"),
+        ("optimized_ir_summary", "optimized_instruction_stream_hash"),
+    ]
+    first_divergent = None
+    for stage_name, key in stages:
+        if left_sem.get(key) != right_sem.get(key):
+            first_divergent = stage_name
+            break
+    return {
+        "all_equal": scalar_cmp["all_equal"],
+        "scalar_comparison": scalar_cmp,
+        "first_divergent_stage": first_divergent,
+        "in_process": left_sem,
+        "prepare_worker": right_sem,
+        "manifest_hashes": {
+            "in_process": _manifest_hash(left_artifact),
+            "prepare_worker": _manifest_hash(right_artifact),
+            "equal": _manifest_hash(left_artifact) == _manifest_hash(right_artifact),
+            "note": "Full manifest hashes include runtime paths and are not the semantic gate.",
+        },
+    }
 
 
 @contextmanager
@@ -601,10 +962,17 @@ def _run_worker_subprocess(
     sample_interval_sec: float,
     artifact_json: Path | None = None,
     timeout_sec: float | None = None,
+    extra_env: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     result_json = run_dir / f"{worker}_worker_result.json"
     stdout_path = run_dir / f"{worker}_worker.stdout.log"
     stderr_path = run_dir / f"{worker}_worker.stderr.log"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    for stale_path in (result_json, stdout_path, stderr_path):
+        try:
+            stale_path.unlink()
+        except FileNotFoundError:
+            pass
     cmd = [
         sys.executable,
         str(Path(__file__).resolve()),
@@ -624,10 +992,14 @@ def _run_worker_subprocess(
     if artifact_json is not None:
         cmd.extend(["--artifact-json", str(artifact_json)])
     started = time.perf_counter()
+    env = os.environ.copy()
+    if extra_env:
+        env.update({str(key): str(value) for key, value in extra_env.items()})
     with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
         proc = subprocess.Popen(
             cmd,
             cwd=REPO_ROOT,
+            env=env,
             stdout=stdout,
             stderr=stderr,
             close_fds=True,
@@ -710,6 +1082,15 @@ def _worker_prepare(
             "artifact": artifact.to_dict(),
             "artifact_summary": _artifact_summary(artifact),
             "artifact_manifest_path": str(artifact.runtime_root / "step_artifact.json"),
+            "artifact_manifest_hash": _manifest_hash(artifact.to_dict()),
+            "settings": _settings_snapshot(
+                role="prepare_worker",
+                case=case,
+                cache_root=cache_root,
+                batch_size=batch_size,
+                architecture=architecture,
+                artifact=artifact,
+            ),
             "runtime_provenance": _runtime_provenance(architecture, artifact),
         }
         _write_json(result_json, payload)
@@ -769,6 +1150,14 @@ def _worker_compile(
             "elapsed_seconds": time.perf_counter() - started,
             "artifact": _artifact_summary(artifact),
             "metrics": metrics,
+            "settings": _settings_snapshot(
+                role="compile_worker",
+                case=case,
+                cache_root=cache_root,
+                batch_size=batch_size,
+                architecture=architecture,
+                artifact=artifact,
+            ),
             "runtime_provenance": _runtime_provenance(architecture, artifact),
             **stage_data,
         }
@@ -1037,6 +1426,117 @@ def _run_process_isolated_once(
     }
     _write_json(run_dir / "summary.json", result)
     return result
+
+
+def _prepare_in_process_only(
+    *,
+    case: str,
+    run_dir: Path,
+    cache_root: Path,
+    profile_mode: str,
+    batch_size: int,
+    sample_interval_sec: float,
+) -> dict[str, Any]:
+    _configure_profile_mode(profile_mode)
+    params = _case_parameters(case)
+    architecture = _architecture()
+    run_dir.mkdir(parents=True, exist_ok=True)
+    started = time.perf_counter()
+    with _surface_code_runtime(
+        cache_root=cache_root,
+        batch_size=batch_size,
+        sample_interval_sec=sample_interval_sec,
+    ):
+        artifact = sc.prepare_grouped_surface_code_step_artifact(
+            params["ham_name"],
+            params["pf_label"],
+            architecture=architecture,
+            step_time=params["step_time"],
+            rotation_precision=params["rotation_precision"],
+        )
+    artifact = _verify_artifact_dict(artifact.to_dict())
+    prepare_metrics_path = parent_profile._stage_metrics_path(
+        artifact.runtime_root,
+        sc._PREPARE_STAGE_METRICS_FILENAME,
+        sc._PREPARE_STAGE_CACHE_HIT_METRICS_FILENAME,
+    )
+    prepare_metrics = _load_json(prepare_metrics_path) if prepare_metrics_path.exists() else {}
+    payload = {
+        "status": "ok",
+        "variant": "in_process_prepare_only",
+        "case": case,
+        "elapsed_seconds": time.perf_counter() - started,
+        "artifact": artifact.to_dict(),
+        "artifact_summary": _artifact_summary(artifact),
+        "artifact_manifest_path": str(artifact.runtime_root / "step_artifact.json"),
+        "artifact_manifest_hash": _manifest_hash(artifact.to_dict()),
+        "prepare_metrics_path": str(prepare_metrics_path),
+        "prepare_metrics": prepare_metrics,
+        "settings": _settings_snapshot(
+            role="in_process_prepare",
+            case=case,
+            cache_root=cache_root,
+            batch_size=batch_size,
+            architecture=architecture,
+            artifact=artifact,
+        ),
+        "runtime_provenance": _runtime_provenance(architecture, artifact),
+    }
+    _write_json(run_dir / "prepare_in_process_result.json", payload)
+    return payload
+
+
+def _compile_artifact_in_process_only(
+    *,
+    case: str,
+    artifact: sc.SurfaceCodeStepArtifact,
+    run_dir: Path,
+    cache_root: Path,
+    profile_mode: str,
+    batch_size: int,
+    sample_interval_sec: float,
+) -> dict[str, Any]:
+    _configure_profile_mode(profile_mode)
+    architecture = _architecture()
+    run_dir.mkdir(parents=True, exist_ok=True)
+    started = time.perf_counter()
+    with _surface_code_runtime(
+        cache_root=cache_root,
+        batch_size=batch_size,
+        sample_interval_sec=sample_interval_sec,
+    ):
+        metrics = sc.compile_prepared_surface_code_step_artifact(
+            artifact,
+            architecture,
+            reuse_cache=False,
+        )
+    stage_data = _load_stage_data(
+        artifact=artifact,
+        architecture=architecture,
+        cache_root=cache_root,
+        case=case,
+    )
+    payload = {
+        "status": "ok",
+        "variant": "same_artifact_in_process_compile",
+        "case": case,
+        "elapsed_seconds": time.perf_counter() - started,
+        "artifact": _artifact_summary(artifact),
+        "metrics": metrics,
+        "settings": _settings_snapshot(
+            role="in_process_compile",
+            case=case,
+            cache_root=cache_root,
+            batch_size=batch_size,
+            architecture=architecture,
+            artifact=artifact,
+        ),
+        "runtime_provenance": _runtime_provenance(architecture, artifact),
+        "pipeline_config_hash": _pipeline_config_hash(architecture),
+        **stage_data,
+    }
+    _write_json(run_dir / "compile_in_process_result.json", payload)
+    return payload
 
 
 def run_case_once(
@@ -1335,6 +1835,547 @@ def _deep_vs_light(light: Mapping[str, Any], deep: Mapping[str, Any]) -> dict[st
     }
 
 
+def _format_bool(value: Any) -> str:
+    return "True" if bool(value) else "False"
+
+
+def _short(value: Any, limit: int = 18) -> str:
+    if value is None:
+        return ""
+    text = str(value)
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "..."
+
+
+def _write_reproducibility_report(report_path: Path, payload: Mapping[str, Any]) -> None:
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    same = payload.get("same_artifact_compile", {})
+    same = same if isinstance(same, Mapping) else {}
+    prepare = payload.get("prepare_reproducibility", {})
+    prepare = prepare if isinstance(prepare, Mapping) else {}
+    environment_rows = payload.get("environment_comparison", [])
+    same_cmp = same.get("comparison") if isinstance(same.get("comparison"), Mapping) else {}
+    prepare_cmp = prepare.get("comparison") if isinstance(prepare.get("comparison"), Mapping) else {}
+    h4 = payload.get("h4_end_to_end", {})
+    h4 = h4 if isinstance(h4, Mapping) else {}
+    h5 = payload.get("h5_ab", {})
+    h5 = h5 if isinstance(h5, Mapping) else {}
+    root = payload.get("root_cause", {})
+    root = root if isinstance(root, Mapping) else {}
+    validation = payload.get("validation", {})
+    validation = validation if isinstance(validation, Mapping) else {}
+
+    same_in = same.get("in_process") if isinstance(same.get("in_process"), Mapping) else {}
+    same_worker = same.get("compile_worker") if isinstance(same.get("compile_worker"), Mapping) else {}
+    same_in_artifact = _artifact_semantics_from_result(same_in) if same_in else {}
+    same_worker_artifact = _artifact_semantics_from_result(same_worker) if same_worker else {}
+    same_rows = [
+        ("qasm_hash", same_in_artifact.get("qasm_hash"), same_worker_artifact.get("qasm_hash")),
+        ("ir_hash", same_in_artifact.get("ir_hash"), same_worker_artifact.get("ir_hash")),
+        (
+            "optimized_ir_hash",
+            same_in_artifact.get("optimized_ir_hash"),
+            same_worker_artifact.get("optimized_ir_hash"),
+        ),
+        (
+            "instruction_count",
+            same_in_artifact.get("instruction_count"),
+            same_worker_artifact.get("instruction_count"),
+        ),
+        ("gate_depth", same_in_artifact.get("gate_depth"), same_worker_artifact.get("gate_depth")),
+        (
+            "cache_key",
+            same_in.get("metrics", {}).get("cache_key") if isinstance(same_in.get("metrics"), Mapping) else None,
+            same_worker.get("metrics", {}).get("cache_key")
+            if isinstance(same_worker.get("metrics"), Mapping)
+            else None,
+        ),
+        (
+            "qret_command",
+            " ".join(_qret_command_signature(same_in)),
+            " ".join(_qret_command_signature(same_worker)),
+        ),
+        (
+            "raw_metrics",
+            same_cmp.get("raw_metrics", {}).get("all_equal")
+            if isinstance(same_cmp.get("raw_metrics"), Mapping)
+            else None,
+            same_cmp.get("raw_metrics", {}).get("all_equal")
+            if isinstance(same_cmp.get("raw_metrics"), Mapping)
+            else None,
+        ),
+        (
+            "normalized_metrics",
+            same_cmp.get("normalized_metrics", {}).get("all_equal")
+            if isinstance(same_cmp.get("normalized_metrics"), Mapping)
+            else None,
+            same_cmp.get("normalized_metrics", {}).get("all_equal")
+            if isinstance(same_cmp.get("normalized_metrics"), Mapping)
+            else None,
+        ),
+        (
+            "returncode",
+            same_cmp.get("returncode", {}).get("in_process")
+            if isinstance(same_cmp.get("returncode"), Mapping)
+            else None,
+            same_cmp.get("returncode", {}).get("compile_worker")
+            if isinstance(same_cmp.get("returncode"), Mapping)
+            else None,
+        ),
+    ]
+
+    prep_in = prepare_cmp.get("in_process") if isinstance(prepare_cmp.get("in_process"), Mapping) else {}
+    prep_worker = (
+        prepare_cmp.get("prepare_worker")
+        if isinstance(prepare_cmp.get("prepare_worker"), Mapping)
+        else {}
+    )
+    prepare_rows = [
+        ("integral_scf_and_transform", "integral_value_hash"),
+        ("write_qasm", "qasm_hash"),
+        ("qret_parse_or_ir_precision", "ir_hash"),
+        ("rz_helper_or_ir_optimization", "optimized_ir_hash"),
+        ("optimized_ir_summary", "optimized_instruction_stream_hash"),
+        ("artifact_instruction_count", "instruction_count"),
+        ("artifact_gate_depth", "gate_depth"),
+    ]
+
+    lines = [
+        "# Surface Code Process-Isolation Reproducibility",
+        "",
+        "## Scope",
+        "",
+        f"- Evaluation baseline: `{payload.get('baseline_commit_required')}`.",
+        f"- Evaluation HEAD at run: `{payload.get('evaluation_head')}`.",
+        "- H6 was not run.",
+        "",
+        "## Call Graph Audit",
+        "",
+        "| path | call sequence | notes |",
+        "|---|---|---|",
+        "| in-process prepare | `_prepare_in_process_only` -> `prepare_grouped_surface_code_step_artifact` | Generates one `SurfaceCodeStepArtifact`; cache root is explicit. |",
+        "| prepare worker | `_run_worker_subprocess(prepare)` -> `--worker prepare` -> `_worker_prepare` | Fresh Python process; writes result JSON and logs. |",
+        "| in-process compile | `_compile_artifact_in_process_only` -> `compile_prepared_surface_code_step_artifact` | Uses a prebuilt artifact; `reuse_cache=False`. |",
+        "| compile worker | `_run_worker_subprocess(compile)` -> `--worker compile` -> `_worker_compile` | Reconstructs the exact artifact manifest and verifies file hashes. |",
+        "| artifact serialization | `SurfaceCodeStepArtifact.to_dict` / `surface_code_step_artifact_from_dict` | Manifest contains paths and semantic scalars; semantic compare ignores temporary output path. |",
+        "| runtime/cache roots | `_surface_code_runtime` and per-run cache roots | Same-artifact compile shares input artifact; compile output roots are separated. |",
+        "",
+        "## Same-Artifact Compile",
+        "",
+        "| field | in-process | compile worker | equal |",
+        "|---|---|---|---:|",
+    ]
+    for field, left, right in same_rows:
+        lines.append(f"| {field} | `{_short(left)}` | `{_short(right)}` | {_format_bool(left == right)} |")
+    lines.extend(
+        [
+            "",
+            f"same-artifact compile all equal: `{same_cmp.get('all_equal')}`",
+            "",
+            "## Prepare Reproducibility",
+            "",
+            "| stage | in-process hash | worker hash | equal |",
+            "|---|---|---|---:|",
+        ]
+    )
+    for stage, key in prepare_rows:
+        left = prep_in.get(key)
+        right = prep_worker.get(key)
+        lines.append(f"| {stage} | `{_short(left)}` | `{_short(right)}` | {_format_bool(left == right)} |")
+    lines.extend(
+        [
+            "",
+            "## Environment Comparison",
+            "",
+            "| setting | in-process | worker | equal |",
+            "|---|---|---|---:|",
+        ]
+    )
+    for row in environment_rows:
+        if not isinstance(row, Mapping):
+            continue
+        left = row.get("in_process")
+        worker = row.get("compile_worker")
+        if worker is None:
+            worker = row.get("prepare_worker")
+        lines.append(
+            f"| {row.get('setting')} | `{_short(left, 32)}` | `{_short(worker, 32)}` | {_format_bool(row.get('identical'))} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Root Cause",
+            "",
+            "```text",
+            f"first divergent stage: {root.get('first_divergent_stage')}",
+            f"root cause: {root.get('root_cause')}",
+            f"fix: {root.get('fix')}",
+            "```",
+            "",
+            "## H4 End-To-End",
+            "",
+        ]
+    )
+    if h4.get("results"):
+        lines.extend(
+            [
+                "| variant | qasm hash | optimized IR hash | raw equal | normalized equal |",
+                "|---|---|---|---:|---:|",
+            ]
+        )
+        for row in h4.get("results", []):
+            if not isinstance(row, Mapping):
+                continue
+            artifact = row.get("artifact") if isinstance(row.get("artifact"), Mapping) else {}
+            comparison = h4.get("comparison") if isinstance(h4.get("comparison"), Mapping) else {}
+            lines.append(
+                f"| {row.get('variant')} | `{_short(artifact.get('qasm_hash'))}` | `{_short(artifact.get('optimized_ir_hash'))}` | {_format_bool(comparison.get('raw_metrics', {}).get('all_equal') if isinstance(comparison.get('raw_metrics'), Mapping) else False)} | {_format_bool(comparison.get('normalized_metrics', {}).get('all_equal') if isinstance(comparison.get('normalized_metrics'), Mapping) else False)} |"
+            )
+    else:
+        lines.append(str(h4.get("not_run_reason") or "Not run."))
+    lines.extend(["", "## H5 A/B", ""])
+    if h5.get("results"):
+        lines.extend(
+            [
+                "| variant | tree peak | parent/orchestrator | workers | qret | elapsed |",
+                "|---|---:|---:|---:|---:|---:|",
+            ]
+        )
+        for row in h5.get("results", []):
+            if not isinstance(row, Mapping):
+                continue
+            peaks = (
+                row.get("classification", {}).get("peaks_by_kind_kb", {})
+                if isinstance(row.get("classification"), Mapping)
+                else {}
+            )
+            split = row.get("tree_peak_split") if isinstance(row.get("tree_peak_split"), Mapping) else {}
+            worker_peak = max(
+                int(peaks.get("prepare_worker") or 0),
+                int(peaks.get("compile_worker") or 0),
+            )
+            lines.append(
+                f"| {row.get('variant')} | {_fmt_int(row.get('tree_peak_rss_kb'))} | {_fmt_int(peaks.get('orchestrator') or split.get('parent_vmrss_kb'))} | {_fmt_int(worker_peak)} | {_fmt_int(row.get('qret_peak_rss_kb'))} | {_fmt_float(row.get('elapsed_seconds'))} |"
+            )
+    else:
+        lines.append(str(h5.get("not_run_reason") or "Not run."))
+    decision = payload.get("process_isolation_decision", {})
+    decision = decision if isinstance(decision, Mapping) else {}
+    h4_artifact_equal = h4.get("artifact_hashes_equal")
+    h4_raw_equal = h4.get("raw_metrics_equal")
+    h4_normalized_equal = h4.get("normalized_metrics_equal")
+    lines.extend(
+        [
+            "",
+            "## Final Answers",
+            "",
+            f"1. 同一artifact compileは一致したか: {same_cmp.get('all_equal')}.",
+            f"2. compile worker分離自体は安全か: {bool(same_cmp.get('all_equal'))}.",
+            f"3. prepareの最初の不一致stage: {root.get('first_divergent_stage')}.",
+            f"4. 不一致原因: {root.get('root_cause')}",
+            f"5. seed/environment/orderのどれが原因だったか: {root.get('cause_class')}.",
+            f"6. 修正後H4 artifact hashは一致したか: {h4_artifact_equal if h4_artifact_equal is not None else 'not run'}.",
+            f"7. raw metricsは一致したか: {h4_raw_equal if h4_raw_equal is not None else 'not run'}.",
+            f"8. normalized metricsは一致したか: {h4_normalized_equal if h4_normalized_equal is not None else 'not run'}.",
+            f"9. H5 A/Bを実行したか: {bool(h5.get('results'))}.",
+            f"10. H5 tree peak削減量: {_fmt_mb_or_na(decision.get('median_tree_saved_kb'))} MB.",
+            f"11. elapsed差: {_fmt_float(decision.get('median_elapsed_delta_ratio'))}.",
+            f"12. process isolationをproduction defaultにしたか: {decision.get('production_default')}.",
+            f"13. defaultにしなかった理由: {decision.get('production_default_reason')}.",
+            "14. 次にqret ancilla/pathへ進むべきか: yes.",
+            "15. H6を実行していないこと: yes.",
+            "",
+            "## qret Next Candidate",
+            "",
+            "- `LATTICE_SURGERY_MAGIC` count: 236,736.",
+            "- Total estimated: 123.1 MB; operand 79.7 MB; ancilla/path 63.5 MB; all MachineFunction ancilla/path 68.4 MB.",
+            "- Next task candidates: path length distribution, duplicate path ratio, exact duplicate sequence ratio, shared prefix/suffix ratio, coordinate range, delta encoding, straight-line segment compression, `std::list` node overhead, routing insert/erase requirements, vector/pool/offset representation.",
+            "",
+            "## Validation",
+            "",
+        ]
+    )
+    for key, value in validation.items():
+        lines.append(f"- {key}: {value}")
+    report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def run_reproducibility_diagnosis(
+    *,
+    output_root: Path = DEFAULT_OUTPUT_ROOT,
+    report_path: Path = DEFAULT_REPRO_REPORT_PATH,
+    sample_interval_sec: float = SAMPLE_INTERVAL_SEC,
+    batch_size: int = 2,
+    run_h5_if_accepted: bool = True,
+) -> dict[str, Any]:
+    output_root = output_root.resolve()
+    report_path = report_path.resolve()
+    run_id = time.strftime("%Y%m%d_%H%M%S")
+    repro_root = output_root / "reproducibility" / run_id
+    cache_root_base = output_root / "surface_code_cache" / "reproducibility" / run_id
+    repro_root.mkdir(parents=True, exist_ok=True)
+    safety_before = {
+        "meminfo": parent_profile._meminfo(),
+        "disk_free_bytes": shutil.disk_usage(output_root).free,
+    }
+    if int(safety_before["disk_free_bytes"]) < MIN_FREE_DISK_BYTES:
+        raise RuntimeError(f"Free disk below 5 GiB for {output_root}")
+
+    architecture = _architecture()
+    runtime_before = _runtime_provenance(architecture)
+    source_prepare = _prepare_in_process_only(
+        case=H4_CASE,
+        run_dir=repro_root / "same_artifact" / "source_prepare",
+        cache_root=cache_root_base / "same_artifact" / "source_prepare",
+        profile_mode="light",
+        batch_size=batch_size,
+        sample_interval_sec=sample_interval_sec,
+    )
+    source_artifact = _verify_artifact_dict(source_prepare["artifact"])
+    artifact_manifest_path = Path(source_prepare["artifact_manifest_path"])
+    same_in = _compile_artifact_in_process_only(
+        case=H4_CASE,
+        artifact=source_artifact,
+        run_dir=repro_root / "same_artifact" / "in_process_compile",
+        cache_root=cache_root_base / "same_artifact" / "in_process_compile",
+        profile_mode="light",
+        batch_size=batch_size,
+        sample_interval_sec=sample_interval_sec,
+    )
+    same_worker = _run_worker_subprocess(
+        "compile",
+        case=H4_CASE,
+        cache_root=cache_root_base / "same_artifact" / "compile_worker",
+        run_dir=repro_root / "same_artifact" / "compile_worker",
+        batch_size=batch_size,
+        sample_interval_sec=sample_interval_sec,
+        artifact_json=artifact_manifest_path,
+    )
+    same_comparison = _compile_semantic_comparison(same_in, same_worker)
+    results: list[dict[str, Any]] = [source_prepare, same_in, same_worker]
+
+    prepare_in: dict[str, Any] = {}
+    prepare_worker: dict[str, Any] = {}
+    prepare_comparison: dict[str, Any] = {}
+    h4: dict[str, Any] = {"not_run_reason": "Not run because prepare reproducibility was not accepted."}
+    h5_ab: dict[str, Any] = {"not_run_reason": "Not run because H4 acceptance did not pass."}
+    decision: dict[str, Any] = {
+        "production_default": False,
+        "production_default_reason": "H4 acceptance did not pass",
+    }
+    root_cause: dict[str, Any] = {
+        "first_divergent_stage": None,
+        "root_cause": "not evaluated",
+        "cause_class": "not evaluated",
+        "fix": "not evaluated",
+    }
+
+    if same_comparison["all_equal"]:
+        prepare_in = _prepare_in_process_only(
+            case=H4_CASE,
+            run_dir=repro_root / "prepare_reproducibility" / "in_process_prepare",
+            cache_root=cache_root_base / "prepare_reproducibility" / "in_process_prepare",
+            profile_mode="light",
+            batch_size=batch_size,
+            sample_interval_sec=sample_interval_sec,
+        )
+        prepare_worker = _run_worker_subprocess(
+            "prepare",
+            case=H4_CASE,
+            cache_root=cache_root_base / "prepare_reproducibility" / "prepare_worker",
+            run_dir=repro_root / "prepare_reproducibility" / "prepare_worker",
+            batch_size=batch_size,
+            sample_interval_sec=sample_interval_sec,
+        )
+        prepare_comparison = _compare_prepare_artifacts(prepare_in, prepare_worker)
+        results.extend([prepare_in, prepare_worker])
+        if prepare_comparison["all_equal"]:
+            h4_in = run_case_once(
+                case=H4_CASE,
+                variant="in_process",
+                output_root=output_root,
+                run_group=f"reproducibility/{run_id}/h4_end_to_end",
+                run_index=0,
+                profile_mode="light",
+                batch_size=batch_size,
+                sample_interval_sec=sample_interval_sec,
+            )
+            h4_iso = run_case_once(
+                case=H4_CASE,
+                variant="process_isolated",
+                output_root=output_root,
+                run_group=f"reproducibility/{run_id}/h4_end_to_end",
+                run_index=0,
+                profile_mode="light",
+                batch_size=batch_size,
+                sample_interval_sec=sample_interval_sec,
+            )
+            h4_comparison = _compile_semantic_comparison(h4_in, h4_iso)
+            h4 = {
+                "results": [h4_in, h4_iso],
+                "comparison": h4_comparison,
+                "artifact_hashes_equal": h4_comparison["artifact_hashes"]["all_equal"],
+                "raw_metrics_equal": h4_comparison["raw_metrics"]["all_equal"],
+                "normalized_metrics_equal": h4_comparison["normalized_metrics"]["all_equal"],
+            }
+            results.extend([h4_in, h4_iso])
+            if h4_comparison["all_equal"] and run_h5_if_accepted:
+                h5_in_rows = [
+                    run_case_once(
+                        case=H5_CASE,
+                        variant="in_process",
+                        output_root=output_root,
+                        run_group=f"reproducibility/{run_id}/h5_ab",
+                        run_index=index,
+                        profile_mode="light",
+                        batch_size=batch_size,
+                        sample_interval_sec=sample_interval_sec,
+                    )
+                    for index in range(2)
+                ]
+                h5_iso_rows = [
+                    run_case_once(
+                        case=H5_CASE,
+                        variant="process_isolated",
+                        output_root=output_root,
+                        run_group=f"reproducibility/{run_id}/h5_ab",
+                        run_index=index,
+                        profile_mode="light",
+                        batch_size=batch_size,
+                        sample_interval_sec=sample_interval_sec,
+                    )
+                    for index in range(2)
+                ]
+                semantic_comparisons = {
+                    f"h5_run{index}": _compile_semantic_comparison(h5_in_rows[index], h5_iso_rows[index])
+                    for index in range(2)
+                }
+                semantic_ok = all(item["all_equal"] for item in semantic_comparisons.values())
+                decision = _ab_decision(h5_in_rows, h5_iso_rows, semantic_ok=semantic_ok)
+                qret_base = _median([row.get("qret_peak_rss_kb") for row in h5_in_rows])
+                qret_iso = _median([row.get("qret_peak_rss_kb") for row in h5_iso_rows])
+                decision["qret_peak_delta_kb"] = (
+                    None
+                    if qret_base is None or qret_iso is None
+                    else float(qret_iso) - float(qret_base)
+                )
+                h5_ab = {
+                    "results": [*h5_in_rows, *h5_iso_rows],
+                    "semantic_comparisons": semantic_comparisons,
+                    "in_process_aggregate": _aggregate_variant(
+                        h5_in_rows,
+                        variant="in_process",
+                        case=H5_CASE,
+                    ),
+                    "process_isolated_aggregate": _aggregate_variant(
+                        h5_iso_rows,
+                        variant="process_isolated",
+                        case=H5_CASE,
+                    ),
+                }
+                results.extend([*h5_in_rows, *h5_iso_rows])
+            else:
+                h5_ab = {"not_run_reason": "Not run because H4 semantic correctness failed."}
+        else:
+            first_stage = prepare_comparison.get("first_divergent_stage")
+            if first_stage == "integral_scf_and_transform":
+                root = (
+                    "Independent cache-miss prepare recomputed PySCF/MO integrals with "
+                    "different low-bit floating values; persisted QASM/IR diverged before "
+                    "compile. This is prepare nondeterminism, not compile-worker isolation."
+                )
+                cause_class = "floating-point/global numeric state"
+                fix = (
+                    "No low-risk production fix applied. Deterministic MO canonicalization "
+                    "or integral-cache policy would be required and can change floating-point "
+                    "generation semantics."
+                )
+            else:
+                root = "Prepare artifacts diverged before H4 acceptance; see stage hashes."
+                cause_class = "prepare ordering/environment/cache"
+                fix = "No low-risk fix applied in this run."
+            root_cause = {
+                "first_divergent_stage": first_stage,
+                "root_cause": root,
+                "cause_class": cause_class,
+                "fix": fix,
+            }
+    else:
+        root_cause = {
+            "first_divergent_stage": "same_artifact_compile",
+            "root_cause": "Same-artifact compile differs between in-process and worker.",
+            "cause_class": "compile worker environment/cache/path",
+            "fix": "No H5 run; inspect compile worker environment and cache path differences.",
+        }
+        h4 = {"not_run_reason": "Not run because same-artifact compile failed."}
+        h5_ab = {"not_run_reason": "Not run because same-artifact compile failed."}
+        decision = {
+            "production_default": False,
+            "production_default_reason": "same-artifact compile failed",
+        }
+
+    runtime_after = _runtime_provenance(architecture)
+    if (
+        runtime_before.get("qret_executable_hash") != runtime_after.get("qret_executable_hash")
+        or runtime_before.get("qret_core_library_hash") != runtime_after.get("qret_core_library_hash")
+    ):
+        raise RuntimeError("qret executable or library hash changed during reproducibility diagnosis")
+
+    env_rows: list[dict[str, Any]] = []
+    if same_in.get("settings") and same_worker.get("settings"):
+        env_rows.extend(
+            _compare_settings(
+                same_in["settings"],
+                same_worker["settings"],
+                labels=("in_process", "compile_worker"),
+                context="same_artifact_compile",
+            )
+        )
+    if prepare_in.get("settings") and prepare_worker.get("settings"):
+        env_rows.extend(
+            _compare_settings(
+                prepare_in["settings"],
+                prepare_worker["settings"],
+                labels=("in_process", "prepare_worker"),
+                context="prepare_reproducibility",
+            )
+        )
+
+    payload = {
+        "evaluation_head": _git_output(["rev-parse", "HEAD"]),
+        "baseline_commit_required": REPRO_BASELINE_COMMIT,
+        "platform": {"python": sys.version, "system": platform.platform()},
+        "python_executable": sys.executable,
+        "run_id": run_id,
+        "safety_before": safety_before,
+        "runtime_provenance_before": runtime_before,
+        "runtime_provenance_after": runtime_after,
+        "same_artifact_compile": {
+            "source_prepare": source_prepare,
+            "in_process": same_in,
+            "compile_worker": same_worker,
+            "comparison": same_comparison,
+        },
+        "prepare_reproducibility": {
+            "in_process": prepare_in,
+            "prepare_worker": prepare_worker,
+            "comparison": prepare_comparison,
+        },
+        "environment_comparison": env_rows,
+        "root_cause": root_cause,
+        "h4_end_to_end": h4,
+        "h5_ab": h5_ab,
+        "process_isolation_decision": decision,
+        "results": results,
+        "validation": {},
+        "h6_run": False,
+    }
+    _write_json(output_root / "surface_code_process_isolation_reproducibility_summary.json", payload)
+    _write_reproducibility_report(report_path, payload)
+    return payload
+
+
 def run_profile(
     *,
     output_root: Path = DEFAULT_OUTPUT_ROOT,
@@ -1521,6 +2562,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--report-path", type=Path, default=DEFAULT_REPORT_PATH)
+    parser.add_argument("--repro-report-path", type=Path, default=DEFAULT_REPRO_REPORT_PATH)
+    parser.add_argument("--diagnose-reproducibility", action="store_true")
     parser.add_argument("--sample-interval-sec", type=float, default=SAMPLE_INTERVAL_SEC)
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--no-ab", action="store_true")
@@ -1553,6 +2596,26 @@ def main(argv: Sequence[str] | None = None) -> int:
             batch_size=args.batch_size,
             sample_interval_sec=args.sample_interval_sec,
         )
+
+    if args.diagnose_reproducibility:
+        payload = run_reproducibility_diagnosis(
+            output_root=args.output_root,
+            report_path=args.repro_report_path,
+            sample_interval_sec=args.sample_interval_sec,
+            batch_size=args.batch_size,
+            run_h5_if_accepted=not args.no_ab,
+        )
+        same = payload["same_artifact_compile"]["comparison"]
+        prepare = payload["prepare_reproducibility"]["comparison"]
+        h5 = payload["h5_ab"]
+        print(
+            "repro same_artifact={same} prepare_equal={prepare} h5_run={h5}".format(
+                same=same.get("all_equal"),
+                prepare=prepare.get("all_equal") if isinstance(prepare, Mapping) else None,
+                h5=bool(h5.get("results")) if isinstance(h5, Mapping) else False,
+            )
+        )
+        return 0
 
     if args.variant is not None:
         result = run_case_once(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -168,7 +169,7 @@ def test_worker_success_loads_result_without_stdout_retention(tmp_path: Path, mo
     result_path = tmp_path / "prepare_worker_result.json"
 
     class FakeProcess:
-        def __init__(self, cmd, cwd=None, stdout=None, stderr=None, close_fds=True):  # noqa: ANN001
+        def __init__(self, cmd, cwd=None, env=None, stdout=None, stderr=None, close_fds=True):  # noqa: ANN001
             result_path.write_text(json.dumps({"status": "ok"}), encoding="utf-8")
             if stdout is not None:
                 stdout.write(b"hello")
@@ -190,6 +191,60 @@ def test_worker_success_loads_result_without_stdout_retention(tmp_path: Path, mo
     assert result["status"] == "ok"
     assert "stdout" not in result
     assert result["worker_stdout_size_bytes"] == 5
+
+
+def test_worker_timeout_rejects_stale_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    stale = tmp_path / "compile_worker_result.json"
+    stale.write_text(json.dumps({"status": "ok"}), encoding="utf-8")
+
+    class FakeProcess:
+        def __init__(self, *_args, **_kwargs):
+            self.killed = False
+
+        def wait(self, timeout=None):  # noqa: ANN001
+            if not self.killed:
+                raise subprocess.TimeoutExpired(cmd="compile", timeout=timeout)
+            return -9
+
+        def kill(self):
+            self.killed = True
+
+    monkeypatch.setattr(profile.subprocess, "Popen", FakeProcess)
+
+    with pytest.raises(RuntimeError, match="compile worker timeout"):
+        profile._run_worker_subprocess(
+            "compile",
+            case=profile.H4_CASE,
+            cache_root=tmp_path / "cache",
+            run_dir=tmp_path,
+            batch_size=2,
+            sample_interval_sec=0.02,
+            artifact_json=tmp_path / "artifact.json",
+            timeout_sec=0.01,
+        )
+
+    assert not stale.exists()
+
+
+def test_worker_missing_result_after_zero_exit_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeProcess:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def wait(self, timeout=None):  # noqa: ANN001
+            return 0
+
+    monkeypatch.setattr(profile.subprocess, "Popen", FakeProcess)
+
+    with pytest.raises(RuntimeError, match="did not create"):
+        profile._run_worker_subprocess(
+            "prepare",
+            case=profile.H4_CASE,
+            cache_root=tmp_path / "cache",
+            run_dir=tmp_path,
+            batch_size=2,
+            sample_interval_sec=0.02,
+        )
 
 
 def test_worker_pid_classification() -> None:
@@ -252,6 +307,110 @@ def test_raw_normalized_and_cache_comparisons() -> None:
     assert comparison["artifact_hashes"]["all_equal"]
     assert comparison["raw_metrics"]["all_equal"]
     assert comparison["normalized_metrics"]["all_equal"]
+
+
+def test_compile_semantic_comparison_includes_cache_command_and_returncode() -> None:
+    left = {
+        "artifact": {"qasm_hash": "q", "ir_hash": "i", "optimized_ir_hash": "o", "instruction_count": 1, "gate_depth": 2},
+        "raw_resource_metrics": {"runtime": 1},
+        "metrics": {
+            "runtime": 1,
+            "cache_key": "c",
+            "qasm_hash": "q",
+            "optimized_ir_hash": "o",
+            "compiler_executable_hash": "e",
+            "compiler_core_library_hash": "l",
+            "topology_hash": "t",
+        },
+        "qret_stage": {
+            "details": {"command": ["/repo/build/quration/qret", "compile", "--pipeline", "/a/compile.yaml", "--verbose"]},
+            "result": {"returncode": 0},
+        },
+    }
+    right = {
+        **left,
+        "qret_stage": {
+            "details": {"command": ["/other/qret", "compile", "--pipeline", "/b/compile.yaml", "--verbose"]},
+            "result": {"returncode": 0},
+        },
+    }
+
+    comparison = profile._compile_semantic_comparison(left, right)
+
+    assert comparison["all_equal"]
+    assert comparison["cache_semantics"]["all_equal"]
+    assert comparison["qret_command"]["all_equal"]
+    assert comparison["returncode"]["all_equal"]
+
+
+def test_prepare_comparison_finds_integral_divergence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def artifact_payload(root: Path, qasm_hash: str, opt_hash: str, integral_hash: str) -> dict[str, object]:
+        qasm = root / "step.qasm"
+        ir = root / "step_ir.json"
+        opt = root / "step_opt.json"
+        for path in (qasm, ir, opt):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(path.name, encoding="utf-8")
+        return {
+            "ham_name": "H4",
+            "molecule": "H4",
+            "num_logical_qubits": 4,
+            "pf_label": profile.PF_LABEL,
+            "target_error": 1e-3,
+            "step_time": 1.0,
+            "rotation_precision": 1e-5,
+            "runtime_root": str(root),
+            "qasm_path": str(qasm),
+            "ir_path": str(ir),
+            "optimized_ir_path": str(opt),
+            "qasm_hash": qasm_hash,
+            "optimized_ir_hash": opt_hash,
+            "qret_path": str(root / "qret"),
+            "qret_hash": "qret",
+            "step_rz_count": 1,
+            "step_rz_layer": 1,
+            "step_magic_state_count": 2,
+            "step_magic_state_depth": 3,
+            "peak_magic_layer": 4,
+            "instruction_count": 5,
+            "gate_depth": 6,
+            "rz_call_cache": {
+                "optimized_ir_stream": {"normalized_instruction_stream_hash": opt_hash},
+            },
+            "integral_cache": {"integral_value_hash": integral_hash, "cache_key": "ik", "cache_status": "miss"},
+        }
+
+    monkeypatch.setattr(profile.sc, "file_sha256", lambda path: "ir-a" if "left" in str(path) else "ir-b")
+    left = {"artifact": artifact_payload(tmp_path / "left", "qasm-a", "opt-a", "integral-a")}
+    right = {"artifact": artifact_payload(tmp_path / "right", "qasm-b", "opt-b", "integral-b")}
+
+    comparison = profile._compare_prepare_artifacts(left, right)
+
+    assert comparison["all_equal"] is False
+    assert comparison["first_divergent_stage"] == "integral_scf_and_transform"
+    assert "integral_value_hash" in comparison["scalar_comparison"]["mismatches"]
+
+
+def test_settings_comparison_uses_context_prefix(tmp_path: Path) -> None:
+    architecture = profile._architecture()
+    snapshot = profile._settings_snapshot(
+        role="test",
+        case=profile.H4_CASE,
+        cache_root=tmp_path / "cache",
+        batch_size=2,
+        architecture=architecture,
+    )
+
+    rows = profile._compare_settings(
+        snapshot,
+        snapshot,
+        labels=("in_process", "compile_worker"),
+        context="same_artifact_compile",
+    )
+
+    assert rows
+    assert rows[0]["setting"].startswith("same_artifact_compile:")
+    assert all(row["identical"] for row in rows)
 
 
 def test_h4_h5_case_names_are_supported() -> None:
