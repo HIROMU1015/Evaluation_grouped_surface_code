@@ -32,6 +32,7 @@
 #include "qret/pass.h"
 #include "qret/target/sc_ls_fixed_v0/external_pass.h"
 #include "qret/target/sc_ls_fixed_v0/lowering.h"
+#include "qret/target/sc_ls_fixed_v0/magic_path_profile.h"
 #include "qret/target/sc_ls_fixed_v0/memory_profile_stats.h"
 #include "qret/target/sc_ls_fixed_v0/pipeline_state.h"
 #include "qret/target/sc_ls_fixed_v0/sc_ls_fixed_v0_target_machine.h"
@@ -324,6 +325,10 @@ bool RunCompilation(
     qret::rss_profile::Mark(
             "after_pass_manager_run",
             MachineFunctionStats(mf, skip_pipeline_state_output)
+    );
+    qret::sc_ls_fixed_v0::MaybeWriteLatticeSurgeryMagicPathProfile(
+            mf,
+            "after_pass_manager_run"
     );
 
     if (skip_pipeline_state_output) {
