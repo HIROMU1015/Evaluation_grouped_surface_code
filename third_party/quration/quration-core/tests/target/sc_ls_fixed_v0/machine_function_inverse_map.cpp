@@ -61,8 +61,34 @@ private:
     std::string name_;
 };
 
+class CountingInstruction : public MachineInstruction {
+public:
+    explicit CountingInstruction(std::string name)
+        : name_(std::move(name)) {}
+    ~CountingInstruction() override {
+        ++destructor_count;
+    }
+
+    [[nodiscard]] std::string ToString() const override {
+        return name_;
+    }
+
+    static void Reset() {
+        destructor_count = 0;
+    }
+
+    inline static int destructor_count = 0;
+
+private:
+    std::string name_;
+};
+
 std::unique_ptr<DummyInstruction> Dummy(std::string name) {
     return std::make_unique<DummyInstruction>(std::move(name));
+}
+
+std::unique_ptr<CountingInstruction> Counting(std::string name) {
+    return std::make_unique<CountingInstruction>(std::move(name));
 }
 
 std::vector<std::string> Names(const MachineBasicBlock& block) {
@@ -129,6 +155,94 @@ TEST(MachineFunctionInverseMap, EmptyBlockConstructAndRelease) {
     EXPECT_FALSE(block.HasInverseMap());
     EXPECT_TRUE(block.InverseMapReleased());
     EXPECT_EQ(block.InverseMapSize(), 0);
+}
+
+TEST(MachineFunctionInstructionArena, ModeDefaultArenaAndInvalidValue) {
+    const auto env = ScopedEnv("QRET_INSTRUCTION_ALLOCATION", std::nullopt);
+    EXPECT_EQ(qret::MachineInstructionAllocationMode(), "legacy");
+    EXPECT_FALSE(qret::MachineInstructionArenaModeEnabled());
+
+    {
+        const auto arena_env = ScopedEnv("QRET_INSTRUCTION_ALLOCATION", "arena");
+        EXPECT_EQ(qret::MachineInstructionAllocationMode(), "arena");
+        EXPECT_TRUE(qret::MachineInstructionArenaModeEnabled());
+    }
+    {
+        const auto invalid_env = ScopedEnv("QRET_INSTRUCTION_ALLOCATION", "pooled");
+        EXPECT_THROW(qret::MachineInstructionAllocationMode(), std::invalid_argument);
+        auto mf = MachineFunction();
+        EXPECT_THROW(
+                [&]() {
+                    auto scope = qret::MachineInstructionAllocationScope(mf);
+                }(),
+                std::invalid_argument
+        );
+    }
+}
+
+TEST(MachineFunctionInstructionArena, ScopeAllocatesStablePointersAndEraseDestroysObject) {
+    const auto env = ScopedEnv("QRET_INSTRUCTION_ALLOCATION", "arena");
+    CountingInstruction::Reset();
+    auto mf = MachineFunction();
+    auto scope = qret::MachineInstructionAllocationScope(mf);
+    auto& block = mf.AddBlock();
+    auto inst = Counting("arena-a");
+    auto* ptr = inst.get();
+    block.EmplaceBack(std::move(inst));
+
+    ASSERT_EQ(block.begin()->get(), ptr);
+    auto stats = mf.GetInstructionArenaStats();
+    EXPECT_TRUE(stats.enabled);
+    EXPECT_EQ(stats.allocation_count, 1);
+    EXPECT_EQ(stats.deallocation_count, 0);
+    EXPECT_GE(stats.requested_bytes, sizeof(CountingInstruction));
+    EXPECT_GE(stats.used_bytes, stats.requested_bytes);
+    EXPECT_GE(stats.reserved_bytes, stats.used_bytes);
+
+    block.Erase(ptr);
+    stats = mf.GetInstructionArenaStats();
+    EXPECT_EQ(CountingInstruction::destructor_count, 1);
+    EXPECT_EQ(stats.allocation_count, 1);
+    EXPECT_EQ(stats.deallocation_count, 1);
+}
+
+TEST(MachineFunctionInstructionArena, ExceptionCleanupRunsDestructorAndDelete) {
+    const auto env = ScopedEnv("QRET_INSTRUCTION_ALLOCATION", "arena");
+    CountingInstruction::Reset();
+    auto mf = MachineFunction();
+
+    try {
+        auto scope = qret::MachineInstructionAllocationScope(mf);
+        auto inst = std::unique_ptr<MachineInstruction>(new CountingInstruction("temporary"));
+        throw std::runtime_error("trigger cleanup");
+    } catch (const std::runtime_error&) {
+    }
+
+    const auto stats = mf.GetInstructionArenaStats();
+    EXPECT_EQ(CountingInstruction::destructor_count, 1);
+    EXPECT_EQ(stats.allocation_count, 1);
+    EXPECT_EQ(stats.deallocation_count, 1);
+}
+
+TEST(MachineFunctionInstructionArena, MultipleMachineFunctionsUseSeparateArenas) {
+    const auto env = ScopedEnv("QRET_INSTRUCTION_ALLOCATION", "arena");
+    auto first = MachineFunction();
+    auto second = MachineFunction();
+
+    {
+        auto scope = qret::MachineInstructionAllocationScope(first);
+        first.AddBlock().EmplaceBack(Counting("first"));
+    }
+    {
+        auto scope = qret::MachineInstructionAllocationScope(second);
+        second.AddBlock().EmplaceBack(Counting("second-a"));
+        second.begin()->EmplaceBack(Counting("second-b"));
+    }
+
+    EXPECT_EQ(first.GetInstructionArenaStats().allocation_count, 1);
+    EXPECT_EQ(second.GetInstructionArenaStats().allocation_count, 2);
+    EXPECT_NE(first.GetInstructionArenaStats().reserved_bytes, 0);
+    EXPECT_NE(second.GetInstructionArenaStats().reserved_bytes, 0);
 }
 
 TEST(MachineFunctionInverseMap, ConstructTwiceDoesNotDuplicateEntries) {

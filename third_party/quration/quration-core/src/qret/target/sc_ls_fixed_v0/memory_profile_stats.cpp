@@ -550,6 +550,31 @@ qret::Json MachineFunctionMemoryStats(const qret::MachineFunction& mf) {
         interner_stats = LastMagicPathInternerStats();
     }
     AddPrefixed(ret, "", interner_stats);
+    const auto arena_stats = mf.GetInstructionArenaStats();
+    ret["machine_instruction_allocation_mode"] = qret::MachineInstructionAllocationMode();
+    ret["machine_instruction_arena_enabled"] = arena_stats.enabled;
+    ret["machine_instruction_arena_allocation_count"] = arena_stats.allocation_count;
+    ret["machine_instruction_arena_deallocation_count"] = arena_stats.deallocation_count;
+    ret["machine_instruction_arena_live_allocations"] =
+            arena_stats.allocation_count >= arena_stats.deallocation_count
+            ? arena_stats.allocation_count - arena_stats.deallocation_count
+            : std::uint64_t{0};
+    ret["machine_instruction_arena_requested_bytes"] = arena_stats.requested_bytes;
+    ret["machine_instruction_arena_used_bytes"] = arena_stats.used_bytes;
+    ret["machine_instruction_arena_reserved_bytes"] = arena_stats.reserved_bytes;
+    ret["machine_instruction_arena_internal_fragmentation_bytes"] =
+            arena_stats.used_bytes >= arena_stats.requested_bytes
+            ? arena_stats.used_bytes - arena_stats.requested_bytes
+            : std::uint64_t{0};
+    ret["machine_instruction_arena_reserved_unused_bytes"] =
+            arena_stats.reserved_bytes >= arena_stats.used_bytes
+            ? arena_stats.reserved_bytes - arena_stats.used_bytes
+            : std::uint64_t{0};
+    ret["machine_instruction_arena_chunk_count"] = arena_stats.chunk_count;
+    ret["machine_instruction_legacy_allocator_metadata_model_bytes"] =
+            instruction_count * std::uint64_t{16};
+    ret["machine_instruction_legacy_allocator_metadata_model"] =
+            "16 bytes per instruction object allocation";
     ret["machine_estimate_is_exact"] = false;
     ret["machine_total_bytes_estimated"] = total;
     return ret;

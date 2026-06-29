@@ -7,6 +7,7 @@
 
 #include <fmt/format.h>
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -242,6 +243,7 @@ bool RunCompilation(
     auto target_machine = qret::sc_ls_fixed_v0::ScLsFixedV0TargetMachine::New(topology, option);
 
     auto mf = qret::MachineFunction(target_machine.get());
+    auto instruction_allocation_scope = qret::MachineInstructionAllocationScope(mf);
     auto manager = qret::MFPassManager();
 
     if (request.source_format == qret::CompileFormat::IR
@@ -284,8 +286,17 @@ bool RunCompilation(
         auto before_lowering_extra = MachineFunctionStats(mf);
         qret::rss_profile::Mark("before_machine_function_construction", before_lowering_extra);
         qret::rss_profile::Mark("before_lowering", before_lowering_extra);
+        const auto lowering_start = std::chrono::high_resolution_clock::now();
         qret::sc_ls_fixed_v0::Lowering().RunOnMachineFunction(mf);
+        const auto lowering_finish = std::chrono::high_resolution_clock::now();
+        const auto lowering_elapsed_ms =
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                        lowering_finish - lowering_start
+                )
+                        .count();
         auto after_lowering_extra = MachineFunctionStats(mf);
+        after_lowering_extra["machine_function_construction_elapsed_ms"] =
+                lowering_elapsed_ms;
         qret::rss_profile::Mark("after_machine_function_construction", after_lowering_extra);
         qret::rss_profile::MaybeDiagnosticTrim("after_machine_function_construction");
         qret::rss_profile::Mark("after_lowering", after_lowering_extra);

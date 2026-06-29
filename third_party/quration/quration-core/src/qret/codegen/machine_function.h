@@ -8,9 +8,11 @@
 #define QRET_CODEGEN_MACHINE_FUNCTION_H
 
 #include <cstddef>
+#include <cstdint>
 #include <list>
 #include <map>
 #include <memory>
+#include <new>
 #include <string>
 #include <utility>
 #include <vector>
@@ -25,11 +27,85 @@ namespace qret {
 class TargetMachine;
 class MachineFunction;
 
+struct QRET_EXPORT MachineInstructionArenaStats {
+    bool enabled = false;
+    std::uint64_t allocation_count = 0;
+    std::uint64_t deallocation_count = 0;
+    std::uint64_t requested_bytes = 0;
+    std::uint64_t used_bytes = 0;
+    std::uint64_t reserved_bytes = 0;
+    std::uint64_t chunk_count = 0;
+};
+
+/**
+ * @brief Monotonic storage for machine instruction objects.
+ */
+class QRET_EXPORT MachineInstructionArena {
+public:
+    MachineInstructionArena() = default;
+    ~MachineInstructionArena();
+    MachineInstructionArena(const MachineInstructionArena&) = delete;
+    MachineInstructionArena& operator=(const MachineInstructionArena&) = delete;
+    MachineInstructionArena(MachineInstructionArena&& other) noexcept;
+    MachineInstructionArena& operator=(MachineInstructionArena&& other) noexcept;
+
+    void* Allocate(std::size_t size, std::size_t alignment);
+    [[nodiscard]] bool Owns(const void* ptr) const;
+    bool Deallocate(const void* ptr) noexcept;
+    [[nodiscard]] MachineInstructionArenaStats Stats() const;
+
+private:
+    struct Chunk {
+        void* data = nullptr;
+        std::size_t size = 0;
+        std::size_t used = 0;
+        std::size_t alignment = 0;
+    };
+
+    void Register();
+    void Unregister() noexcept;
+    void Release() noexcept;
+
+    std::vector<Chunk> chunks_ = {};
+    std::uint64_t allocation_count_ = 0;
+    std::uint64_t deallocation_count_ = 0;
+    std::uint64_t requested_bytes_ = 0;
+    std::uint64_t used_bytes_ = 0;
+    bool registered_ = false;
+};
+
+class QRET_EXPORT MachineInstructionAllocationScope {
+public:
+    explicit MachineInstructionAllocationScope(MachineFunction& mf);
+    MachineInstructionAllocationScope(const MachineInstructionAllocationScope&) = delete;
+    MachineInstructionAllocationScope& operator=(const MachineInstructionAllocationScope&) =
+            delete;
+    ~MachineInstructionAllocationScope();
+
+private:
+    MachineInstructionArena* previous_ = nullptr;
+    bool enabled_ = false;
+};
+
+QRET_EXPORT std::string MachineInstructionAllocationMode();
+QRET_EXPORT bool MachineInstructionArenaModeEnabled();
+
 /**
  * @brief Basic representation for all target dependent machine instructions used by the backend.
  */
 class QRET_EXPORT MachineInstruction {
 public:
+    static void* operator new(std::size_t size);
+    static void* operator new(std::size_t size, std::align_val_t alignment);
+    static void operator delete(void* ptr) noexcept;
+    static void operator delete(void* ptr, std::size_t size) noexcept;
+    static void operator delete(void* ptr, std::align_val_t alignment) noexcept;
+    static void operator delete(
+            void* ptr,
+            std::size_t size,
+            std::align_val_t alignment
+    ) noexcept;
+
     virtual ~MachineInstruction() = default;
     [[nodiscard]] virtual std::string ToString() const = 0;
 };
@@ -229,8 +305,18 @@ public:
     const CompileInfo* GetCompileInfo() const {
         return compile_info_.get();
     }
+    [[nodiscard]] MachineInstructionArenaStats GetInstructionArenaStats() const {
+        return instruction_arena_.Stats();
+    }
 
 private:
+    friend class MachineInstructionAllocationScope;
+
+    MachineInstructionArena& InstructionArena() {
+        return instruction_arena_;
+    }
+
+    MachineInstructionArena instruction_arena_ = {};
     const TargetMachine* target_ = nullptr;
     const ir::Function* ir_ = nullptr;
     std::unique_ptr<CompileInfo> compile_info_ = nullptr;
