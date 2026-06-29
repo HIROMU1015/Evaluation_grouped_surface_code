@@ -311,6 +311,29 @@ TEST(MemoryProfileStats, DiagnosticTrimDefaultNoneAndInvalidValue) {
     );
 }
 
+TEST(MemoryProfileStats, HighWaterProfileRequiresExplicitEnvAndJsonlOutput) {
+    const auto high_water_env = ScopedEnv("QRET_PROFILE_HIGH_WATER", std::nullopt);
+    const auto profile_env = ScopedEnv("QRET_RSS_PROFILE_JSONL", std::nullopt);
+
+    EXPECT_FALSE(qret::rss_profile::HighWaterEnabled());
+
+    {
+        const auto enabled_env = ScopedEnv("QRET_PROFILE_HIGH_WATER", "1");
+        EXPECT_FALSE(qret::rss_profile::HighWaterEnabled());
+    }
+    {
+        const auto path = TempJsonlPath("high_water");
+        const auto jsonl_env = ScopedEnv("QRET_RSS_PROFILE_JSONL", path.string());
+        const auto enabled_env = ScopedEnv("QRET_PROFILE_HIGH_WATER", "1");
+        EXPECT_TRUE(qret::rss_profile::HighWaterEnabled());
+        std::filesystem::remove(path);
+    }
+    {
+        const auto invalid_env = ScopedEnv("QRET_PROFILE_HIGH_WATER", "yes");
+        EXPECT_THROW(qret::rss_profile::HighWaterEnabled(), std::invalid_argument);
+    }
+}
+
 TEST(MemoryProfileStats, DiagnosticTrimWritesMarkersOnGlibc) {
     const auto path = TempJsonlPath("trim");
     std::filesystem::remove(path);

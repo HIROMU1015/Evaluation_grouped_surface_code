@@ -2810,6 +2810,7 @@ bool DumpCompileInfo::RunOnMachineFunction(MachineFunction& mf) {
                 auto json_start_extra = MachineAndCompileInfoStats(mf, &compile_info);
                 json_start_extra["json_output_path"] = path;
                 json_start_extra["compile_info_output_mode"] = std::string(ToString(output_mode));
+                qret::rss_profile::Mark("before_serialization", json_start_extra);
                 qret::rss_profile::Mark(
                         "dump_compile_info_before_json_dom_create",
                         json_start_extra
@@ -2837,6 +2838,7 @@ bool DumpCompileInfo::RunOnMachineFunction(MachineFunction& mf) {
                             "dump_compile_info_after_json_stream_write",
                             write_extra
                     );
+                    qret::rss_profile::Mark("after_serialization", write_extra);
                 }
                 auto after_destroy_extra = MachineAndCompileInfoStats(mf, &compile_info);
                 after_destroy_extra["json_output_path"] = path;

@@ -16,6 +16,7 @@
 #include "qret/base/cast.h"
 #include "qret/base/log.h"
 #include "qret/base/option.h"
+#include "qret/base/rss_profile.h"
 #include "qret/codegen/machine_function.h"
 #include "qret/ir/basic_block.h"
 #include "qret/ir/function.h"
@@ -25,6 +26,7 @@
 #include "qret/math/pauli.h"
 #include "qret/target/sc_ls_fixed_v0/constants.h"
 #include "qret/target/sc_ls_fixed_v0/instruction.h"
+#include "qret/target/sc_ls_fixed_v0/memory_profile_stats.h"
 #include "qret/target/sc_ls_fixed_v0/pauli.h"
 #include "qret/target/sc_ls_fixed_v0/sc_ls_fixed_v0_target_machine.h"
 #include "qret/target/sc_ls_fixed_v0/symbol.h"
@@ -38,6 +40,30 @@ static Opt<std::string> DumpPBCString(
         "Dump pauli string if PBC mode is enabled",
         OptionHidden::Hidden
 );
+
+constexpr std::uint64_t HighWaterConstructionSampleStep = 100000;
+
+void MaybeMarkConstructionSample(
+        MachineBasicBlock& block,
+        bool enabled,
+        std::uint64_t& next_sample
+) {
+    if (!enabled || block.NumInstructions() < next_sample) {
+        return;
+    }
+    auto* parent = block.Parent();
+    if (parent == nullptr) {
+        return;
+    }
+    auto extra = MachineFunctionMemoryStats(*parent);
+    extra["machine_construction_sample_step"] = HighWaterConstructionSampleStep;
+    extra["machine_construction_sample_threshold"] = next_sample;
+    extra["machine_construction_inst_block_instructions"] = block.NumInstructions();
+    qret::rss_profile::Mark("during_machine_function_construction", extra);
+    while (block.NumInstructions() >= next_sample) {
+        next_sample += HighWaterConstructionSampleStep;
+    }
+}
 }
 
 struct LowerContextOfBB {
@@ -301,7 +327,13 @@ void LowerBinary(LowerContextOfBB& ctx, MachineBasicBlock& bb, const ir::BinaryI
     }
 }
 
-void LowerBB(LowerContextOfBB& ctx, MachineBasicBlock& insert_at_end, const ir::BasicBlock& bb) {
+void LowerBB(
+        LowerContextOfBB& ctx,
+        MachineBasicBlock& insert_at_end,
+        const ir::BasicBlock& bb,
+        bool high_water_profile,
+        std::uint64_t& next_sample
+) {
     for (const auto& inst : bb) {
         if (inst.IsMeasurement()) {
             LowerMeasurement(ctx, insert_at_end, Cast<ir::MeasurementInst>(&inst));
@@ -321,6 +353,7 @@ void LowerBB(LowerContextOfBB& ctx, MachineBasicBlock& insert_at_end, const ir::
                     "SC_LS_FIXED_V0 lowering error: Cannot lower multi-controlled instructions."
             );
         }
+        MaybeMarkConstructionSample(insert_at_end, high_water_profile, next_sample);
     }
 }
 
@@ -328,7 +361,8 @@ void LowerCircuit(
         MachineBasicBlock& bb,
         const ScLsFixedV0MachineType machine_type,
         const std::uint64_t csym_offset,
-        const ir::Function& func
+        const ir::Function& func,
+        bool high_water_profile
 ) {
     // Since there are no branching instructions in the SC_LS_FIXED_V0 instruction set,
     // branching must be expressed using conditions.
@@ -338,6 +372,7 @@ void LowerCircuit(
     // Do lowering.
     const auto depth_ordered_bbs = func.GetDepthOrderBB();
     auto new_csym = func.GetNumRegisters() + func.GetNumTmpRegisters() + csym_offset;
+    auto next_sample = HighWaterConstructionSampleStep;
 
     for (const auto& [ir_bb, _depth] : depth_ordered_bbs) {
         const auto& formula = cond.at(ir_bb);
@@ -386,7 +421,7 @@ void LowerCircuit(
                 .condition = condition,
                 .new_csym = new_csym,
         };
-        LowerBB(ctx, bb, *ir_bb);
+        LowerBB(ctx, bb, *ir_bb, high_water_profile, next_sample);
 
         new_csym = ctx.new_csym;
     }
@@ -809,7 +844,13 @@ bool Lowering::RunOnMachineFunction(MachineFunction& mf) {
 
         pbc::LowerCircuit(num_magic_factories, num_qubits, NumReservedCSymbols, inst_block, func);
     } else {
-        LowerCircuit(inst_block, target.machine_option.type, NumReservedCSymbols, func);
+        LowerCircuit(
+                inst_block,
+                target.machine_option.type,
+                NumReservedCSymbols,
+                func,
+                qret::rss_profile::HighWaterEnabled()
+        );
     }
 
     auto changed = true;

@@ -108,8 +108,10 @@ LoadFunctionFromIR(const qret::CompileRequest& request, qret::ir::IRContext& con
     } catch (...) {
         input_extra["ir_file_size_bytes"] = nullptr;
     }
+    qret::rss_profile::Mark("before_input_json_read", input_extra);
     qret::rss_profile::Mark("before_ir_file_read", input_extra);
     auto ifs = std::ifstream(request.input);
+    qret::rss_profile::Mark("after_input_json_read", input_extra);
     qret::rss_profile::Mark("after_ir_file_read", input_extra);
     qret::rss_profile::Mark("before_ir_json_parse", input_extra);
     auto j = qret::Json::parse(ifs);
@@ -117,6 +119,7 @@ LoadFunctionFromIR(const qret::CompileRequest& request, qret::ir::IRContext& con
     json_extra["input"] = request.input;
     json_extra["explicit_input_buffer_present"] = false;
     json_extra["ir_file_size_bytes"] = input_extra["ir_file_size_bytes"];
+    qret::rss_profile::Mark("after_json_parse_or_dom_build", json_extra);
     qret::rss_profile::Mark("after_ir_json_parse", json_extra);
     qret::rss_profile::Mark("load_ir_after_json_parse_json_alive", json_extra);
 
@@ -278,9 +281,14 @@ bool RunCompilation(
         qret::rss_profile::Mark("after_ignore_global_phase", FunctionStats(*func));
 
         LOG_INFO("Lowering IR to the machine function of SC_LS_FIXED_V0.");
-        qret::rss_profile::Mark("before_lowering", MachineFunctionStats(mf));
+        auto before_lowering_extra = MachineFunctionStats(mf);
+        qret::rss_profile::Mark("before_machine_function_construction", before_lowering_extra);
+        qret::rss_profile::Mark("before_lowering", before_lowering_extra);
         qret::sc_ls_fixed_v0::Lowering().RunOnMachineFunction(mf);
-        qret::rss_profile::Mark("after_lowering", MachineFunctionStats(mf));
+        auto after_lowering_extra = MachineFunctionStats(mf);
+        qret::rss_profile::Mark("after_machine_function_construction", after_lowering_extra);
+        qret::rss_profile::MaybeDiagnosticTrim("after_machine_function_construction");
+        qret::rss_profile::Mark("after_lowering", after_lowering_extra);
     } else {
         LOG_INFO("Load SC_LS_FIXED_V0 pipeline state file.");
         auto state = qret::sc_ls_fixed_v0::LoadPipelineState(request.input);
@@ -479,6 +487,7 @@ bool ScLsFixedV0CompileBackend::Compile(
     start_extra["output"] = request.output;
     start_extra["function"] = request.function_name;
     start_extra["source_format"] = static_cast<std::int32_t>(request.source_format);
+    qret::rss_profile::Mark("process_start", start_extra);
     qret::rss_profile::Mark("compile_entry", start_extra);
     qret::rss_profile::Mark("compile_backend_start", start_extra);
 
@@ -518,6 +527,7 @@ bool ScLsFixedV0CompileBackend::Compile(
     );
     auto exit_extra = pass_extra;
     exit_extra["success"] = success;
+    qret::rss_profile::Mark("before_process_exit", exit_extra);
     qret::rss_profile::Mark("compile_exit", exit_extra);
     return success;
 }

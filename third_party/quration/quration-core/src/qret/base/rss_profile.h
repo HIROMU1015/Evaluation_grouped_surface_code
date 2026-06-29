@@ -13,6 +13,7 @@
 
 namespace qret::rss_profile {
 QRET_EXPORT bool Enabled();
+QRET_EXPORT bool HighWaterEnabled();
 QRET_EXPORT void Mark(std::string_view stage);
 QRET_EXPORT void Mark(std::string_view stage, const qret::Json& extra);
 QRET_EXPORT bool DiagnosticTrimRequested(std::string_view stage);

@@ -67,6 +67,9 @@ void MFPassManager::Run(MachineFunction& mf) {
         if (const auto boundary = BoundaryStage(ptr->GetPassArgument(), true); !boundary.empty()) {
             qret::rss_profile::Mark(boundary, before_extra);
         }
+        if (ptr->GetPassArgument() == "sc_ls_fixed_v0::calc_info_without_topology") {
+            qret::rss_profile::Mark("before_compile_info", before_extra);
+        }
         ptr->RunOnMachineFunction(mf);
 
         const auto finish = std::chrono::high_resolution_clock::now();
@@ -77,6 +80,13 @@ void MFPassManager::Run(MachineFunction& mf) {
         extra["elapsed_ms"] = elapsed_ms.count();
         if (const auto boundary = BoundaryStage(ptr->GetPassArgument(), false); !boundary.empty()) {
             qret::rss_profile::Mark(boundary, extra);
+        }
+        if (ptr->GetPassArgument() == "sc_ls_fixed_v0::mapping") {
+            qret::rss_profile::MaybeDiagnosticTrim("after_mapping");
+        }
+        if (ptr->GetPassArgument() == "sc_ls_fixed_v0::calc_info_with_topology") {
+            qret::rss_profile::Mark("after_compile_info", extra);
+            qret::rss_profile::MaybeDiagnosticTrim("after_compile_info");
         }
         qret::rss_profile::Mark("mf_pass_after", extra);
     }

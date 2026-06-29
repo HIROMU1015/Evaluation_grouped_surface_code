@@ -169,8 +169,13 @@ bool Routing::RunOnMachineFunction(MachineFunction& mf) {
         );
     }
 
+    if (qret::rss_profile::Enabled()) {
+        qret::rss_profile::Mark("before_validation", MachineFunctionStats(mf));
+    }
     Validate(mf);
-    qret::rss_profile::Mark("routing_after_validate", MachineFunctionStats(mf));
+    auto after_validation_extra = MachineFunctionStats(mf);
+    qret::rss_profile::Mark("after_validation", after_validation_extra);
+    qret::rss_profile::Mark("routing_after_validate", after_validation_extra);
 
     const auto inverse_map_construction_mode = ParseInverseMapConstructionMode();
     qret::inverse_map_profile::RecordBlockUniverse(mf);
@@ -241,6 +246,7 @@ bool Routing::RunOnMachineFunction(MachineFunction& mf) {
         queue.Peek(2 * InstQueuePeekSize);
         qret::rss_profile::Mark("routing_after_initial_queue_peek", QueueStats(mf, queue, &simulator));
         qret::rss_profile::Mark("routing_after_initial_peek", QueueStats(mf, queue, &simulator));
+        qret::rss_profile::Mark("routing_after_setup", QueueStats(mf, queue, &simulator));
         if (!queue.Empty() && queue.NumRunnables() > 0) {
             lightest_weight_of_inst_at_beat = queue.GetNode(*queue.begin()).weight;
         }
@@ -359,6 +365,7 @@ bool Routing::RunOnMachineFunction(MachineFunction& mf) {
         mf.ReleaseInverseMaps();
     }
     qret::rss_profile::Mark("routing_after_inverse_map_release", MachineFunctionStats(mf));
+    qret::rss_profile::MaybeDiagnosticTrim("routing_after_inverse_map_release");
     qret::rss_profile::Mark("routing_pass_exit", MachineFunctionStats(mf));
     return changed;
 }

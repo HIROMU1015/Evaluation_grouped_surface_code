@@ -12,6 +12,7 @@
 #endif
 
 #include <sys/types.h>
+#include <sys/resource.h>
 #include <unistd.h>
 
 #include <chrono>
@@ -67,6 +68,8 @@ qret::Json ReadProcStatus() {
             ret["vmhwm_kb"] = *value;
         } else if (auto value = ParseKbLine(line, "VmSize:"); value.has_value()) {
             ret["vmsize_kb"] = *value;
+        } else if (auto value = ParseKbLine(line, "VmData:"); value.has_value()) {
+            ret["vmdata_kb"] = *value;
         } else if (auto value = ParseKbLine(line, "RssAnon:"); value.has_value()) {
             ret["rss_anon_kb"] = *value;
         } else if (auto value = ParseKbLine(line, "RssFile:"); value.has_value()) {
@@ -101,6 +104,15 @@ qret::Json ReadProcSmapsRollup() {
     return ret;
 }
 
+qret::Json ReadResourceUsage() {
+    auto ret = qret::Json::object();
+    auto usage = rusage{};
+    if (getrusage(RUSAGE_SELF, &usage) == 0) {
+        ret["ru_maxrss_kb"] = static_cast<std::int64_t>(usage.ru_maxrss);
+    }
+    return ret;
+}
+
 qret::Json ReadMallinfo2() {
     auto ret = qret::Json::object();
 #if defined(__GLIBC__)
@@ -127,18 +139,34 @@ std::string DiagnosticTrimMode() {
     }
     const auto mode = std::string(raw);
     if (mode == "none" || mode == "after_json_dom_destroy"
-        || mode == "after_routing_temporary_destroy" || mode == "both") {
+        || mode == "after_routing_temporary_destroy"
+        || mode == "after_machine_function_construction" || mode == "after_mapping"
+        || mode == "routing_after_inverse_map_release" || mode == "after_compile_info"
+        || mode == "both") {
         return mode;
     }
     throw std::invalid_argument(
             "QRET_RSS_DIAGNOSTIC_TRIM_STAGE must be one of none, "
-            "after_json_dom_destroy, after_routing_temporary_destroy, or both"
+            "after_json_dom_destroy, after_routing_temporary_destroy, "
+            "after_machine_function_construction, after_mapping, "
+            "routing_after_inverse_map_release, after_compile_info, or both"
     );
 }
 }  // namespace
 
 bool Enabled() {
     return OutputPath().has_value();
+}
+
+bool HighWaterEnabled() {
+    const auto* raw = std::getenv("QRET_PROFILE_HIGH_WATER");
+    if (raw == nullptr || std::string(raw).empty() || std::string(raw) == "0") {
+        return false;
+    }
+    if (std::string(raw) == "1") {
+        return Enabled();
+    }
+    throw std::invalid_argument("QRET_PROFILE_HIGH_WATER must be 0 or 1");
 }
 
 void Mark(std::string_view stage) {
@@ -167,6 +195,10 @@ void Mark(std::string_view stage, const qret::Json& extra) {
     for (auto it = smaps.begin(); it != smaps.end(); ++it) {
         payload[it.key()] = it.value();
     }
+    auto usage = ReadResourceUsage();
+    for (auto it = usage.begin(); it != usage.end(); ++it) {
+        payload[it.key()] = it.value();
+    }
     auto heap = ReadMallinfo2();
     for (auto it = heap.begin(); it != heap.end(); ++it) {
         payload[it.key()] = it.value();
@@ -193,7 +225,10 @@ bool DiagnosticTrimRequested(const std::string_view stage) {
     }
     if (mode == "both") {
         return stage == "after_json_dom_destroy"
-                || stage == "after_routing_temporary_destroy";
+                || stage == "after_routing_temporary_destroy"
+                || stage == "after_machine_function_construction" || stage == "after_mapping"
+                || stage == "routing_after_inverse_map_release"
+                || stage == "after_compile_info";
     }
     return mode == stage;
 }
