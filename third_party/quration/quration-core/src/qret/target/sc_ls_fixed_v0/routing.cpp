@@ -60,6 +60,22 @@ static Opt<std::int32_t> RouteSearcherType(
         OptionHidden::Hidden
 );
 
+enum class InverseMapConstructionMode {
+    Eager,
+    Lazy,
+};
+
+std::string ToString(InverseMapConstructionMode mode) {
+    switch (mode) {
+        case InverseMapConstructionMode::Eager:
+            return "eager";
+        case InverseMapConstructionMode::Lazy:
+            return "lazy";
+        default:
+            return "unknown";
+    }
+}
+
 qret::Json MachineFunctionStats(const MachineFunction& mf) {
     return RoutingLiveMemoryStats(mf);
 }
@@ -90,6 +106,17 @@ bool ReleaseInverseMapAfterRouting() {
         return true;
     }
     throw std::invalid_argument("QRET_RELEASE_INVERSE_MAP_AFTER_ROUTING must be 0 or 1");
+}
+
+InverseMapConstructionMode ParseInverseMapConstructionMode() {
+    const auto* raw = std::getenv("QRET_INVERSE_MAP_CONSTRUCTION");
+    if (raw == nullptr || std::string(raw).empty() || std::string(raw) == "eager") {
+        return InverseMapConstructionMode::Eager;
+    }
+    if (std::string(raw) == "lazy") {
+        return InverseMapConstructionMode::Lazy;
+    }
+    throw std::invalid_argument("QRET_INVERSE_MAP_CONSTRUCTION must be eager or lazy");
 }
 }  // namespace
 
@@ -145,18 +172,23 @@ bool Routing::RunOnMachineFunction(MachineFunction& mf) {
     Validate(mf);
     qret::rss_profile::Mark("routing_after_validate", MachineFunctionStats(mf));
 
+    const auto inverse_map_construction_mode = ParseInverseMapConstructionMode();
+    qret::inverse_map_profile::RecordBlockUniverse(mf);
+
     auto magic_path_interner = MagicPathInterner();
     auto magic_path_interning_scope = MagicPathInterningScope(magic_path_interner);
 
-    // Initialize machine function.
-    {
+    if (inverse_map_construction_mode == InverseMapConstructionMode::Eager) {
         const auto inverse_map_stage =
                 qret::inverse_map_profile::StageScope("routing_setup_construct_inverse_map");
         for (auto&& mbb : mf) {
             mbb.ConstructInverseMap();
         }
     }
-    qret::rss_profile::Mark("routing_after_construct_inverse_map", MachineFunctionStats(mf));
+    auto inverse_map_extra = MachineFunctionStats(mf);
+    inverse_map_extra["inverse_map_construction_mode"] =
+            ToString(inverse_map_construction_mode);
+    qret::rss_profile::Mark("routing_after_construct_inverse_map", inverse_map_extra);
 
     auto changed = true;
     {

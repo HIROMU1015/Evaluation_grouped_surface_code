@@ -301,6 +301,7 @@ qret::Json MachineFunctionMemoryStats(const qret::MachineFunction& mf) {
     auto inverse_map_entries = std::uint64_t{0};
     auto inverse_map_valid_blocks = std::uint64_t{0};
     auto inverse_map_released_blocks = std::uint64_t{0};
+    auto inverse_map_never_constructed_blocks = std::uint64_t{0};
     auto largest_inverse_map_block_entries = std::uint64_t{0};
     auto qtarget_count = std::uint64_t{0};
     auto condition_count = std::uint64_t{0};
@@ -344,6 +345,9 @@ qret::Json MachineFunctionMemoryStats(const qret::MachineFunction& mf) {
         }
         if (mbb.InverseMapReleased()) {
             ++inverse_map_released_blocks;
+        }
+        if (mbb.InverseMapNeverBuilt()) {
+            ++inverse_map_never_constructed_blocks;
         }
         const auto block_instruction_list_node_bytes =
                 mbb.NumInstructions()
@@ -490,6 +494,8 @@ qret::Json MachineFunctionMemoryStats(const qret::MachineFunction& mf) {
     ret["machine_inverse_map_entries"] = inverse_map_entries;
     ret["machine_inverse_map_valid_blocks"] = inverse_map_valid_blocks;
     ret["machine_inverse_map_released_blocks"] = inverse_map_released_blocks;
+    ret["machine_inverse_map_never_constructed_blocks"] =
+            inverse_map_never_constructed_blocks;
     ret["machine_inverse_map_entries_by_basic_block"] = inverse_map_entries_by_basic_block;
     ret["machine_inverse_map_largest_block_entries"] = largest_inverse_map_block_entries;
     ret["machine_inverse_map_key_size_bytes"] = inverse_map_key_size;

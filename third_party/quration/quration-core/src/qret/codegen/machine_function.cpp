@@ -12,13 +12,17 @@
 
 namespace qret {
 void MachineBasicBlock::ConstructInverseMap() {
+    ConstructInverseMapImpl(false);
+}
+void MachineBasicBlock::ConstructInverseMapImpl(bool from_ensure) {
     const auto was_valid = inverse_map_valid_;
     const auto was_released = inverse_map_released_;
     const auto entries_before = mp_.size();
-    mp_.clear();
+    auto next = std::map<const MachineInstruction*, ConstIterator>();
     for (auto itr = instructions_.begin(); itr != instructions_.end(); ++itr) {
-        mp_.emplace(itr->get(), itr);
+        next.emplace(itr->get(), itr);
     }
+    mp_.swap(next);
     inverse_map_valid_ = true;
     inverse_map_released_ = false;
     inverse_map_profile::RecordConstruct(
@@ -26,7 +30,8 @@ void MachineBasicBlock::ConstructInverseMap() {
             was_valid,
             was_released,
             entries_before,
-            mp_.size()
+            mp_.size(),
+            from_ensure
     );
 }
 void MachineBasicBlock::EnsureInverseMap() const {
@@ -36,8 +41,8 @@ void MachineBasicBlock::EnsureInverseMap() const {
     }
     const auto was_released = inverse_map_released_;
     auto& self = const_cast<MachineBasicBlock&>(*this);
-    self.ConstructInverseMap();
-    inverse_map_profile::RecordLazyRebuild(*this, was_released);
+    self.ConstructInverseMapImpl(true);
+    inverse_map_profile::RecordLazyRebuild(*this, was_released, self.InverseMapSize());
 }
 void MachineBasicBlock::ReleaseInverseMap() {
     const auto was_valid = inverse_map_valid_;

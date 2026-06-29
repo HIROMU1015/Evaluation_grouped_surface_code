@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "qret/codegen/inverse_map_profile.h"
 #include "qret/base/string.h"
 #include "qret/target/sc_ls_fixed_v0/instruction.h"
 #include "qret/target/sc_ls_fixed_v0/routing.h"
@@ -102,6 +103,16 @@ ScLsFixedV0MachineOption TestOption() {
             .maximum_entangled_state_stock = 100,
             .reaction_time = 1,
     };
+}
+
+MachineFunction BuildRoutableMachineFunction(const ScLsFixedV0TargetMachine& target) {
+    auto mf = MachineFunction(&target);
+    auto& alloc = mf.AddBlock();
+    auto& block = mf.AddBlock();
+    alloc.EmplaceBack(Allocate::New(QSymbol{0}, Coord3D{1, 1, 3}, 0, {}));
+    alloc.EmplaceBack(Allocate::New(QSymbol{1}, Coord3D{4, 3, 3}, 0, {}));
+    block.EmplaceBack(Cnot::New(QSymbol{0}, QSymbol{1}, {}, {}));
+    return mf;
 }
 }  // namespace
 
@@ -230,14 +241,10 @@ TEST(MachineFunctionInverseMap, CustomPassStyleMutationAfterRelease) {
 
 TEST(MachineFunctionInverseMap, RoutingReleasesInverseMapsByDefault) {
     const auto release_env = ScopedEnv("QRET_RELEASE_INVERSE_MAP_AFTER_ROUTING", std::nullopt);
+    const auto construction_env = ScopedEnv("QRET_INVERSE_MAP_CONSTRUCTION", "eager");
     auto topology = LoadPlaneTopologyFixture();
     const auto target = ScLsFixedV0TargetMachine(topology, TestOption());
-    auto mf = MachineFunction(&target);
-    auto& alloc = mf.AddBlock();
-    auto& block = mf.AddBlock();
-    alloc.EmplaceBack(Allocate::New(QSymbol{0}, Coord3D{1, 1, 3}, 0, {}));
-    alloc.EmplaceBack(Allocate::New(QSymbol{1}, Coord3D{4, 3, 3}, 0, {}));
-    block.EmplaceBack(Cnot::New(QSymbol{0}, QSymbol{1}, {}, {}));
+    auto mf = BuildRoutableMachineFunction(target);
 
     Routing().RunOnMachineFunction(mf);
 
@@ -247,5 +254,112 @@ TEST(MachineFunctionInverseMap, RoutingReleasesInverseMapsByDefault) {
         EXPECT_TRUE(mbb.InverseMapReleased());
         EXPECT_EQ(mbb.InverseMapSize(), 0);
     }
+}
+
+TEST(MachineFunctionInverseMap, RoutingEagerModeBuildsInverseMapsWhenReleaseDisabled) {
+    const auto release_env = ScopedEnv("QRET_RELEASE_INVERSE_MAP_AFTER_ROUTING", "0");
+    const auto construction_env = ScopedEnv("QRET_INVERSE_MAP_CONSTRUCTION", "eager");
+    auto topology = LoadPlaneTopologyFixture();
+    const auto target = ScLsFixedV0TargetMachine(topology, TestOption());
+    auto mf = BuildRoutableMachineFunction(target);
+
+    Routing().RunOnMachineFunction(mf);
+
+    for (const auto& mbb : mf) {
+        EXPECT_TRUE(mbb.HasInverseMap());
+        EXPECT_FALSE(mbb.InverseMapReleased());
+        EXPECT_FALSE(mbb.InverseMapNeverBuilt());
+        EXPECT_EQ(mbb.InverseMapSize(), mbb.NumInstructions());
+    }
+}
+
+TEST(MachineFunctionInverseMap, RoutingDefaultKeepsEagerModeUntilLazyCandidateAccepted) {
+    const auto release_env = ScopedEnv("QRET_RELEASE_INVERSE_MAP_AFTER_ROUTING", "0");
+    const auto construction_env = ScopedEnv("QRET_INVERSE_MAP_CONSTRUCTION", std::nullopt);
+    auto topology = LoadPlaneTopologyFixture();
+    const auto target = ScLsFixedV0TargetMachine(topology, TestOption());
+    auto mf = BuildRoutableMachineFunction(target);
+
+    Routing().RunOnMachineFunction(mf);
+
+    for (const auto& mbb : mf) {
+        EXPECT_TRUE(mbb.HasInverseMap());
+        EXPECT_FALSE(mbb.InverseMapReleased());
+        EXPECT_FALSE(mbb.InverseMapNeverBuilt());
+        EXPECT_EQ(mbb.InverseMapSize(), mbb.NumInstructions());
+    }
+}
+
+TEST(MachineFunctionInverseMap, RoutingLazyModeLeavesUnusedInverseMapsUnbuilt) {
+    const auto release_env = ScopedEnv("QRET_RELEASE_INVERSE_MAP_AFTER_ROUTING", "0");
+    const auto construction_env = ScopedEnv("QRET_INVERSE_MAP_CONSTRUCTION", "lazy");
+    auto topology = LoadPlaneTopologyFixture();
+    const auto target = ScLsFixedV0TargetMachine(topology, TestOption());
+    auto mf = BuildRoutableMachineFunction(target);
+
+    Routing().RunOnMachineFunction(mf);
+
+    for (const auto& mbb : mf) {
+        EXPECT_FALSE(mbb.HasInverseMap());
+        EXPECT_FALSE(mbb.InverseMapReleased());
+        EXPECT_TRUE(mbb.InverseMapNeverBuilt());
+        EXPECT_EQ(mbb.InverseMapSize(), 0);
+    }
+}
+
+TEST(MachineFunctionInverseMap, InvalidInverseMapConstructionModeThrows) {
+    const auto construction_env = ScopedEnv("QRET_INVERSE_MAP_CONSTRUCTION", "invalid");
+    auto topology = LoadPlaneTopologyFixture();
+    const auto target = ScLsFixedV0TargetMachine(topology, TestOption());
+    auto mf = BuildRoutableMachineFunction(target);
+
+    EXPECT_THROW(Routing().RunOnMachineFunction(mf), std::invalid_argument);
+}
+
+TEST(MachineFunctionInverseMap, LazyProfileCountersTrackNeverConstructedBlocks) {
+    const auto profile_env = ScopedEnv("QRET_PROFILE_INVERSE_MAP_USAGE", "1");
+    qret::inverse_map_profile::ResetForTest();
+    auto mf = MachineFunction();
+    auto& first = mf.AddBlock();
+    auto& second = mf.AddBlock();
+    auto& third = mf.AddBlock();
+    first.EmplaceBack(Dummy("a"));
+    auto inst = Dummy("b");
+    auto* ptr = inst.get();
+    second.EmplaceBack(std::move(inst));
+    third.EmplaceBack(Dummy("c"));
+    qret::inverse_map_profile::RecordBlockUniverse(mf);
+
+    EXPECT_TRUE(second.Contain(ptr));
+
+    const auto stats = qret::inverse_map_profile::SnapshotJson();
+    EXPECT_EQ(stats["constructed_block_count"], 1);
+    EXPECT_EQ(stats["never_constructed_block_count"], 2);
+    EXPECT_EQ(stats["lazy_construction_count"], 1);
+    EXPECT_EQ(stats["lazy_inserted_entries"], 1);
+    EXPECT_EQ(stats["max_live_entries"], 1);
+    qret::inverse_map_profile::ResetForTest();
+}
+
+TEST(MachineFunctionInverseMap, DirectEmplaceBackMaintainsOrDefersInverseMap) {
+    auto mf = MachineFunction();
+    auto& block = mf.AddBlock();
+    auto first = Dummy("first");
+    auto* first_ptr = first.get();
+    block.EmplaceBack(std::move(first));
+    EXPECT_TRUE(block.InverseMapNeverBuilt());
+
+    auto second = Dummy("second");
+    auto* second_ptr = second.get();
+    block.EmplaceBack(std::move(second));
+    EXPECT_TRUE(block.Contain(second_ptr));
+    EXPECT_EQ(block.InverseMapSize(), 2);
+
+    auto third = Dummy("third");
+    auto* third_ptr = third.get();
+    block.EmplaceBack(std::move(third));
+    EXPECT_TRUE(block.Contain(first_ptr));
+    EXPECT_TRUE(block.Contain(third_ptr));
+    EXPECT_EQ(block.InverseMapSize(), 3);
 }
 }  // namespace qret::sc_ls_fixed_v0

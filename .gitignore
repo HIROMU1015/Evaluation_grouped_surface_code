@@ -26,6 +26,7 @@ artifacts/qret_magic_path_interning/
 artifacts/qret_compact_operands/
 artifacts/qret_memory_strategy/
 artifacts/qret_inverse_map_design/
+artifacts/qret_lazy_inverse_map/
 artifacts/surface_code_parent_memory/
 artifacts/surface_code_process_isolation/
 artifacts/implementation_visual_overview/

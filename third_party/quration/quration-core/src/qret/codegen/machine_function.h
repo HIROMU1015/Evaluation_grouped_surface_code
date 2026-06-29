@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "qret/codegen/compile_info.h"
+#include "qret/codegen/inverse_map_profile.h"
 #include "qret/ir/function.h"
 #include "qret/qret_export.h"
 
@@ -69,6 +70,9 @@ public:
     [[nodiscard]] bool InverseMapReleased() const {
         return inverse_map_released_;
     }
+    [[nodiscard]] bool InverseMapNeverBuilt() const {
+        return !inverse_map_valid_ && !inverse_map_released_ && mp_.empty();
+    }
     [[nodiscard]] bool Contain(const MachineInstruction* inst) const;
     void
     InsertBefore(const MachineInstruction* inst, std::unique_ptr<MachineInstruction>&& new_inst);
@@ -113,6 +117,8 @@ public:
     }  // NOLINT
 
 private:
+    void ConstructInverseMapImpl(bool from_ensure);
+
     MachineBasicBlock(
             MachineFunction* parent,
             std::list<std::unique_ptr<MachineInstruction>>&& instructions,
@@ -165,6 +171,7 @@ public:
         blocks_.clear();
     }
     void ReleaseInverseMaps() {
+        inverse_map_profile::RecordBlockUniverse(*this);
         for (auto& block : blocks_) {
             block.ReleaseInverseMap();
         }

@@ -13,6 +13,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -37,10 +38,13 @@ struct StageCounters {
 
 struct ProfileStats {
     std::uint64_t construct_inverse_map_count = 0;
+    std::uint64_t eager_construction_count = 0;
+    std::uint64_t lazy_construction_count = 0;
     std::uint64_t construct_when_valid_count = 0;
     std::uint64_t construct_after_release_count = 0;
     std::uint64_t full_rebuild_count = 0;
     std::uint64_t initial_inserted_entries = 0;
+    std::uint64_t lazy_inserted_entries = 0;
     std::uint64_t constructed_entries_total = 0;
     std::uint64_t ensure_inverse_map_count = 0;
     std::uint64_t ensure_valid_count = 0;
@@ -62,6 +66,9 @@ struct ProfileStats {
     std::uint64_t max_live_entries = 0;
     std::uint64_t min_live_entries = std::numeric_limits<std::uint64_t>::max();
     bool observed_live_entries = false;
+    bool observed_block_universe = false;
+    std::uint64_t block_universe_count = 0;
+    std::unordered_set<const MachineBasicBlock*> constructed_blocks;
     std::vector<std::uint64_t> construct_block_entries;
     std::vector<std::uint64_t> release_block_entries;
     std::map<std::string, StageCounters> stage_counters;
@@ -160,25 +167,31 @@ StageScope::~StageScope() {
 }
 
 void RecordConstruct(
-        const MachineBasicBlock&,
+        const MachineBasicBlock& block,
         bool was_valid,
         bool was_released,
         std::size_t entries_before,
-        std::size_t entries_after
+        std::size_t entries_after,
+        bool from_ensure
 ) {
     if (!Enabled()) {
         return;
     }
     std::lock_guard<std::mutex> lock(Mutex);
     auto& stage = Stage(Stats);
+    const auto stage_name = StageName();
     ++Stats.construct_inverse_map_count;
     ++Stats.full_rebuild_count;
     ++stage.construct_count;
+    Stats.constructed_blocks.insert(&block);
     if (was_valid) {
         ++Stats.construct_when_valid_count;
         RemoveEntries(Stats, static_cast<std::uint64_t>(entries_before));
-    } else if (!was_released) {
+    } else if (!was_released && !from_ensure) {
         Stats.initial_inserted_entries += static_cast<std::uint64_t>(entries_after);
+    }
+    if (stage_name == "routing_setup_construct_inverse_map") {
+        ++Stats.eager_construction_count;
     }
     if (was_released) {
         ++Stats.construct_after_release_count;
@@ -205,12 +218,18 @@ void RecordEnsure(const MachineBasicBlock&, bool was_valid, bool) {
     }
 }
 
-void RecordLazyRebuild(const MachineBasicBlock&, bool was_released) {
+void RecordLazyRebuild(
+        const MachineBasicBlock&,
+        bool was_released,
+        std::size_t entries_after
+) {
     if (!Enabled()) {
         return;
     }
     std::lock_guard<std::mutex> lock(Mutex);
     auto& stage = Stage(Stats);
+    ++Stats.lazy_construction_count;
+    Stats.lazy_inserted_entries += static_cast<std::uint64_t>(entries_after);
     ++Stats.lazy_rebuild_count;
     ++stage.lazy_rebuild_count;
     if (was_released) {
@@ -288,6 +307,19 @@ void RecordRelease(const MachineBasicBlock&, bool was_valid, std::size_t entries
     }
 }
 
+void RecordBlockUniverse(const MachineFunction& mf) {
+    if (!Enabled()) {
+        return;
+    }
+    auto count = std::uint64_t{0};
+    for ([[maybe_unused]] const auto& block : mf) {
+        ++count;
+    }
+    std::lock_guard<std::mutex> lock(Mutex);
+    Stats.observed_block_universe = true;
+    Stats.block_universe_count = std::max(Stats.block_universe_count, count);
+}
+
 qret::Json SnapshotJson() {
     if (!Enabled()) {
         return qret::Json::object();
@@ -306,13 +338,17 @@ qret::Json SnapshotJson() {
     ret["schema"] = "qret_inverse_map_usage_profile_v1";
     ret["enabled"] = true;
     ret["construct_inverse_map_count"] = Stats.construct_inverse_map_count;
+    ret["eager_construction_count"] = Stats.eager_construction_count;
+    ret["lazy_construction_count"] = Stats.lazy_construction_count;
     ret["construct_when_valid_count"] = Stats.construct_when_valid_count;
     ret["construct_after_release_count"] = Stats.construct_after_release_count;
     ret["full_rebuild_count"] = Stats.full_rebuild_count;
     ret["initial_inserted_entries"] = Stats.initial_inserted_entries;
+    ret["lazy_inserted_entries"] = Stats.lazy_inserted_entries;
     ret["constructed_entries_total"] = Stats.constructed_entries_total;
     ret["ensure_inverse_map_count"] = Stats.ensure_inverse_map_count;
     ret["ensure_valid_count"] = Stats.ensure_valid_count;
+    ret["ensure_noop_count"] = Stats.ensure_valid_count;
     ret["ensure_rebuild_needed_count"] = Stats.ensure_rebuild_needed_count;
     ret["lazy_rebuild_count"] = Stats.lazy_rebuild_count;
     ret["lazy_rebuild_after_release_count"] = Stats.lazy_rebuild_after_release_count;
@@ -331,6 +367,18 @@ qret::Json SnapshotJson() {
     ret["max_live_entries"] = Stats.max_live_entries;
     ret["min_live_entries"] =
             Stats.observed_live_entries ? Stats.min_live_entries : std::uint64_t{0};
+    ret["block_universe_count"] =
+            Stats.observed_block_universe ? Stats.block_universe_count : std::uint64_t{0};
+    ret["constructed_block_count"] =
+            static_cast<std::uint64_t>(Stats.constructed_blocks.size());
+    ret["never_constructed_block_count"] =
+            Stats.observed_block_universe
+            ? Stats.block_universe_count
+                    - std::min(
+                            Stats.block_universe_count,
+                            static_cast<std::uint64_t>(Stats.constructed_blocks.size())
+                    )
+            : std::uint64_t{0};
     ret["construct_block_entries"] = Stats.construct_block_entries;
     ret["release_block_entries"] = Stats.release_block_entries;
     ret["stage_counters"] = stages;
