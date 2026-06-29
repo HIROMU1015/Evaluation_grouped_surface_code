@@ -20,6 +20,7 @@ Only H4 and H5 were observed. H6, H7, H8, and H9 were not executed.
 - compile-info mode: summary
 - TimeSeries mode: legacy summary TimeSeries
 - DepGraph mode: compact
+- inverse-map construction: eager by default; `QRET_INVERSE_MAP_CONSTRUCTION=lazy` remains an explicit rejected candidate mode
 - inverse-map release after routing: enabled
 - pipeline-state output: skipped
 
@@ -37,6 +38,23 @@ singleton non-path operands, but did not adopt it for production.
 Phase 1 raw and normalized metrics matched for H4/H5, and path interning counters
 were unchanged. The candidate was rejected because H5 median qret peak improved by
 only `12,324 KB` (`2.834%`) and elapsed regressed by `9.092%`.
+
+Phase 2 measured lazy inverse-map construction. It eliminated all inverse-map
+entries in the current H5 production pipeline, but was not adopted because RSS
+peak did not move enough to pass the H5 gate.
+
+| phase | case | variant | observed runs | median qret peak KB | median routing peak KB | median elapsed s | median max live inverse-map entries | decision |
+| ----- | ---- | ------- | ------------: | ------------------: | ---------------------: | ---------------: | ----------------------------------: | -------- |
+| Phase 2 | H5 `4th(new_2)` | eager inverse-map construction | 2 | 434,900 | 434,900 | 18.091 | 1,499,072 | kept |
+| Phase 2 | H5 `4th(new_2)` | lazy inverse-map construction | 2 | 434,852 | 434,852 | 17.919 | 0 | not adopted |
+
+Phase 2 raw and normalized metrics matched for H4/H5. The H5 median qret peak
+improved by only `48 KB` (`0.011%`), and one lazy run was higher than one eager
+run, so the production default remains eager. The useful diagnostic result is
+that allocator in-use bytes at `routing_before_inverse_map_release` dropped by
+about `93,690 KB` while VMRSS stayed at the previous high-water level. The next
+effective optimization must reduce the pre-routing/MachineFunction RSS high-water
+or allocator retention, not only remove data that no longer controls VMRSS.
 
 ## Operand Audit
 
@@ -125,6 +143,22 @@ The current implementation stores `std::map<const MachineInstruction*, ConstIter
 inside each `MachineBasicBlock`. Compile-info and pipeline-state output iterate
 instructions directly and do not need the inverse map after routing.
 
+Lazy construction result:
+
+| item | eager H5 median | lazy H5 median |
+| ---- | --------------: | -------------: |
+| max live inverse-map entries | 1,499,072 | 0 |
+| constructed block count | 3 | 0 |
+| never-constructed block count | 0 | 3 |
+| initial inserted entries | 1,499,072 | 0 |
+| qret peak RSS KB | 434,900 | 434,852 |
+| median RSS saving KB |  | 48 |
+| adoption | kept | rejected |
+
+The lazy candidate remains useful as an explicit diagnostic and custom-pipeline
+fallback path. It is not a production default because H5 RSS was dominated by
+another live set or allocator-retained high-water mark.
+
 Candidate structures:
 
 | candidate | likely H5 effect | notes |
@@ -165,33 +199,52 @@ gate failed, so this candidate is not production.
 
 | rank | candidate | H5 live bytes | H5 realistic saving | H9 estimated saving | peak effective | risk | scope |
 | ---: | --------- | ------------: | ------------------: | ------------------: | -------------- | ---- | ----- |
-| 1 | inverse map compactization | 57.2 MB | 35-50 MB | 1.6-2.4 GB | yes | medium | `MachineBasicBlock` inverse map and mutation helpers |
-| 2 | instruction list-node removal | 34.3 MB | 20-34 MB | 1.0-1.6 GB | yes | medium-high | `MachineBasicBlock::Container`, iterator users |
-| 3 | instruction object arena/flat storage | 137.8 MB | 30-60 MB | 1.3-2.6 GB | yes | high | instruction class layout and ownership |
-| 4 | residual operand compaction with real range API | 51.4 MB | 20-35 MB | 0.8-1.5 GB | yes | medium-high | operand APIs, no compatibility cache |
-| 5 | instruction count reduction | all instruction-scaled components | case-dependent | high | yes | high | routing/lowering semantics |
-| 6 | MachineFunction chunk/stream routing | broad live set | high theoretical | high | yes | very high | routing architecture |
+| 1 | pre-routing/MachineFunction high-water reduction | broad live set | needs H5 diagnosis | high | yes | medium | IR parse, lowering/mapping temporaries, allocator retention |
+| 2 | instruction object arena/flat storage | 137.8 MB | 30-60 MB | 1.3-2.6 GB | likely | high | instruction class layout and ownership |
+| 3 | instruction list-node removal | 34.3 MB | 20-34 MB | 1.0-1.6 GB | likely | medium-high | `MachineBasicBlock::Container`, iterator users |
+| 4 | residual operand compaction with real range API | 51.4 MB | 20-35 MB | 0.8-1.5 GB | likely | medium-high | operand APIs, no compatibility cache |
+| 5 | inverse map compactization | 57.2 MB live bytes | low unless it also reduces high-water | 1.6-2.4 GB model only | no in current H5 | medium | `MachineBasicBlock` inverse map and mutation helpers |
+| 6 | instruction count reduction | all instruction-scaled components | case-dependent | high | yes | high | routing/lowering semantics |
+| 7 | MachineFunction chunk/stream routing | broad live set | high theoretical | high | yes | very high | routing architecture |
 
 Next implementation candidates are limited to:
 
-1. **Inverse map compactization**
-   - target files/classes: `qret/codegen/machine_function.{h,cpp}`
-   - current data structure: `std::map<const MachineInstruction*, ConstIterator>`
-   - proposed data structure: stable instruction ID plus block-local flat vector/index table
-   - required API changes: keep `Contain`, `InsertBefore`, `InsertAfter`, `Erase`
-   - H4 tests: insert/erase/lazy rebuild, routing replacement, validation, pipeline-state output
-   - H5 A/B: current production vs compact inverse map, 2 runs each
-   - acceptance: raw/normalized parity, all candidate peaks below baseline, >=25 MB or >=5% H5 reduction, elapsed <=3% regression
-   - rollback: compile-time guarded fallback to current `std::map`
-   - H9 effect: central estimate about 2 GB if most map nodes are removed
+1. **Pre-routing/MachineFunction high-water audit**
+   - target files/classes: IR load/lowering/mapping path plus `MachineFunction` live-set instrumentation
+   - current observation: lazy inverse-map mode removes the map live set but H5 VMRSS stays flat
+   - required measurement: H4/H5 only, with allocator fields at IR parse, MachineFunction build, lowering, mapping, and routing entry
+   - acceptance: identify a component whose H5 RSS effect is at least 30 MB or 7%, without H6-H9 execution
+   - rollback: read-only profiling first
+   - H9 effect: estimated only from H4/H5 component growth
 
-2. **Instruction list-node removal after inverse-map IDs are stable**
+2. **Instruction object arena/flat storage**
+   - target files/classes: `ScLsInstructionBase` subclasses and ownership in `MachineBasicBlock`
+   - current data structure: per-instruction heap allocation behind `std::unique_ptr`
+   - required API changes: preserve instruction polymorphism or introduce a stable tagged arena facade
+   - H4 tests: all semantic parity plus insertion/erase/lazy rebuild tests
+   - H5 A/B: only after high-water audit shows instruction objects are peak-effective
+   - acceptance: same H5-only gates, with no H6-H9 execution
+   - rollback: selectable legacy allocation path
+   - H9 effect: model only, not measured
+
+3. **Instruction list-node removal**
    - target files/classes: `MachineBasicBlock::Container`, routing insertion call sites
    - current data structure: `std::list<std::unique_ptr<MachineInstruction>>`
    - proposed data structure: flat/chunked owner with stable instruction pointers and ID-based positions
    - required API changes: iterator-dependent code must move to pointer/ID ranges
    - H4 tests: insertion order, replacement/erase, queue dependencies, compile-info parity
-   - H5 A/B: only after inverse-map work defines stable IDs
-   - acceptance: same gates as inverse-map work, plus targeted iterator lifetime tests
+   - H5 A/B: only after high-water audit confirms list nodes are peak-effective
+   - acceptance: same H5-only gates, plus targeted iterator lifetime tests
    - rollback: keep `std::list` implementation selectable at compile time
    - H9 effect: central estimate about 1.6 GB for list-node payload alone
+
+4. **Inverse map compactization**
+   - target files/classes: `qret/codegen/machine_function.{h,cpp}`
+   - current data structure: `std::map<const MachineInstruction*, ConstIterator>`
+   - proposed data structure: stable instruction ID plus block-local flat vector/index table
+   - required API changes: keep `Contain`, `InsertBefore`, `InsertAfter`, `Erase`
+   - H4 tests: insert/erase/lazy rebuild, routing replacement, validation, pipeline-state output
+   - H5 A/B: only after proving inverse-map storage is still peak-effective; lazy construction showed it is not peak-effective in current H5
+   - acceptance: raw/normalized parity, all candidate peaks below baseline, >=30 MB or >=7% H5 reduction, elapsed <=3% regression
+   - rollback: compile-time guarded fallback to current `std::map`
+   - H9 effect: central estimate about 2.7 GB for eager map nodes, but this is theoretical/model-only and not a current H5 adoption basis
