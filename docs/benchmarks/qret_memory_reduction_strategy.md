@@ -56,6 +56,22 @@ about `93,690 KB` while VMRSS stayed at the previous high-water level. The next
 effective optimization must reduce the pre-routing/MachineFunction RSS high-water
 or allocator retention, not only remove data that no longer controls VMRSS.
 
+Phase 3 measured pre-routing and MachineFunction high-water stages with bounded
+read-only instrumentation. It did not add a production optimization. The H5
+high-water was already formed before the routing main loop, and lazy inverse-map
+construction again changed allocator in-use bytes without changing qret peak RSS.
+
+| phase | case | variant | observed runs | qret peak KB | elapsed s | first max VmHWM stage | decision |
+| ----- | ---- | ------- | ------------: | ------------: | --------: | --------------------- | -------- |
+| Phase 3 | H5 `4th(new_2)` | eager high-water profile | 1 | 434,864 | 19.135 | `routing_after_splitter_construct` | kept |
+| Phase 3 | H5 `4th(new_2)` | lazy high-water profile | 1 | 434,816 | 18.973 | `routing_after_splitter_construct` | diagnostic only |
+| Phase 3 | H5 `4th(new_2)` | eager + trim after inverse release | 1 | 435,048 | 19.357 | `after_machine_function_construction` | diagnostic only |
+
+Phase 3 H4 raw and normalized metrics matched across profile-off/profile-on,
+eager/lazy, and diagnostic trim variants. H5 was run only after H4 parity passed.
+The detailed report is
+[`qret_pre_routing_high_water_audit.md`](qret_pre_routing_high_water_audit.md).
+
 ## Operand Audit
 
 The compact singleton candidate targeted the highest-count 0/1 fields. It removed
@@ -88,163 +104,88 @@ about `14.8 MB`, matching the small observed RSS reduction.
 
 ## Stage Live Set
 
-The previous strategy treated inverse map as `0.0 MB` because it used the
-post-release snapshot. That was stage-incorrect for the qret peak. At the routing
-live peak, inverse map entries are live. They become zero only after
-`routing_after_inverse_map_release`.
+The high-water audit shows that H5 reaches current peak RSS before the routing
+main loop. The JSON DOM does not overlap with MachineFunction high-water enough
+to explain the peak: `after_json_parse_or_dom_build` reached `226,076 KB`
+VmRSS, then the DOM was destroyed before lowering. MachineFunction construction
+alone reached `434,608 KB`, and routing setup lifted the process to `434,864 KB`.
 
-H5 current production, run 1:
+H5 high-water profile, eager production-equivalent mode:
 
-| stage | observed RSS KB | uordblks KB | fordblks KB | inst count | instruction object MB | non-path operand MB | path MB | list-node MB | inverse-map MB | routing temp MB |
-| ----- | --------------: | ----------: | ----------: | ---------: | --------------------: | ------------------: | ------: | -----------: | -------------: | --------------: |
-| after IR JSON parse | 226,540 | 202,915 | 100 |  |  |  |  |  |  |  |
-| after MachineFunction construction | 371,692 | 347,707 | 80 |  |  |  |  |  |  |  |
-| routing start | 404,864 | 252,660 | 144,835 | 1,499,072 | 137.8 | 51.4 | 0.0 | 34.3 | 0.0 | 0.0 |
-| routing main-loop live peak | 434,856 | 413,472 | 939 | 1,499,072 | 137.8 | 51.4 | 5.0 | 34.3 | 57.2 | 19.9 |
-| before inverse-map release | 434,856 | 385,016 | 29,395 | 1,499,072 | 137.8 | 51.4 | 5.0 | 34.3 | 57.2 | 0.0 |
-| after inverse-map release | 434,856 | 291,324 | 123,087 | 1,499,072 | 137.8 | 51.4 | 5.0 | 34.3 | 0.0 | 0.0 |
-| calc-info start | 434,856 | 291,281 | 123,130 | 1,499,072 |  |  |  |  |  |  |
-| calc-info peak | 434,856 | 414,949 | 254 | 1,499,072 |  |  |  |  |  |  |
-| compile exit | 434,856 | 286 | 414,917 |  |  |  |  |  |  |  |
+| stage | VmRSS KB | VmHWM KB | uordblks KB | fordblks KB | conclusion |
+| ----- | -------: | -------: | ----------: | ----------: | ---------- |
+| after JSON parse / DOM build | 226,076 | 239,616 | 202,917 | 98 | JSON DOM is large but below peak |
+| before MachineFunction construction | 379,568 | 412,444 | 145,048 | 227,371 | source IR remains live; allocator retains earlier pages |
+| during MachineFunction construction | 415,920 | 415,920 | 408,982 | 137 | construction pushes live allocator bytes near peak |
+| after MachineFunction construction | 434,608 | 434,608 | 427,747 | 116 | peak is effectively formed before routing |
+| routing entry | 434,608 | 434,608 | 282,932 | 144,931 | RSS remains high after lowering frees |
+| routing setup / first max | 434,864 | 434,864 | 377,611 | 50,252 | first observed H5 max VmHWM stage |
+| before inverse-map release | 434,864 | 434,864 | 388,032 | 39,831 | eager inverse map is live |
+| after inverse-map release | 434,864 | 434,864 | 294,344 | 133,519 | inverse map freed, RSS retained |
+| compile-info peak | 434,864 | 434,864 | 416,222 | 11,641 | later pass reuses retained heap arena |
+| before process exit | 434,864 | 434,864 | 297 | 427,566 | freed heap remains mapped until exit |
 
-H5 compact singleton operand candidate at the same routing live point:
+H5 MachineFunction and related component estimates at the peak-relevant stage:
 
-| component | current production MB | compact candidate MB | delta MB |
-| --------- | --------------------: | -------------------: | -------: |
-| instruction object | 137.8 | 167.3 | -29.6 |
-| non-path operand containers | 51.4 | 7.0 | 44.4 |
-| path storage | 5.0 | 5.0 | 0.0 |
-| instruction list nodes | 34.3 | 34.3 | 0.0 |
-| inverse map at routing peak | 57.2 | 57.2 | 0.0 |
-| inverse map after release | 0.0 | 0.0 | 0.0 |
-| metadata | 22.9 | 22.9 | 0.0 |
-| routing temporary | 19.9 | 19.9 | 0.0 |
+| component | classification | H5 value |
+| --------- | -------------- | -------: |
+| instruction count | observed | 1,499,072 |
+| instruction object bytes | theoretical | 144,451,120 bytes / 137.8 MB |
+| non-path/path operand container bytes | theoretical | 59,136,892 bytes / 56.4 MB |
+| interned path dynamic bytes | theoretical | 116,292 bytes / 0.1 MB |
+| instruction list-node bytes | theoretical | 35,977,728 bytes / 34.3 MB |
+| inverse-map entries | observed | 1,499,072 eager / 0 lazy |
+| inverse-map bytes | theoretical | 59,962,880 bytes / 57.2 MB |
+| metadata bytes | theoretical | 23,985,152 bytes / 22.9 MB |
+| routing temporary bytes | theoretical | 21,133,864 bytes / 20.2 MB |
+| compact DepGraph nodes / edges | observed | 1,499,072 / 1,533,838 |
+| compact DepGraph payload bytes | theoretical | 62,324,224 bytes / 59.4 MB |
 
-## Inverse Map
-
-| item | observed / estimated value |
-| ---- | -------------------------: |
-| routing peak entries | 1,499,072 |
-| routing peak estimated bytes | 59,962,880 |
-| routing peak MB | 57.2 |
-| after-release entries | 0 |
-| after-release bytes | 0 |
-| largest block entries | 1,499,048 |
-| valid blocks at peak | 3 |
-| released blocks after release | 3 |
-| estimated node bytes | 40 |
-| build count | 3 block maps at routing setup |
-| insert count | 1,499,072 initial entries plus routing mutation inserts |
-| erase count | not directly instrumented; source path erases replacement targets |
-| lookup count | not directly instrumented |
-| rebuild count | 1 per block at routing setup; lazy rebuild possible after release |
-
-The current implementation stores `std::map<const MachineInstruction*, ConstIterator>`
-inside each `MachineBasicBlock`. Compile-info and pipeline-state output iterate
-instructions directly and do not need the inverse map after routing.
-
-Lazy construction result:
-
-| item | eager H5 median | lazy H5 median |
-| ---- | --------------: | -------------: |
-| max live inverse-map entries | 1,499,072 | 0 |
-| constructed block count | 3 | 0 |
-| never-constructed block count | 0 | 3 |
-| initial inserted entries | 1,499,072 | 0 |
-| qret peak RSS KB | 434,900 | 434,852 |
-| median RSS saving KB |  | 48 |
-| adoption | kept | rejected |
-
-The lazy candidate remains useful as an explicit diagnostic and custom-pipeline
-fallback path. It is not a production default because H5 RSS was dominated by
-another live set or allocator-retained high-water mark.
-
-Candidate structures:
-
-| candidate | likely H5 effect | notes |
-| --------- | ---------------: | ----- |
-| keep `std::map` | 0 MB | current production |
-| `std::unordered_map` | modest | removes tree pointers but keeps per-node allocation |
-| dense instruction ID + vector | high | replaces map nodes with flat payload; needs stable IDs |
-| instruction-local stable ID + vector | high | best fit if instruction list work also proceeds |
-| block-local map with smaller value | medium | less invasive, still node-based unless unordered/flat |
-| necessary-only partial construction | medium-high | route helpers using insert/erase must be audited first |
+The allocator evidence is now concrete: inverse-map release drops `uordblks` by
+about `93,688 KB` while VmRSS stays flat, and compile-info later increases
+`uordblks` back to `416,222 KB` without increasing VmRSS. The freed heap arena is
+therefore retained by glibc and reused by later passes. Diagnostic `malloc_trim`
+after inverse-map release dropped H5 VmRSS by `108,736 KB`, but only after the
+process had already reached its high-water; it is not a production optimization.
 
 ## H9 Estimates
 
-The estimates use four H4->H5 models: instruction-count ratio,
-instruction-type ratio, bytes-per-instruction, and component-growth. Scenario
-rows combine those model outputs; they are not a single mechanically compounded
-growth rate.
+H9 remains unmeasured. The current extrapolation uses observed H4/H5 component
+growth and keeps `observed`, `estimated`, and `theoretical` labels separate.
 
-| scenario | variant | classification | instruction object MB | operand containers MB | path storage MB | instruction list MB | inverse map MB | metadata MB | routing temp MB | Python parent MB | total MB |
-| -------- | ------- | -------------- | --------------------: | --------------------: | --------------: | ------------------: | -------------: | ----------: | --------------: | ---------------: | -------: |
-| conservative | current production | estimated | 5,587.0 | 2,083.2 | 204.5 | 1,391.5 | 2,319.2 | 927.7 | 806.0 | 50.7 | 13,369.8 |
-| conservative | compact operands | estimated | 6,786.2 | 285.0 | 204.5 | 1,391.5 | 2,319.2 | 927.7 | 806.0 | 50.7 | 12,770.8 |
-| central | current production | estimated | 6,580.3 | 2,453.6 | 241.6 | 1,638.9 | 2,731.5 | 1,092.6 | 949.2 | 59.7 | 15,747.5 |
-| central | compact operands | estimated | 7,992.7 | 337.2 | 241.9 | 1,638.9 | 2,731.5 | 1,092.6 | 949.2 | 59.7 | 15,043.7 |
-| upper | current production | estimated | 8,308.4 | 3,098.0 | 863.5 | 2,069.3 | 3,448.9 | 1,379.5 | 1,198.5 | 75.4 | 20,441.5 |
-| upper | compact operands | estimated | 10,110.4 | 453.6 | 863.5 | 2,073.2 | 3,455.3 | 1,382.1 | 1,200.8 | 75.5 | 19,614.3 |
+| component | H5 theoretical MB | H9 central estimated MB | note |
+| --------- | ----------------: | ----------------------: | ---- |
+| instruction objects | 137.8 | 6,572.9 | biggest peak-effective resident payload |
+| operand containers | 56.4 | 2,690.9 | only useful if redesigned without compatibility caches |
+| instruction list nodes | 34.3 | 1,637.1 | smaller H5 payload but direct live-set removal |
+| inverse map | 57.2 | 2,728.5 | not peak-effective in current H5 evidence |
+| metadata | 22.9 | 1,091.4 | coupled to instruction layout |
 
-| scenario | classification | compact-operand theoretical saving MB | saving % |
-| -------- | -------------- | ------------------------------------: | -------: |
-| conservative | theoretical | 599.0 | 4.480 |
-| central | theoretical | 703.8 | 4.469 |
-| upper | theoretical | 827.2 | 4.047 |
-
-The compact singleton operand H9 estimate is useful as a model, but the H5
-gate failed, so this candidate is not production.
+These H9 values are estimates only. They should guide priority only after the H5
+peak-effectiveness test passes.
 
 ## Next Candidate Ranking
 
-| rank | candidate | H5 live bytes | H5 realistic saving | H9 estimated saving | peak effective | risk | scope |
-| ---: | --------- | ------------: | ------------------: | ------------------: | -------------- | ---- | ----- |
-| 1 | pre-routing/MachineFunction high-water reduction | broad live set | needs H5 diagnosis | high | yes | medium | IR parse, lowering/mapping temporaries, allocator retention |
-| 2 | instruction object arena/flat storage | 137.8 MB | 30-60 MB | 1.3-2.6 GB | likely | high | instruction class layout and ownership |
-| 3 | instruction list-node removal | 34.3 MB | 20-34 MB | 1.0-1.6 GB | likely | medium-high | `MachineBasicBlock::Container`, iterator users |
-| 4 | residual operand compaction with real range API | 51.4 MB | 20-35 MB | 0.8-1.5 GB | likely | medium-high | operand APIs, no compatibility cache |
-| 5 | inverse map compactization | 57.2 MB live bytes | low unless it also reduces high-water | 1.6-2.4 GB model only | no in current H5 | medium | `MachineBasicBlock` inverse map and mutation helpers |
-| 6 | instruction count reduction | all instruction-scaled components | case-dependent | high | yes | high | routing/lowering semantics |
-| 7 | MachineFunction chunk/stream routing | broad live set | high theoretical | high | yes | very high | routing architecture |
+| rank | candidate | H5 expected peak saving | classification | H9 estimated effect | peak effective | risk | decision |
+| ---: | --------- | ----------------------: | -------------- | ------------------: | -------------- | ---- | -------- |
+| 1 | instruction object arena / flat storage | about 35 MB from a conservative 25% object reduction | theoretical | about 1.6 GB at the same 25% model | yes | high | next implementation candidate |
+| 2 | instruction list-node removal | about 35 MB if list nodes are eliminated | theoretical | about 1.6 GB | yes | medium-high | good second candidate or combined design input |
+| 3 | residual operand API redesign | about 35 MB from 60% container reduction | theoretical | about 1.6 GB at the same model | yes | medium-high | useful only without owner-side compatibility caches |
+| 4 | allocator strategy / process isolation | 0 MB same-process peak; 108 MB post-peak RSS trim observed | observed | unknown | no for current process | medium | design only; needs a safe serialization boundary |
+| 5 | inverse-map compactization / lazy default | 48 KB observed lazy-vs-eager peak movement | observed | about 2.7 GB theoretical map payload | no in current H5 | medium | do not adopt as next production optimization |
+| 6 | instruction count reduction | case-dependent | unresolved | high | yes | high | separate algorithmic project |
+| 7 | chunk / stream routing | potentially high | unresolved | high | yes | very high | not next without a MachineFunction artifact design |
 
-Next implementation candidates are limited to:
+Next implementation should target **instruction object arena / flat storage**.
+The acceptance gate remains H5-only: raw and normalized metrics must match,
+production defaults must stay unchanged, H6-H9 must not be executed, and the H5
+qret peak must move by at least `30 MB` or `7%`. The immediate design work is:
 
-1. **Pre-routing/MachineFunction high-water audit**
-   - target files/classes: IR load/lowering/mapping path plus `MachineFunction` live-set instrumentation
-   - current observation: lazy inverse-map mode removes the map live set but H5 VMRSS stays flat
-   - required measurement: H4/H5 only, with allocator fields at IR parse, MachineFunction build, lowering, mapping, and routing entry
-   - acceptance: identify a component whose H5 RSS effect is at least 30 MB or 7%, without H6-H9 execution
-   - rollback: read-only profiling first
-   - H9 effect: estimated only from H4/H5 component growth
-
-2. **Instruction object arena/flat storage**
-   - target files/classes: `ScLsInstructionBase` subclasses and ownership in `MachineBasicBlock`
-   - current data structure: per-instruction heap allocation behind `std::unique_ptr`
-   - required API changes: preserve instruction polymorphism or introduce a stable tagged arena facade
-   - H4 tests: all semantic parity plus insertion/erase/lazy rebuild tests
-   - H5 A/B: only after high-water audit shows instruction objects are peak-effective
-   - acceptance: same H5-only gates, with no H6-H9 execution
-   - rollback: selectable legacy allocation path
-   - H9 effect: model only, not measured
-
-3. **Instruction list-node removal**
-   - target files/classes: `MachineBasicBlock::Container`, routing insertion call sites
-   - current data structure: `std::list<std::unique_ptr<MachineInstruction>>`
-   - proposed data structure: flat/chunked owner with stable instruction pointers and ID-based positions
-   - required API changes: iterator-dependent code must move to pointer/ID ranges
-   - H4 tests: insertion order, replacement/erase, queue dependencies, compile-info parity
-   - H5 A/B: only after high-water audit confirms list nodes are peak-effective
-   - acceptance: same H5-only gates, plus targeted iterator lifetime tests
-   - rollback: keep `std::list` implementation selectable at compile time
-   - H9 effect: central estimate about 1.6 GB for list-node payload alone
-
-4. **Inverse map compactization**
-   - target files/classes: `qret/codegen/machine_function.{h,cpp}`
-   - current data structure: `std::map<const MachineInstruction*, ConstIterator>`
-   - proposed data structure: stable instruction ID plus block-local flat vector/index table
-   - required API changes: keep `Contain`, `InsertBefore`, `InsertAfter`, `Erase`
-   - H4 tests: insert/erase/lazy rebuild, routing replacement, validation, pipeline-state output
-   - H5 A/B: only after proving inverse-map storage is still peak-effective; lazy construction showed it is not peak-effective in current H5
-   - acceptance: raw/normalized parity, all candidate peaks below baseline, >=30 MB or >=7% H5 reduction, elapsed <=3% regression
-   - rollback: compile-time guarded fallback to current `std::map`
-   - H9 effect: central estimate about 2.7 GB for eager map nodes, but this is theoretical/model-only and not a current H5 adoption basis
+1. Add a selectable legacy/arena allocation path for `ScLsInstructionBase`
+   subclasses without changing instruction semantics.
+2. Preserve stable instruction pointers or introduce a stable ID facade before
+   touching routing insertion/erase code.
+3. Keep inverse-map construction eager by default and release-after-routing
+   enabled, so the comparison isolates instruction storage.
+4. Run H4 semantic parity first, then one H5 eager production-equivalent profile.
+5. Treat H9 only as an estimated model until an H5 candidate passes the gate.
