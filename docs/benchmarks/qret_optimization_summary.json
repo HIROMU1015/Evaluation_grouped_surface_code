@@ -1,0 +1,367 @@
+{
+  "baseline_commit": "5c52fc649d26c33f027d5ac65ef4f2f0701347d1",
+  "cases": {
+    "h4_4th_new2:cold": [
+      {
+        "absolute_difference": 2.2088969089090824,
+        "baseline": 7.129593413788825,
+        "final": 4.920696504879743,
+        "metric": "elapsed_seconds",
+        "percentage": 30.982088047784273
+      },
+      {
+        "absolute_difference": 1917748.0,
+        "baseline": 2089188,
+        "final": 171440,
+        "metric": "qret_peak_rss_kb",
+        "percentage": 91.79394099525749
+      },
+      {
+        "absolute_difference": 1909284.0,
+        "baseline": 2081748,
+        "final": 172464,
+        "metric": "tree_peak_rss_kb",
+        "percentage": 91.71542376887116
+      },
+      {
+        "absolute_difference": 18968266.0,
+        "baseline": 18970408,
+        "final": 2142,
+        "metric": "compile_info_size_bytes",
+        "percentage": 99.98870872993348
+      },
+      {
+        "absolute_difference": 10252433.0,
+        "baseline": 18970408,
+        "final": 8717975,
+        "metric": "largest_intermediate_file_bytes",
+        "percentage": 54.044346331402046
+      },
+      {
+        "absolute_difference": 18968172.0,
+        "baseline": 36348585,
+        "final": 17380413,
+        "metric": "total_intermediate_file_bytes",
+        "percentage": 52.184072639966594
+      }
+    ],
+    "h4_4th_new2:warm": [
+      {
+        "absolute_difference": 2.2447982798330486,
+        "baseline": 7.1587226102128625,
+        "final": 4.913924330379814,
+        "metric": "elapsed_seconds",
+        "percentage": 31.357525665689963
+      },
+      {
+        "absolute_difference": 1917856.0,
+        "baseline": 2089232,
+        "final": 171376,
+        "metric": "qret_peak_rss_kb",
+        "percentage": 91.79717714452009
+      },
+      {
+        "absolute_difference": 1909244.0,
+        "baseline": 2081644,
+        "final": 172400,
+        "metric": "tree_peak_rss_kb",
+        "percentage": 91.71808436024604
+      },
+      {
+        "absolute_difference": 18968266.0,
+        "baseline": 18970408,
+        "final": 2142,
+        "metric": "compile_info_size_bytes",
+        "percentage": 99.98870872993348
+      },
+      {
+        "absolute_difference": 10252433.0,
+        "baseline": 18970408,
+        "final": 8717975,
+        "metric": "largest_intermediate_file_bytes",
+        "percentage": 54.044346331402046
+      },
+      {
+        "absolute_difference": 18968172.0,
+        "baseline": 36348585,
+        "final": 17380413,
+        "metric": "total_intermediate_file_bytes",
+        "percentage": 52.184072639966594
+      }
+    ],
+    "h5_4th_new2:cold": [
+      {
+        "absolute_difference": 1.7239300720393658,
+        "baseline": 20.89296640106477,
+        "final": 19.169036329025403,
+        "metric": "elapsed_seconds",
+        "percentage": 8.251246084191804
+      },
+      {
+        "absolute_difference": 5048784.0,
+        "baseline": 5484042.0,
+        "final": 435258.0,
+        "metric": "qret_peak_rss_kb",
+        "percentage": 92.06318988804243
+      },
+      {
+        "absolute_difference": 5037208.0,
+        "baseline": 5473618.0,
+        "final": 436410.0,
+        "metric": "tree_peak_rss_kb",
+        "percentage": 92.02702855771082
+      },
+      {
+        "absolute_difference": 60723022.0,
+        "baseline": 60725194.0,
+        "final": 2172.0,
+        "metric": "compile_info_size_bytes",
+        "percentage": 99.99642323085868
+      },
+      {
+        "absolute_difference": 37604907.0,
+        "baseline": 60725194.0,
+        "final": 23120287.0,
+        "metric": "largest_intermediate_file_bytes",
+        "percentage": 61.92636782683641
+      },
+      {
+        "absolute_difference": 60722928.0,
+        "baseline": 107425903.0,
+        "final": 46702975.0,
+        "metric": "total_intermediate_file_bytes",
+        "percentage": 56.52540616763538
+      }
+    ],
+    "h5_4th_new2:warm": [
+      {
+        "absolute_difference": 1.9102784746792167,
+        "baseline": 20.88932501175441,
+        "final": 18.97904653707519,
+        "metric": "elapsed_seconds",
+        "percentage": 9.144759218425222
+      },
+      {
+        "absolute_difference": 5048244.0,
+        "baseline": 5483526.0,
+        "final": 435282.0,
+        "metric": "qret_peak_rss_kb",
+        "percentage": 92.06200535932537
+      },
+      {
+        "absolute_difference": 5036594.0,
+        "baseline": 5473156.0,
+        "final": 436562.0,
+        "metric": "tree_peak_rss_kb",
+        "percentage": 92.02357835223407
+      },
+      {
+        "absolute_difference": 60723022.0,
+        "baseline": 60725194.0,
+        "final": 2172.0,
+        "metric": "compile_info_size_bytes",
+        "percentage": 99.99642323085868
+      },
+      {
+        "absolute_difference": 37604907.0,
+        "baseline": 60725194.0,
+        "final": 23120287.0,
+        "metric": "largest_intermediate_file_bytes",
+        "percentage": 61.92636782683641
+      },
+      {
+        "absolute_difference": 60722928.0,
+        "baseline": 107425903.0,
+        "final": 46702975.0,
+        "metric": "total_intermediate_file_bytes",
+        "percentage": 56.52540616763538
+      }
+    ]
+  },
+  "execution_limits": {
+    "h6_executed": false,
+    "h7_executed": false,
+    "h8_executed": false,
+    "h9_executed": false,
+    "h9_memory": "not measured; estimated/theoretical only in prior strategy reports",
+    "largest_measured_case": "H5"
+  },
+  "final_commit": "c9d573465cdabb323561ebe97572564b8426a20b",
+  "limitations": [
+    "direct qret compile benchmark uses final prepared optimized IR as common input",
+    "cold/warm direct qret runs do not exercise Evaluation compile-result cache",
+    "H6-H9 were not executed",
+    "not a formal proof for all quration inputs"
+  ],
+  "production_optimizations": [
+    {
+      "elapsed_effect": "preserved or improved by avoiding full merged IR materialization",
+      "evaluation_case": "H4/H5 pipeline tests and staged reports",
+      "memory_effect": "reduced parent JSON/IR lifetime; report-level cumulative",
+      "optimization": "streaming Python inliner",
+      "reason": "same inlining semantics with streaming emission",
+      "semantic_validation": "normalized instruction stream and metrics",
+      "status": "production adopted"
+    },
+    {
+      "elapsed_effect": "small/acceptable",
+      "evaluation_case": "H4 parent-RSS profile",
+      "memory_effect": "reduced retained Python JSON load where used",
+      "optimization": "incremental JSON parsing",
+      "reason": "reads required fields without changing values",
+      "semantic_validation": "field extraction and normalized metrics",
+      "status": "production adopted"
+    },
+    {
+      "elapsed_effect": "warm/helper-cache improvement",
+      "evaluation_case": "H4/H5 artifact generation",
+      "memory_effect": "removes repeated full-IR helper materialization",
+      "optimization": "RZ helper independent/cache/batch/merge-less flow",
+      "reason": "cache keys include input, qret hash, gridsynth identity, and version",
+      "semantic_validation": "helper output summaries and optimized IR stream hash",
+      "status": "production adopted"
+    },
+    {
+      "elapsed_effect": "warm prepare improvement",
+      "evaluation_case": "surface-code reproducibility tests",
+      "memory_effect": "avoids regeneration work on warm runs",
+      "optimization": "integral cache",
+      "reason": "only exact cache-key hit is reused",
+      "semantic_validation": "content/version keyed npz metadata",
+      "status": "production adopted"
+    },
+    {
+      "elapsed_effect": "warm run improvement",
+      "evaluation_case": "architecture sweep cache-hit tests",
+      "memory_effect": "warm run avoids prepared/compile intermediate regeneration",
+      "optimization": "prepared artifact cache / compile result cache",
+      "reason": "cache payload includes qret/topology/config/input hashes",
+      "semantic_validation": "artifact and compile cache hashes",
+      "status": "production adopted"
+    },
+    {
+      "elapsed_effect": "large compile elapsed reduction",
+      "evaluation_case": "H4/H5 qret direct benchmark",
+      "memory_effect": "large qret peak reduction by avoiding BuildPipelineState",
+      "optimization": "pipeline-state output skip",
+      "reason": "compile-info is dumped directly; unused state output is not built",
+      "semantic_validation": "compile-info metrics parity",
+      "status": "production adopted"
+    },
+    {
+      "elapsed_effect": "improved or acceptable",
+      "evaluation_case": "H4/H5/H6 summary reports, H6 predates current restriction",
+      "memory_effect": "large compile-info JSON and summary accumulation reduction",
+      "optimization": "compile-info summary / summary aggregation / TimeSeries current default",
+      "reason": "keeps required aggregates without retaining full time-series payload",
+      "semantic_validation": "raw and normalized metrics parity",
+      "status": "production adopted"
+    },
+    {
+      "elapsed_effect": "acceptable",
+      "evaluation_case": "H4/H5 compact graph profiles",
+      "memory_effect": "reduced dependency graph storage",
+      "optimization": "compact DepGraph",
+      "reason": "representation changes, graph semantics unchanged",
+      "semantic_validation": "node/edge counts and depth metrics parity",
+      "status": "production adopted"
+    },
+    {
+      "elapsed_effect": "neutral",
+      "evaluation_case": "H5 routing lifetime profile",
+      "memory_effect": "reduces allocator in-use bytes after routing",
+      "optimization": "inverse-map release after routing",
+      "reason": "clears maps after the mutation phase",
+      "semantic_validation": "post-routing consumers do not require inverse maps",
+      "status": "production adopted"
+    },
+    {
+      "elapsed_effect": "improved",
+      "evaluation_case": "H5 `4th(new_2)`",
+      "memory_effect": "116.6 MB / 21.1% H5 qret peak reduction",
+      "optimization": "magic-path exact interning",
+      "reason": "only identical path sequences share storage",
+      "semantic_validation": "raw and normalized metrics parity",
+      "status": "production adopted"
+    }
+  ],
+  "rejected_optimizations": [
+    {
+      "elapsed_effect": "9.092% regression",
+      "evaluation_case": "H5 `4th(new_2)`",
+      "memory_effect": "12.3 MB / 2.834% peak reduction",
+      "optimization": "non-path singleton operand compaction",
+      "reason": "compatibility cache added object bytes and elapsed cost",
+      "semantic_validation": "raw and normalized metrics parity",
+      "status": "evaluated and rejected"
+    },
+    {
+      "elapsed_effect": "0.951% faster",
+      "evaluation_case": "H5 `4th(new_2)`",
+      "memory_effect": "48 KB / 0.011% peak reduction",
+      "optimization": "lazy inverse-map construction",
+      "reason": "removed live entries but did not move VMRSS high-water",
+      "semantic_validation": "raw and normalized metrics parity",
+      "status": "evaluated and rejected"
+    },
+    {
+      "elapsed_effect": "2.314% faster in Phase A median",
+      "evaluation_case": "H4/H5 `4th(new_2)`",
+      "memory_effect": "10.8 MB / 2.487% H5 qret peak reduction",
+      "optimization": "instruction arena allocation",
+      "reason": "failed 30 MB or 7% H5 peak gate",
+      "semantic_validation": "raw, normalized, and semantic projection parity",
+      "status": "rejected"
+    }
+  ],
+  "semantic_validation": {
+    "h4_2nd": {
+      "ignored_normalized_fields": [
+        "cache_key",
+        "compile_info_json",
+        "compiler_core_library_hash",
+        "compiler_core_library_path",
+        "compiler_executable_hash",
+        "compiler_executable_path",
+        "estimated_execution_time_sec",
+        "execution_time_sec"
+      ],
+      "normalized_equal": true,
+      "normalized_mismatches": [],
+      "raw_equal": true,
+      "raw_mismatches": []
+    },
+    "h4_4th_new2": {
+      "ignored_normalized_fields": [
+        "cache_key",
+        "compile_info_json",
+        "compiler_core_library_hash",
+        "compiler_core_library_path",
+        "compiler_executable_hash",
+        "compiler_executable_path",
+        "estimated_execution_time_sec",
+        "execution_time_sec"
+      ],
+      "normalized_equal": true,
+      "normalized_mismatches": [],
+      "raw_equal": true,
+      "raw_mismatches": []
+    },
+    "h5_4th_new2": {
+      "ignored_normalized_fields": [
+        "cache_key",
+        "compile_info_json",
+        "compiler_core_library_hash",
+        "compiler_core_library_path",
+        "compiler_executable_hash",
+        "compiler_executable_path",
+        "estimated_execution_time_sec",
+        "execution_time_sec"
+      ],
+      "normalized_equal": true,
+      "normalized_mismatches": [],
+      "raw_equal": true,
+      "raw_mismatches": []
+    }
+  }
+}
