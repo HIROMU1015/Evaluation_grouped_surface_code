@@ -126,6 +126,65 @@ class SurfaceCodeArchitecture:
 SurfaceCodeArchitectureConfig = SurfaceCodeArchitecture
 
 
+UNCONTROLLED_PF_ONE_STEP_SCOPE = "uncontrolled_pf_one_step"
+CONTROLLED_PF_TIME_EVOLUTION_BLOCK_SCOPE = "controlled_pf_time_evolution_block"
+COMPILED_CIRCUIT_SCOPES = frozenset(
+    {
+        UNCONTROLLED_PF_ONE_STEP_SCOPE,
+        CONTROLLED_PF_TIME_EVOLUTION_BLOCK_SCOPE,
+    }
+)
+
+
+@dataclass(frozen=True)
+class _CircuitScopeSpec:
+    compiled_circuit_scope: str
+    qpe_power_k: int | None
+    time_multiplier: int
+    num_control_qubits: int
+
+    @property
+    def is_controlled(self) -> bool:
+        return self.compiled_circuit_scope == CONTROLLED_PF_TIME_EVOLUTION_BLOCK_SCOPE
+
+
+def _validate_qpe_power_k(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("qpe_power_k must be an integer >= 0")
+    if value < 0:
+        raise ValueError("qpe_power_k must be an integer >= 0")
+    return int(value)
+
+
+def _circuit_scope_spec(
+    compiled_circuit_scope: str = UNCONTROLLED_PF_ONE_STEP_SCOPE,
+    *,
+    qpe_power_k: int | None = None,
+) -> _CircuitScopeSpec:
+    scope = str(compiled_circuit_scope).strip()
+    if scope not in COMPILED_CIRCUIT_SCOPES:
+        raise ValueError(
+            f"Unknown compiled_circuit_scope={compiled_circuit_scope!r}; "
+            f"expected one of {sorted(COMPILED_CIRCUIT_SCOPES)}"
+        )
+    if scope == UNCONTROLLED_PF_ONE_STEP_SCOPE:
+        if qpe_power_k is not None:
+            raise ValueError("qpe_power_k is only valid for controlled circuit scope")
+        return _CircuitScopeSpec(
+            compiled_circuit_scope=scope,
+            qpe_power_k=None,
+            time_multiplier=1,
+            num_control_qubits=0,
+        )
+    k = _validate_qpe_power_k(qpe_power_k)
+    return _CircuitScopeSpec(
+        compiled_circuit_scope=scope,
+        qpe_power_k=k,
+        time_multiplier=2**k,
+        num_control_qubits=1,
+    )
+
+
 @dataclass(frozen=True)
 class SurfaceCodeStepArtifact:
     ham_name: str
@@ -152,15 +211,42 @@ class SurfaceCodeStepArtifact:
     gate_depth: int
     rz_call_cache: dict[str, Any]
     integral_cache: dict[str, Any] = field(default_factory=dict)
+    compiled_circuit_scope: str = UNCONTROLLED_PF_ONE_STEP_SCOPE
+    num_system_qubits: int | None = None
+    num_control_qubits: int = 0
+    qpe_power_k: int | None = None
+    time_multiplier: int = 1
+    effective_evolution_time: float | None = None
+    identity_coefficient: float | None = None
+    identity_phase_angle: float | None = None
+    control_qubit_index: int | None = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "ham_name": self.ham_name,
             "molecule": self.molecule,
             "num_logical_qubits": int(self.num_logical_qubits),
+            "num_system_qubits": (
+                int(self.num_system_qubits)
+                if self.num_system_qubits is not None
+                else int(self.num_logical_qubits) - int(self.num_control_qubits)
+            ),
+            "num_control_qubits": int(self.num_control_qubits),
             "pf_label": self.pf_label,
             "target_error": float(self.target_error),
             "step_time": float(self.step_time),
+            "base_step_time": float(self.step_time),
+            "effective_evolution_time": (
+                float(self.effective_evolution_time)
+                if self.effective_evolution_time is not None
+                else float(self.step_time)
+            ),
+            "compiled_circuit_scope": self.compiled_circuit_scope,
+            "qpe_power_k": self.qpe_power_k,
+            "time_multiplier": int(self.time_multiplier),
+            "control_qubit_index": self.control_qubit_index,
+            "identity_coefficient": self.identity_coefficient,
+            "identity_phase_angle": self.identity_phase_angle,
             "rotation_precision": float(self.rotation_precision),
             "runtime_root": str(self.runtime_root),
             "qasm_path": str(self.qasm_path),
@@ -183,10 +269,20 @@ class SurfaceCodeStepArtifact:
 
 
 def surface_code_step_artifact_from_dict(payload: Mapping[str, Any]) -> SurfaceCodeStepArtifact:
+    compiled_circuit_scope = str(
+        payload.get("compiled_circuit_scope", UNCONTROLLED_PF_ONE_STEP_SCOPE)
+    )
+    qpe_power_raw = payload.get("qpe_power_k")
+    qpe_power = None if qpe_power_raw is None else int(qpe_power_raw)
+    num_control_qubits = int(payload.get("num_control_qubits", 0))
+    num_logical_qubits = int(payload["num_logical_qubits"])
+    num_system_qubits = int(
+        payload.get("num_system_qubits", num_logical_qubits - num_control_qubits)
+    )
     return SurfaceCodeStepArtifact(
         ham_name=str(payload["ham_name"]),
         molecule=str(payload["molecule"]),
-        num_logical_qubits=int(payload["num_logical_qubits"]),
+        num_logical_qubits=num_logical_qubits,
         pf_label=str(payload["pf_label"]),
         target_error=float(payload["target_error"]),
         step_time=float(payload["step_time"]),
@@ -210,6 +306,29 @@ def surface_code_step_artifact_from_dict(payload: Mapping[str, Any]) -> SurfaceC
         gate_depth=int(payload["gate_depth"]),
         rz_call_cache=dict(payload.get("rz_call_cache") or {}),
         integral_cache=dict(payload.get("integral_cache") or {}),
+        compiled_circuit_scope=compiled_circuit_scope,
+        num_system_qubits=num_system_qubits,
+        num_control_qubits=num_control_qubits,
+        qpe_power_k=qpe_power,
+        time_multiplier=int(payload.get("time_multiplier", 1)),
+        effective_evolution_time=float(
+            payload.get("effective_evolution_time", payload["step_time"])
+        ),
+        identity_coefficient=(
+            None
+            if payload.get("identity_coefficient") is None
+            else float(payload["identity_coefficient"])
+        ),
+        identity_phase_angle=(
+            None
+            if payload.get("identity_phase_angle") is None
+            else float(payload["identity_phase_angle"])
+        ),
+        control_qubit_index=(
+            None
+            if payload.get("control_qubit_index") is None
+            else int(payload["control_qubit_index"])
+        ),
     )
 
 
@@ -369,7 +488,7 @@ _PREPARE_STAGE_CACHE_HIT_METRICS_FILENAME = "prepare_stage_cache_hit_metrics.jso
 _COMPILE_STAGE_METRICS_FILENAME = "compile_stage_metrics.json"
 _COMPILE_STAGE_CACHE_HIT_METRICS_FILENAME = "compile_stage_cache_hit_metrics.json"
 _SURFACE_CODE_INTEGRAL_CACHE_VERSION = "surface_code_integral_cache_v2"
-_SURFACE_CODE_STEP_ARTIFACT_CACHE_VERSION = "surface_code_step_artifact_cache_v2"
+_SURFACE_CODE_STEP_ARTIFACT_CACHE_VERSION = "surface_code_step_artifact_cache_v3"
 _SURFACE_CODE_CIRCUIT_GENERATION_VERSION = "grouped_hchain_pf_step_circuit_v2"
 _SURFACE_CODE_STEP_DEPENDENCY_PACKAGES = (
     "numpy",
@@ -1877,22 +1996,60 @@ def _surface_code_integrals(
     return resolved.constant, resolved.one_body, resolved.two_body
 
 
-def _build_grouped_surface_code_step_circuit_from_integrals(
-    ham_name: str,
-    pf_label: PFLabel,
+def _real_hamiltonian_coefficient(value: Any, *, context: str) -> float:
+    coeff = complex(value)
+    if not math.isclose(coeff.imag, 0.0, rel_tol=0.0, abs_tol=1.0e-10):
+        raise ValueError(f"Expected real Hamiltonian coefficient in {context}: {value!r}")
+    return float(coeff.real)
+
+
+def _identity_coefficients_by_clique(
+    commuting_cliques: Sequence[Sequence[Any]],
+) -> list[float]:
+    identity_coefficients: list[float] = []
+    for clique_index, commuting_clique in enumerate(commuting_cliques):
+        identity_coeff = 0.0
+        for hamiltonian in commuting_clique:
+            terms = getattr(hamiltonian, "terms", {})
+            for term, coeff in terms.items():
+                if term:
+                    continue
+                identity_coeff += _real_hamiltonian_coefficient(
+                    coeff,
+                    context=f"commuting clique {clique_index}",
+                )
+        identity_coefficients.append(float(identity_coeff))
+    return identity_coefficients
+
+
+def _identity_phase_angle_for_pf_sequence(
     *,
-    step_time: float,
+    identity_coefficients: Sequence[float],
+    pf_label: PFLabel,
+    evolution_time: float,
+) -> float:
+    from .qiskit_time_evolution_utils import _get_w_list
+    from .pf_decomposition import iter_pf_steps
+
+    phase = 0.0
+    weights = _get_w_list(normalize_pf_label(pf_label))
+    for term_idx, weight in iter_pf_steps(len(identity_coefficients), weights):
+        phase -= float(evolution_time) * float(weight) * float(identity_coefficients[term_idx])
+    return float(phase)
+
+
+def _grouped_surface_code_operator_data_from_integrals(
+    ham_name: str,
+    *,
     constant: Any,
     one_body: Any,
     two_body: Any,
-) -> Any:
+) -> tuple[int, list[list[Any]], float, list[float]]:
     from openfermion import InteractionOperator
     from openfermion.chem.molecular_data import spinorb_from_spatial
     from openfermion.transforms import get_fermion_operator, jordan_wigner
-    from qiskit import QuantumCircuit
 
     from .chemistry_hamiltonian import min_hamiltonian_grouper
-    from .qiskit_time_evolution_grouping import w_trotter_grouper
     from .qiskit_time_evolution_pyscf import _build_grouped_jw_list
 
     chain_length = _parse_hchain_length(ham_name)
@@ -1909,6 +2066,32 @@ def _build_grouped_surface_code_step_circuit_from_integrals(
         commuting_cliques = _build_grouped_jw_list(constant, one_body, two_body)
         num_qubits = int(2 * np.asarray(one_body).shape[0])
 
+    identity_coefficients = _identity_coefficients_by_clique(commuting_cliques)
+    total_identity_coefficient = float(sum(identity_coefficients))
+    return num_qubits, commuting_cliques, total_identity_coefficient, identity_coefficients
+
+
+def _build_grouped_surface_code_step_circuit_from_integrals(
+    ham_name: str,
+    pf_label: PFLabel,
+    *,
+    step_time: float,
+    constant: Any,
+    one_body: Any,
+    two_body: Any,
+) -> Any:
+    from qiskit import QuantumCircuit
+
+    from .qiskit_time_evolution_grouping import w_trotter_grouper
+
+    num_qubits, commuting_cliques, _identity_coeff, _identity_by_clique = (
+        _grouped_surface_code_operator_data_from_integrals(
+            ham_name,
+            constant=constant,
+            one_body=one_body,
+            two_body=two_body,
+        )
+    )
     qc = QuantumCircuit(num_qubits)
     w_trotter_grouper(
         qc,
@@ -1921,19 +2104,111 @@ def _build_grouped_surface_code_step_circuit_from_integrals(
     return qc
 
 
+def _build_grouped_surface_code_controlled_block_circuit_from_integrals(
+    ham_name: str,
+    pf_label: PFLabel,
+    *,
+    base_step_time: float,
+    qpe_power_k: int,
+    constant: Any,
+    one_body: Any,
+    two_body: Any,
+) -> tuple[Any, dict[str, Any]]:
+    from qiskit import QuantumCircuit
+
+    from .qiskit_time_evolution_grouping import w_trotter_grouper
+
+    spec = _circuit_scope_spec(
+        CONTROLLED_PF_TIME_EVOLUTION_BLOCK_SCOPE,
+        qpe_power_k=qpe_power_k,
+    )
+    effective_time = float(base_step_time) * float(spec.time_multiplier)
+    (
+        num_system_qubits,
+        commuting_cliques,
+        total_identity_coefficient,
+        identity_coefficients,
+    ) = _grouped_surface_code_operator_data_from_integrals(
+        ham_name,
+        constant=constant,
+        one_body=one_body,
+        two_body=two_body,
+    )
+
+    system_qc = QuantumCircuit(num_system_qubits)
+    w_trotter_grouper(
+        system_qc,
+        commuting_cliques,
+        effective_time,
+        num_system_qubits,
+        normalize_pf_label(pf_label),
+    )
+    system_qc.global_phase = 0.0
+
+    control_qubit_index = num_system_qubits
+    controlled_qc = QuantumCircuit(num_system_qubits + 1)
+    controlled_gate = system_qc.to_gate(label="pf_time_evolution").control(1)
+    controlled_qc.append(
+        controlled_gate,
+        [control_qubit_index, *range(num_system_qubits)],
+    )
+    identity_phase_angle = _identity_phase_angle_for_pf_sequence(
+        identity_coefficients=identity_coefficients,
+        pf_label=pf_label,
+        evolution_time=effective_time,
+    )
+    if not math.isclose(identity_phase_angle, 0.0, rel_tol=0.0, abs_tol=1.0e-15):
+        controlled_qc.p(identity_phase_angle, control_qubit_index)
+    controlled_qc.global_phase = 0.0
+    return controlled_qc, {
+        "compiled_circuit_scope": CONTROLLED_PF_TIME_EVOLUTION_BLOCK_SCOPE,
+        "num_system_qubits": int(num_system_qubits),
+        "num_control_qubits": 1,
+        "num_logical_qubits": int(num_system_qubits + 1),
+        "control_qubit_index": int(control_qubit_index),
+        "qpe_power_k": int(spec.qpe_power_k or 0),
+        "time_multiplier": int(spec.time_multiplier),
+        "base_step_time": float(base_step_time),
+        "effective_evolution_time": float(effective_time),
+        "identity_coefficient": float(total_identity_coefficient),
+        "identity_phase_angle": float(identity_phase_angle),
+        "identity_phase_convention": (
+            "PhaseGate(theta) on the control qubit with "
+            "theta=-sum_j w_j*c_identity_j*t_k"
+        ),
+    }
+
+
 def build_grouped_surface_code_step_circuit(
     ham_name: str,
     pf_label: PFLabel,
     *,
     step_time: float,
     stage_recorder: _StageMetricsRecorder | None = None,
+    compiled_circuit_scope: str = UNCONTROLLED_PF_ONE_STEP_SCOPE,
+    qpe_power_k: int | None = None,
 ) -> Any:
+    spec = _circuit_scope_spec(
+        compiled_circuit_scope,
+        qpe_power_k=qpe_power_k,
+    )
     chain_length = _parse_hchain_length(ham_name)
     resolved = _resolve_surface_code_integrals(
         chain_length,
         distance=_parse_distance(ham_name),
         stage_recorder=stage_recorder,
     )
+    if spec.is_controlled:
+        qc, _metadata = _build_grouped_surface_code_controlled_block_circuit_from_integrals(
+            ham_name,
+            pf_label,
+            base_step_time=step_time,
+            qpe_power_k=int(spec.qpe_power_k or 0),
+            constant=resolved.constant,
+            one_body=resolved.one_body,
+            two_body=resolved.two_body,
+        )
+        return qc
     return _build_grouped_surface_code_step_circuit_from_integrals(
         ham_name,
         pf_label,
@@ -1941,6 +2216,24 @@ def build_grouped_surface_code_step_circuit(
         constant=resolved.constant,
         one_body=resolved.one_body,
         two_body=resolved.two_body,
+    )
+
+
+def build_grouped_surface_code_controlled_block_circuit(
+    ham_name: str,
+    pf_label: PFLabel,
+    *,
+    step_time: float,
+    qpe_power_k: int,
+    stage_recorder: _StageMetricsRecorder | None = None,
+) -> Any:
+    return build_grouped_surface_code_step_circuit(
+        ham_name,
+        pf_label,
+        step_time=step_time,
+        stage_recorder=stage_recorder,
+        compiled_circuit_scope=CONTROLLED_PF_TIME_EVOLUTION_BLOCK_SCOPE,
+        qpe_power_k=qpe_power_k,
     )
 
 
@@ -2017,6 +2310,14 @@ def _safe_path_component(value: str) -> str:
 
 def _count_qasm_rz(qasm_text: str) -> int:
     return sum(1 for line in str(qasm_text).splitlines() if _RZ_QASM_LINE_RE.match(line))
+
+
+def _qasm_rz_depth(qc: Any) -> int:
+    from qiskit.converters import circuit_to_dag
+
+    from .qiskit_time_evolution_utils import _rz_depth_from_dag
+
+    return int(_rz_depth_from_dag(circuit_to_dag(qc)))
 
 
 def _ir_instruction_qubits(inst: Mapping[str, Any]) -> list[int]:
@@ -3494,8 +3795,9 @@ def _rz_helper_cache_payload(
     rotation_precision: float,
     qret_hash: str,
     helper_passes: Sequence[str],
+    cache_scope_identity: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload = {
         "schema_version": _RZ_HELPER_INDEPENDENT_CACHE_VERSION,
         "helper_input_ir_hash": str(helper_input_hash),
         "theta": helper.get("theta"),
@@ -3505,6 +3807,9 @@ def _rz_helper_cache_payload(
         "passes": list(helper_passes),
         "ignore_global_phase": "ir::ignore_global_phase" in set(helper_passes),
     }
+    if cache_scope_identity is not None:
+        payload["cache_scope_identity"] = dict(cache_scope_identity)
+    return payload
 
 
 def _rz_helper_cache_key(payload: Mapping[str, Any]) -> str:
@@ -3557,6 +3862,7 @@ def _rz_helper_descriptor(
     rotation_precision: float,
     qret_hash: str,
     helper_passes: Sequence[str],
+    cache_scope_identity: Mapping[str, Any] | None = None,
 ) -> _RZHelperDescriptor:
     function_name = str(helper["function_name"])
     helper_input_ir = _single_circuit_ir(full_ir_data, function_name)
@@ -3569,6 +3875,7 @@ def _rz_helper_descriptor(
         rotation_precision=rotation_precision,
         qret_hash=qret_hash,
         helper_passes=helper_passes,
+        cache_scope_identity=cache_scope_identity,
     )
     cache_key = _rz_helper_cache_key(payload)
     cache_dir = _rz_helper_cache_root(cache_key)
@@ -3682,7 +3989,8 @@ def _optimize_rz_helper_independent_cached(
     rotation_precision: float,
     qret_hash: str,
     helper_passes: Sequence[str],
-    stage_recorder: _StageMetricsRecorder | None,
+    cache_scope_identity: Mapping[str, Any] | None = None,
+    stage_recorder: _StageMetricsRecorder | None = None,
 ) -> tuple[Mapping[str, Any], dict[str, Any]]:
     function_name = str(helper["function_name"])
     helper_input_ir = _single_circuit_ir(full_ir_data, function_name)
@@ -3695,6 +4003,7 @@ def _optimize_rz_helper_independent_cached(
         rotation_precision=rotation_precision,
         qret_hash=qret_hash,
         helper_passes=helper_passes,
+        cache_scope_identity=cache_scope_identity,
     )
     cache_key = _rz_helper_cache_key(payload)
     cache_dir = _rz_helper_cache_root(cache_key)
@@ -3869,7 +4178,8 @@ def _optimize_rz_helpers_independent_cached_batch(
     qret_hash: str,
     helper_passes: Sequence[str],
     batch_size: int,
-    stage_recorder: _StageMetricsRecorder | None,
+    cache_scope_identity: Mapping[str, Any] | None = None,
+    stage_recorder: _StageMetricsRecorder | None = None,
 ) -> tuple[dict[str, Mapping[str, Any]], list[dict[str, Any]]]:
     configured_batch_size = int(batch_size)
     if configured_batch_size < 1:
@@ -3883,6 +4193,7 @@ def _optimize_rz_helpers_independent_cached_batch(
             rotation_precision=rotation_precision,
             qret_hash=qret_hash,
             helper_passes=helper_passes,
+            cache_scope_identity=cache_scope_identity,
         )
         for index, helper in enumerate(helpers)
     ]
@@ -4232,6 +4543,7 @@ def _run_rz_call_cached_opt(
     opt_path: Path,
     rz_metadata: Mapping[str, Any],
     rotation_precision: float,
+    cache_scope_identity: Mapping[str, Any] | None = None,
     stage_recorder: _StageMetricsRecorder | None = None,
 ) -> dict[str, Any]:
     helpers = [
@@ -4344,6 +4656,7 @@ def _run_rz_call_cached_opt(
                     rotation_precision=rotation_precision,
                     qret_hash=qret_hash,
                     helper_passes=helper_passes,
+                    cache_scope_identity=cache_scope_identity,
                     stage_recorder=stage_recorder,
                 )
                 replacements[str(helper["function_name"])] = helper_circuit
@@ -4359,6 +4672,7 @@ def _run_rz_call_cached_opt(
                     qret_hash=qret_hash,
                     helper_passes=helper_passes,
                     batch_size=helper_batch_size,
+                    cache_scope_identity=cache_scope_identity,
                     stage_recorder=stage_recorder,
                 )
             )
@@ -4602,6 +4916,12 @@ def _step_artifact_cache_key(
     step_time: float,
     rotation_precision: float,
     qret_hash: str,
+    qret_core_library_hash: str | None = None,
+    compiled_circuit_scope: str = UNCONTROLLED_PF_ONE_STEP_SCOPE,
+    qpe_power_k: int | None = None,
+    time_multiplier: int = 1,
+    effective_evolution_time: float | None = None,
+    num_control_qubits: int = 0,
     integral_cache_enabled: bool,
     integral_cache_schema_version: str,
     integral_cache_key: str,
@@ -4614,8 +4934,19 @@ def _step_artifact_cache_key(
         "pf_label": pf_label,
         "target_error": float(target_error),
         "step_time": float(step_time),
+        "base_step_time": float(step_time),
+        "effective_evolution_time": (
+            float(effective_evolution_time)
+            if effective_evolution_time is not None
+            else float(step_time)
+        ),
+        "compiled_circuit_scope": str(compiled_circuit_scope),
+        "qpe_power_k": qpe_power_k,
+        "time_multiplier": int(time_multiplier),
+        "num_control_qubits": int(num_control_qubits),
         "rotation_precision": float(rotation_precision),
         "qret_hash": qret_hash,
+        "qret_core_library_hash": qret_core_library_hash,
         "integral_cache_enabled": bool(integral_cache_enabled),
         "integral_cache_schema_version": str(integral_cache_schema_version),
         "integral_cache_key": str(integral_cache_key),
@@ -4644,6 +4975,12 @@ def _step_artifact_runtime_root(
     step_time: float,
     rotation_precision: float,
     qret_hash: str,
+    qret_core_library_hash: str | None = None,
+    compiled_circuit_scope: str = UNCONTROLLED_PF_ONE_STEP_SCOPE,
+    qpe_power_k: int | None = None,
+    time_multiplier: int = 1,
+    effective_evolution_time: float | None = None,
+    num_control_qubits: int = 0,
     integral_cache_enabled: bool,
     integral_cache_schema_version: str,
     integral_cache_key: str,
@@ -4663,6 +5000,12 @@ def _step_artifact_runtime_root(
             step_time=step_time,
             rotation_precision=rotation_precision,
             qret_hash=qret_hash,
+            qret_core_library_hash=qret_core_library_hash,
+            compiled_circuit_scope=compiled_circuit_scope,
+            qpe_power_k=qpe_power_k,
+            time_multiplier=time_multiplier,
+            effective_evolution_time=effective_evolution_time,
+            num_control_qubits=num_control_qubits,
             integral_cache_enabled=integral_cache_enabled,
             integral_cache_schema_version=integral_cache_schema_version,
             integral_cache_key=integral_cache_key,
@@ -4680,9 +5023,15 @@ def prepare_grouped_surface_code_step_artifact(
     step_time: float | None = None,
     rotation_precision: float | None = None,
     use_original: bool = False,
+    compiled_circuit_scope: str = UNCONTROLLED_PF_ONE_STEP_SCOPE,
+    qpe_power_k: int | None = None,
 ) -> SurfaceCodeStepArtifact:
     architecture = architecture or SurfaceCodeArchitecture()
     pf_label = normalize_pf_label(pf_label)
+    scope_spec = _circuit_scope_spec(
+        compiled_circuit_scope,
+        qpe_power_k=qpe_power_k,
+    )
     step_t = (
         float(step_time)
         if step_time is not None
@@ -4707,7 +5056,9 @@ def prepare_grouped_surface_code_step_artifact(
     qret_path = Path(architecture.qret_path).expanduser().resolve()
     if not qret_path.exists():
         raise FileNotFoundError(f"quration binary not found: {qret_path}")
-    qret_hash = file_sha256(qret_path)
+    qret_hashes = qret_runtime_hashes(qret_path)
+    qret_hash = str(qret_hashes["qret_executable_hash"])
+    effective_evolution_time = float(step_t) * float(scope_spec.time_multiplier)
     stage_recorder = _StageMetricsRecorder(
         scope="prepare_grouped_surface_code_step_artifact",
         metadata={
@@ -4715,9 +5066,17 @@ def prepare_grouped_surface_code_step_artifact(
             "pf_label": pf_label,
             "target_error": float(target_error),
             "step_time": float(step_t),
+            "base_step_time": float(step_t),
+            "effective_evolution_time": float(effective_evolution_time),
+            "compiled_circuit_scope": scope_spec.compiled_circuit_scope,
+            "qpe_power_k": scope_spec.qpe_power_k,
+            "time_multiplier": int(scope_spec.time_multiplier),
+            "num_control_qubits": int(scope_spec.num_control_qubits),
             "rotation_precision": float(rot_precision),
             "qret_path": str(qret_path),
             "qret_hash": qret_hash,
+            "qret_core_library_path": qret_hashes.get("qret_core_library_path"),
+            "qret_core_library_hash": qret_hashes.get("qret_core_library_hash"),
             "rz_call_cache_enabled": bool(SURFACE_CODE_RZ_CALL_CACHE),
             "rz_helper_opt_mode": _rz_helper_opt_mode(),
             "rz_helper_batch_size": _rz_helper_batch_size(),
@@ -4746,6 +5105,12 @@ def prepare_grouped_surface_code_step_artifact(
             step_time=step_t,
             rotation_precision=rot_precision,
             qret_hash=qret_hash,
+            qret_core_library_hash=qret_hashes.get("qret_core_library_hash"),
+            compiled_circuit_scope=scope_spec.compiled_circuit_scope,
+            qpe_power_k=scope_spec.qpe_power_k,
+            time_multiplier=scope_spec.time_multiplier,
+            effective_evolution_time=effective_evolution_time,
+            num_control_qubits=scope_spec.num_control_qubits,
             integral_cache_enabled=resolved_integrals.cache_enabled,
             integral_cache_schema_version=resolved_integrals.schema_version,
             integral_cache_key=resolved_integrals.cache_key,
@@ -4787,15 +5152,41 @@ def prepare_grouped_surface_code_step_artifact(
             return cached_artifact
 
         with stage_recorder.stage("build_step_circuit") as span:
-            qc = _build_grouped_surface_code_step_circuit_from_integrals(
-                ham_name,
-                pf_label,
-                step_time=step_t,
-                constant=resolved_integrals.constant,
-                one_body=resolved_integrals.one_body,
-                two_body=resolved_integrals.two_body,
-            )
-            span.add_result(circuit_type=type(qc).__name__)
+            if scope_spec.is_controlled:
+                qc, circuit_metadata = (
+                    _build_grouped_surface_code_controlled_block_circuit_from_integrals(
+                        ham_name,
+                        pf_label,
+                        base_step_time=step_t,
+                        qpe_power_k=int(scope_spec.qpe_power_k or 0),
+                        constant=resolved_integrals.constant,
+                        one_body=resolved_integrals.one_body,
+                        two_body=resolved_integrals.two_body,
+                    )
+                )
+            else:
+                qc = _build_grouped_surface_code_step_circuit_from_integrals(
+                    ham_name,
+                    pf_label,
+                    step_time=step_t,
+                    constant=resolved_integrals.constant,
+                    one_body=resolved_integrals.one_body,
+                    two_body=resolved_integrals.two_body,
+                )
+                circuit_metadata = {
+                    "compiled_circuit_scope": UNCONTROLLED_PF_ONE_STEP_SCOPE,
+                    "num_system_qubits": int(qc.num_qubits),
+                    "num_control_qubits": 0,
+                    "num_logical_qubits": int(qc.num_qubits),
+                    "control_qubit_index": None,
+                    "qpe_power_k": None,
+                    "time_multiplier": 1,
+                    "base_step_time": float(step_t),
+                    "effective_evolution_time": float(step_t),
+                    "identity_coefficient": None,
+                    "identity_phase_angle": None,
+                }
+            span.add_result(circuit_type=type(qc).__name__, **circuit_metadata)
 
         with stage_recorder.stage("basis_circuit") as span:
             qc_basis = _basis_circuit(qc, runtime_root=runtime_root)
@@ -4804,9 +5195,11 @@ def prepare_grouped_surface_code_step_artifact(
         with stage_recorder.stage("qasm_text") as span:
             qasm_text = _qasm2_text(qc_basis)
             rz_count = _count_qasm_rz(qasm_text)
+            decomposed_rz_depth = _qasm_rz_depth(qc_basis)
             span.add_result(
                 qasm_bytes=len(qasm_text.encode("utf-8")),
                 rz_count=int(rz_count),
+                rz_depth=int(decomposed_rz_depth),
             )
 
         circuit_release_mode = _profile_circuit_release_experiment_mode()
@@ -4857,11 +5250,19 @@ def prepare_grouped_surface_code_step_artifact(
                 rz_metadata = {
                     "enabled": False,
                     "rz_count": int(rz_count),
+                    "rz_depth": int(decomposed_rz_depth),
                     "unique_rotation_count": None,
                     "round_digits": SURFACE_CODE_RZ_CALL_CACHE_ROUND_DIGITS,
                 }
+            else:
+                rz_metadata["rz_depth"] = int(decomposed_rz_depth)
+            rz_metadata["precision_policy"] = {
+                "mode": SURFACE_CODE_ROTATION_PRECISION_MODE,
+                "controlled_block_error_budget_redesign": "out_of_scope",
+            }
             span.add_result(
                 rz_count=int(rz_metadata.get("rz_count") or rz_count),
+                rz_depth=int(rz_metadata.get("rz_depth") or decomposed_rz_depth),
                 unique_rotation_count=rz_metadata.get("unique_rotation_count"),
                 qasm_bytes=len(qasm_text.encode("utf-8")),
             )
@@ -4947,6 +5348,14 @@ def prepare_grouped_surface_code_step_artifact(
                 opt_path=opt_path,
                 rz_metadata=rz_metadata,
                 rotation_precision=rot_precision,
+                cache_scope_identity={
+                    "compiled_circuit_scope": scope_spec.compiled_circuit_scope,
+                    "qpe_power_k": scope_spec.qpe_power_k,
+                    "time_multiplier": int(scope_spec.time_multiplier),
+                    "effective_evolution_time": float(effective_evolution_time),
+                    "num_control_qubits": int(scope_spec.num_control_qubits),
+                    "qret_core_library_hash": qret_hashes.get("qret_core_library_hash"),
+                },
                 stage_recorder=stage_recorder,
             )
         else:
@@ -5017,9 +5426,18 @@ def prepare_grouped_surface_code_step_artifact(
             ham_name=ham_name,
             molecule=molecule,
             num_logical_qubits=int(summary["num_logical_qubits"]),
+            num_system_qubits=int(circuit_metadata["num_system_qubits"]),
+            num_control_qubits=int(circuit_metadata["num_control_qubits"]),
             pf_label=pf_label,
             target_error=float(target_error),
             step_time=float(step_t),
+            compiled_circuit_scope=scope_spec.compiled_circuit_scope,
+            qpe_power_k=scope_spec.qpe_power_k,
+            time_multiplier=int(scope_spec.time_multiplier),
+            effective_evolution_time=float(effective_evolution_time),
+            identity_coefficient=circuit_metadata.get("identity_coefficient"),
+            identity_phase_angle=circuit_metadata.get("identity_phase_angle"),
+            control_qubit_index=circuit_metadata.get("control_qubit_index"),
             rotation_precision=float(rot_precision),
             runtime_root=runtime_root,
             qasm_path=qasm_path,
@@ -5078,6 +5496,20 @@ def surface_code_compile_cache_payload(
         file_sha256(topology_path) if _compile_uses_topology(architecture.compile_mode) else None
     )
     return {
+        "compiled_circuit_scope": artifact.compiled_circuit_scope,
+        "qpe_power_k": artifact.qpe_power_k,
+        "time_multiplier": int(artifact.time_multiplier),
+        "effective_evolution_time": (
+            float(artifact.effective_evolution_time)
+            if artifact.effective_evolution_time is not None
+            else float(artifact.step_time)
+        ),
+        "num_system_qubits": (
+            int(artifact.num_system_qubits)
+            if artifact.num_system_qubits is not None
+            else int(artifact.num_logical_qubits) - int(artifact.num_control_qubits)
+        ),
+        "num_control_qubits": int(artifact.num_control_qubits),
         "qasm_hash": artifact.qasm_hash,
         "optimized_ir_hash": artifact.optimized_ir_hash,
         "topology_path": str(topology_path) if topology_hash is not None else None,
@@ -5340,6 +5772,22 @@ def compile_prepared_surface_code_step_artifact(
             "pf_label": artifact.pf_label,
             "target_error": float(artifact.target_error),
             "step_time": float(artifact.step_time),
+            "base_step_time": float(artifact.step_time),
+            "effective_evolution_time": (
+                float(artifact.effective_evolution_time)
+                if artifact.effective_evolution_time is not None
+                else float(artifact.step_time)
+            ),
+            "compiled_circuit_scope": artifact.compiled_circuit_scope,
+            "qpe_power_k": artifact.qpe_power_k,
+            "time_multiplier": int(artifact.time_multiplier),
+            "num_system_qubits": (
+                int(artifact.num_system_qubits)
+                if artifact.num_system_qubits is not None
+                else int(artifact.num_logical_qubits) - int(artifact.num_control_qubits)
+            ),
+            "num_control_qubits": int(artifact.num_control_qubits),
+            "num_logical_qubits": int(artifact.num_logical_qubits),
             "rotation_precision": float(artifact.rotation_precision),
             "compile_mode": architecture.compile_mode,
             "qret_path": str(qret_path),
@@ -5493,6 +5941,22 @@ def compile_prepared_surface_code_step_artifact(
         generated_metrics = {
             "target_error": float(artifact.target_error),
             "step_time": float(artifact.step_time),
+            "base_step_time": float(artifact.step_time),
+            "effective_evolution_time": (
+                float(artifact.effective_evolution_time)
+                if artifact.effective_evolution_time is not None
+                else float(artifact.step_time)
+            ),
+            "compiled_circuit_scope": artifact.compiled_circuit_scope,
+            "qpe_power_k": artifact.qpe_power_k,
+            "time_multiplier": int(artifact.time_multiplier),
+            "num_system_qubits": (
+                int(artifact.num_system_qubits)
+                if artifact.num_system_qubits is not None
+                else int(artifact.num_logical_qubits) - int(artifact.num_control_qubits)
+            ),
+            "num_control_qubits": int(artifact.num_control_qubits),
+            "num_logical_qubits": int(artifact.num_logical_qubits),
             "rotation_precision": float(artifact.rotation_precision),
             "cache_key": cache_key,
             "generator": "grouped_surface_code_qret",
@@ -5518,10 +5982,18 @@ def compile_prepared_surface_code_step_artifact(
             else None,
             **mapping_metadata,
             "step_rz_count": int(artifact.step_rz_count),
+            "step_rz_depth": (
+                int(artifact.rz_call_cache["rz_depth"])
+                if artifact.rz_call_cache.get("rz_depth") is not None
+                else artifact.step_rz_layer
+            ),
             "step_rz_layer": artifact.step_rz_layer,
             "step_magic_state_count": int(artifact.step_magic_state_count),
             "step_magic_state_depth": int(artifact.step_magic_state_depth),
             "peak_magic_layer": int(artifact.peak_magic_layer),
+            "identity_coefficient": artifact.identity_coefficient,
+            "identity_phase_angle": artifact.identity_phase_angle,
+            "control_qubit_index": artifact.control_qubit_index,
             "rz_call_cache": dict(artifact.rz_call_cache),
         }
         if estimated_execution_time_sec is not None:
@@ -5546,10 +6018,22 @@ def compile_prepared_surface_code_step_artifact(
             "mapping_result_hash",
             "mapping_result_unavailable_reason",
             "step_rz_count",
+            "step_rz_depth",
             "step_rz_layer",
             "step_magic_state_count",
             "step_magic_state_depth",
             "peak_magic_layer",
+            "compiled_circuit_scope",
+            "qpe_power_k",
+            "time_multiplier",
+            "base_step_time",
+            "effective_evolution_time",
+            "num_system_qubits",
+            "num_control_qubits",
+            "num_logical_qubits",
+            "identity_coefficient",
+            "identity_phase_angle",
+            "control_qubit_index",
         ):
             if key in metrics:
                 normalized[key] = metrics[key]
@@ -5646,15 +6130,36 @@ def normalize_surface_code_step_metrics(
         "compile_mode",
         "generator",
         "cache_key",
+        "compiled_circuit_scope",
         "mapping_result_json",
         "mapping_result_hash",
         "mapping_result_unavailable_reason",
     ):
         if metrics.get(key) is not None:
             out[key] = str(metrics[key])
-    for key in ("target_error", "step_time", "rotation_precision"):
+    for key in (
+        "target_error",
+        "step_time",
+        "base_step_time",
+        "effective_evolution_time",
+        "rotation_precision",
+        "identity_coefficient",
+        "identity_phase_angle",
+    ):
         if metrics.get(key) is not None:
             out[key] = float(metrics[key])
+    for key in (
+        "qpe_power_k",
+        "time_multiplier",
+        "num_system_qubits",
+        "num_control_qubits",
+        "num_logical_qubits",
+        "control_qubit_index",
+        "step_rz_count",
+        "step_rz_depth",
+    ):
+        if metrics.get(key) is not None:
+            out[key] = int(metrics[key])
     if isinstance(metrics.get("compile_runtime_config"), Mapping):
         out["compile_runtime_config"] = dict(metrics["compile_runtime_config"])
     if metrics.get("compile_runtime_config_source") is not None:
@@ -5685,6 +6190,8 @@ def generate_grouped_surface_code_step_metrics(
     step_time: float | None = None,
     rotation_precision: float | None = None,
     use_original: bool = False,
+    compiled_circuit_scope: str = UNCONTROLLED_PF_ONE_STEP_SCOPE,
+    qpe_power_k: int | None = None,
 ) -> Dict[str, Any]:
     architecture = architecture or SurfaceCodeArchitecture()
     artifact = prepare_grouped_surface_code_step_artifact(
@@ -5695,8 +6202,58 @@ def generate_grouped_surface_code_step_metrics(
         step_time=step_time,
         rotation_precision=rotation_precision,
         use_original=use_original,
+        compiled_circuit_scope=compiled_circuit_scope,
+        qpe_power_k=qpe_power_k,
     )
     return compile_prepared_surface_code_step_artifact(artifact, architecture)
+
+
+def prepare_grouped_surface_code_controlled_block_artifact(
+    ham_name: str,
+    pf_label: PFLabel,
+    *,
+    qpe_power_k: int,
+    target_error: float = TARGET_ERROR,
+    architecture: SurfaceCodeArchitecture | None = None,
+    step_time: float | None = None,
+    rotation_precision: float | None = None,
+    use_original: bool = False,
+) -> SurfaceCodeStepArtifact:
+    return prepare_grouped_surface_code_step_artifact(
+        ham_name,
+        pf_label,
+        target_error=target_error,
+        architecture=architecture,
+        step_time=step_time,
+        rotation_precision=rotation_precision,
+        use_original=use_original,
+        compiled_circuit_scope=CONTROLLED_PF_TIME_EVOLUTION_BLOCK_SCOPE,
+        qpe_power_k=qpe_power_k,
+    )
+
+
+def generate_grouped_surface_code_controlled_block_metrics(
+    ham_name: str,
+    pf_label: PFLabel,
+    *,
+    qpe_power_k: int,
+    target_error: float = TARGET_ERROR,
+    architecture: SurfaceCodeArchitecture | None = None,
+    step_time: float | None = None,
+    rotation_precision: float | None = None,
+    use_original: bool = False,
+) -> Dict[str, Any]:
+    return generate_grouped_surface_code_step_metrics(
+        ham_name,
+        pf_label,
+        target_error=target_error,
+        architecture=architecture,
+        step_time=step_time,
+        rotation_precision=rotation_precision,
+        use_original=use_original,
+        compiled_circuit_scope=CONTROLLED_PF_TIME_EVOLUTION_BLOCK_SCOPE,
+        qpe_power_k=qpe_power_k,
+    )
 
 
 def compile_grouped_hchain_step(
@@ -5716,6 +6273,28 @@ def compile_grouped_hchain_step(
     )
 
 
+def compile_grouped_hchain_controlled_block(
+    chain_length: int,
+    pf_label: PFLabel,
+    qpe_power_k: int,
+    *,
+    target_error: float = TARGET_ERROR,
+    architecture: SurfaceCodeArchitecture | None = None,
+    use_original: bool = False,
+) -> Dict[str, Any]:
+    return generate_grouped_surface_code_controlled_block_metrics(
+        grouped_hchain_ham_name(chain_length),
+        pf_label,
+        qpe_power_k=qpe_power_k,
+        target_error=target_error,
+        architecture=architecture,
+        use_original=use_original,
+    )
+
+
 _generate_surface_code_step_metrics = generate_grouped_surface_code_step_metrics
 _build_grouped_surface_code_step_circuit = build_grouped_surface_code_step_circuit
+_build_grouped_surface_code_controlled_block_circuit = (
+    build_grouped_surface_code_controlled_block_circuit
+)
 _surface_code_compile_pipeline_yaml = compile_pipeline_yaml

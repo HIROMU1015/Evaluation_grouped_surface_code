@@ -18,10 +18,13 @@ from .config import (
     normalize_pf_label,
 )
 from .surface_code import (
+    CONTROLLED_PF_TIME_EVOLUTION_BLOCK_SCOPE,
     SurfaceCodeArchitecture,
     SurfaceCodeStepArtifact,
+    UNCONTROLLED_PF_ONE_STEP_SCOPE,
     _compile_uses_qec,
     _compile_uses_topology,
+    _circuit_scope_spec,
     compile_prepared_surface_code_step_artifact,
     file_sha256,
     grouped_hchain_ham_name,
@@ -32,8 +35,8 @@ from .surface_code import (
 )
 
 
-COMPILED_CIRCUIT_SCOPE = "uncontrolled_pf_one_step"
-QPE_SCALING_MODEL = "linear_extrapolation_from_uncontrolled_pf_one_step"
+UNCONTROLLED_QPE_SCALING_MODEL = "linear_extrapolation_from_uncontrolled_pf_one_step"
+CONTROLLED_QPE_SCALING_MODEL = "none_single_controlled_block"
 
 RESULT_FIELDS = [
     "status",
@@ -41,8 +44,14 @@ RESULT_FIELDS = [
     "qpe_scaling_model",
     "molecule",
     "num_logical_qubits",
+    "num_system_qubits",
+    "num_control_qubits",
     "pf_label",
     "step_time",
+    "base_step_time",
+    "effective_evolution_time",
+    "qpe_power_k",
+    "time_multiplier",
     "qasm_hash",
     "optimized_ir_hash",
     "rotation_precision",
@@ -198,6 +207,18 @@ def _default_case_values(config: Mapping[str, Any]) -> dict[str, Any]:
     return dict(defaults)
 
 
+def _circuit_scope_values(case: Mapping[str, Any], defaults: Mapping[str, Any]) -> tuple[str, int | None]:
+    scope = str(
+        case.get(
+            "circuit_scope",
+            defaults.get("circuit_scope", UNCONTROLLED_PF_ONE_STEP_SCOPE),
+        )
+    )
+    raw_k = case.get("qpe_power_k", defaults.get("qpe_power_k"))
+    spec = _circuit_scope_spec(scope, qpe_power_k=raw_k)
+    return spec.compiled_circuit_scope, spec.qpe_power_k
+
+
 def _qec_values(config: Mapping[str, Any]) -> dict[str, Any]:
     qec = config.get("qec", {})
     if qec is None:
@@ -293,28 +314,46 @@ def _artifact_row(
     *,
     molecule: str,
     pf_label: str,
+    compiled_circuit_scope: str = UNCONTROLLED_PF_ONE_STEP_SCOPE,
+    qpe_power_k: int | None = None,
     qpe_scale: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    scope = artifact.compiled_circuit_scope if artifact is not None else compiled_circuit_scope
+    is_controlled = scope == CONTROLLED_PF_TIME_EVOLUTION_BLOCK_SCOPE
     row = {
-        "compiled_circuit_scope": COMPILED_CIRCUIT_SCOPE,
-        "qpe_scaling_model": QPE_SCALING_MODEL,
+        "compiled_circuit_scope": scope,
+        "qpe_scaling_model": (
+            CONTROLLED_QPE_SCALING_MODEL
+            if is_controlled
+            else UNCONTROLLED_QPE_SCALING_MODEL
+        ),
         "molecule": molecule,
         "pf_label": pf_label,
+        "qpe_power_k": artifact.qpe_power_k if artifact is not None else qpe_power_k,
     }
-    if qpe_scale is not None:
+    if qpe_scale is not None and not is_controlled:
         row.update(qpe_scale)
     if artifact is None:
         return row
     row.update(
         {
             "num_logical_qubits": artifact.num_logical_qubits,
+            "num_system_qubits": artifact.num_system_qubits,
+            "num_control_qubits": artifact.num_control_qubits,
             "step_time": artifact.step_time,
+            "base_step_time": artifact.step_time,
+            "effective_evolution_time": artifact.effective_evolution_time,
+            "qpe_power_k": artifact.qpe_power_k,
+            "time_multiplier": artifact.time_multiplier,
             "qasm_hash": artifact.qasm_hash,
             "optimized_ir_hash": artifact.optimized_ir_hash,
             "rotation_precision": artifact.rotation_precision,
             "step_rz_count": artifact.step_rz_count,
             "step_rz_layer": artifact.step_rz_layer,
-            "step_rz_depth": artifact.step_rz_layer,
+            "step_rz_depth": artifact.rz_call_cache.get(
+                "rz_depth",
+                artifact.step_rz_layer,
+            ),
             "step_magic_state_count": artifact.step_magic_state_count,
             "step_magic_state_depth": artifact.step_magic_state_depth,
         }
@@ -329,6 +368,25 @@ def _scale_resource(value: Any, action_count: Any) -> Any:
 
 
 def _add_qpe_total_resource_fields(row: dict[str, Any]) -> None:
+    if row.get("compiled_circuit_scope") != UNCONTROLLED_PF_ONE_STEP_SCOPE:
+        reason = "single_controlled_block_not_qpe_total"
+        row["qpe_effective_block_count"] = None
+        row["qpe_action_count"] = None
+        row["total_magic_state_count"] = None
+        row["total_magic_state_depth"] = None
+        for total_key, reason_key in (
+            ("total_runtime_without_topology", "total_runtime_without_topology_unavailable_reason"),
+            ("total_runtime_with_topology", "total_runtime_with_topology_unavailable_reason"),
+            (
+                "total_runtime_difference_vs_topology_free",
+                "total_runtime_difference_vs_topology_free_unavailable_reason",
+            ),
+            ("total_qubit_volume", "total_qubit_volume_unavailable_reason"),
+        ):
+            row[total_key] = None
+            row[reason_key] = reason
+        return
+
     action_count = row.get("qpe_action_count")
     row["total_magic_state_count"] = _scale_resource(
         row.get("step_magic_state_count"),
@@ -520,6 +578,7 @@ def _short_unavailable_reason(reason: Any) -> str:
         "missing_in_compile_info": "not in compile info",
         "not_collected": "not collected",
         "runtime_metric_unavailable": "runtime unavailable",
+        "single_controlled_block_not_qpe_total": "single controlled block",
     }
     return labels.get(str(reason), str(reason))
 
@@ -585,6 +644,22 @@ def _baseline_pf_row(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _append_pf_comparison_report(lines: list[str], rows: list[dict[str, Any]]) -> None:
+    rows = [
+        row
+        for row in rows
+        if row.get("compiled_circuit_scope") == UNCONTROLLED_PF_ONE_STEP_SCOPE
+    ]
+    if not rows:
+        lines.extend(
+            [
+                "## PF-Step Linear Scaling Comparison",
+                "",
+                "No uncontrolled PF one-step rows are present; QPE-scale linear "
+                "extrapolation is not reported for controlled block rows.",
+                "",
+            ]
+        )
+        return
     molecule_groups: dict[Any, list[dict[str, Any]]] = {}
     for row in rows:
         molecule_groups.setdefault(row.get("molecule"), []).append(row)
@@ -938,48 +1013,36 @@ def run_surface_code_architecture_sweep(config_path: str | Path) -> dict[str, An
         molecule_text = str(molecule)
         ham_name = grouped_hchain_ham_name(_hchain_length(molecule_text))
         for pf_label in pf_labels:
-            qpe_scale: dict[str, Any] | None = None
-            try:
-                qpe_scale = _qpe_scale_row(
-                    ham_name,
-                    pf_label,
-                    target_error=target_error,
-                )
-                prepare_architecture = SurfaceCodeArchitecture(
-                    qret_path=_path_or_default(config.get("qret_path"), SURFACE_CODE_QCSF_PATH)
-                )
-                artifact = prepare_grouped_surface_code_step_artifact(
-                    ham_name,
-                    pf_label,
-                    target_error=target_error,
-                    architecture=prepare_architecture,
-                    rotation_precision=rotation_precision_value,
-                )
-            except Exception as exc:
-                row = _artifact_row(
-                    None,
-                    molecule=molecule_text,
-                    pf_label=pf_label,
-                    qpe_scale=qpe_scale,
-                )
-                row.update(
-                    {
-                        "status": "failed",
-                        "error_type": type(exc).__name__,
-                        "error_message": str(exc),
-                    }
-                )
-                rows.append(row)
-                continue
+            default_values = _default_case_values(config)
+            qpe_scale_cache: dict[str, Any] | None = None
+            artifact_cache: dict[tuple[str, int | None], SurfaceCodeStepArtifact] = {}
 
             for raw_case in cases:
                 if not isinstance(raw_case, Mapping):
                     raise ValueError("each architecture case must be a mapping")
                 case_name = str(raw_case.get("name", "case"))
+                compiled_circuit_scope, case_qpe_power_k = _circuit_scope_values(
+                    raw_case,
+                    default_values,
+                )
+                is_controlled = (
+                    compiled_circuit_scope == CONTROLLED_PF_TIME_EVOLUTION_BLOCK_SCOPE
+                )
+                qpe_scale = None
+                if not is_controlled:
+                    if qpe_scale_cache is None:
+                        qpe_scale_cache = _qpe_scale_row(
+                            ham_name,
+                            pf_label,
+                            target_error=target_error,
+                        )
+                    qpe_scale = qpe_scale_cache
                 row = _artifact_row(
-                    artifact,
+                    None,
                     molecule=molecule_text,
                     pf_label=pf_label,
+                    compiled_circuit_scope=compiled_circuit_scope,
+                    qpe_power_k=case_qpe_power_k,
                     qpe_scale=qpe_scale,
                 )
                 if raw_case.get("enabled", True) is False:
@@ -994,6 +1057,35 @@ def run_surface_code_architecture_sweep(config_path: str | Path) -> dict[str, An
                     continue
 
                 try:
+                    artifact_key = (compiled_circuit_scope, case_qpe_power_k)
+                    artifact = artifact_cache.get(artifact_key)
+                    if artifact is None:
+                        prepare_architecture = SurfaceCodeArchitecture(
+                            qret_path=_path_or_default(
+                                config.get("qret_path"),
+                                SURFACE_CODE_QCSF_PATH,
+                            )
+                        )
+                        artifact = prepare_grouped_surface_code_step_artifact(
+                            ham_name,
+                            pf_label,
+                            target_error=target_error,
+                            architecture=prepare_architecture,
+                            rotation_precision=rotation_precision_value,
+                            compiled_circuit_scope=compiled_circuit_scope,
+                            qpe_power_k=case_qpe_power_k,
+                        )
+                        artifact_cache[artifact_key] = artifact
+                    row.update(
+                        _artifact_row(
+                            artifact,
+                            molecule=molecule_text,
+                            pf_label=pf_label,
+                            compiled_circuit_scope=compiled_circuit_scope,
+                            qpe_power_k=case_qpe_power_k,
+                            qpe_scale=qpe_scale,
+                        )
+                    )
                     architecture, stock_policy, resolved_stock, topology_name, topology_path = (
                         build_architecture_for_case(config, raw_case, artifact)
                     )
