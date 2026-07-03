@@ -30,6 +30,9 @@ artifacts/qret_lazy_inverse_map/
 artifacts/qret_pre_routing_high_water/
 artifacts/qret_instruction_arena/
 artifacts/qret_optimization_summary/
+artifacts/surface_code_basis_decompose_ab/
+artifacts/h6_memory_speed_audit/
+artifacts/h9_4th_new2_compile_trial/
 artifacts/surface_code_parent_memory/
 artifacts/surface_code_process_isolation/
 artifacts/implementation_visual_overview/
@@ -37,6 +40,7 @@ artifacts/surface_code_share/quration_topology_free_memory_note_logs_*/
 artifacts/surface_code_share/quration_topology_free_memory_note_logs_*.tar.gz
 docs/quration_memory_measurement_plan.md
 docs/quration_topology_free_memory_note.md
+docs/explanation_PDF
 Quration_QS18*.pdf
 third_party/quration/cmake_test_discovery_*.json
 third_party/quration/output_*.asm
