@@ -47,6 +47,14 @@ larger cases because this task only benchmarks H4/H5.
   --reset-output
 
 .venv/bin/pytest -q tests/test_surface_code_basis_decomposition.py
+
+PYTHONPATH=src:. .venv/bin/pytest -q
+
+.venv/bin/python -m compileall -q src scripts tests
+
+git diff --check
+
+build/quration/qret --version
 ```
 
 Artifacts:
@@ -54,6 +62,14 @@ Artifacts:
 - Strict A/B summary: `artifacts/surface_code_basis_decompose_ab/h4_h5_reps4_vs_8/summary.json`
 - Production remeasurement: `artifacts/surface_code_basis_decompose_ab/production_reps4_h4_h5/summary.json`
 - H2 smoke artifact: `artifacts/surface_code_basis_decompose_ab/smoke_h2/summary.json`
+
+Validation results after adoption:
+
+- `tests/test_surface_code_basis_decomposition.py`: 3 passed
+- full Python suite with `PYTHONPATH=src:.`: 198 passed
+- `compileall`: passed
+- `git diff --check`: passed
+- qret version smoke: `Quration: Quantum Resource Estimation Toolchain for FTQC version 1.0.2`
 
 ## What `reps` Controls
 
@@ -85,6 +101,18 @@ was rechecked.
 | 8 | 15.153203 | 6,945,045 | 258,848 | `b831142e6985f940370b272993b9173c48045061fa505f6669e727931876d5e8` | reference |
 
 `reps=0/1/2` produced different QASM hashes and were not considered candidates.
+
+## Existing H9/H10 Artifacts Rechecked
+
+H9/H10 were not rerun for this task. Existing artifacts were read only to avoid
+mixing old large-case results with the H4/H5 A/B decision.
+
+| case | artifact | observed values |
+|---|---|---|
+| H9 | `artifacts/h9_4th_new2_compile_trial/run_20260703_182935/summary.json` | total 742.866 sec, prepare 623.983 sec, compile 118.377 sec, process-tree peak 8.487 GiB |
+| H10 | `artifacts/h9_4th_new2_compile_trial/run_20260703_205856_h10/result.json` | total 1143.250 sec, prepare 954.260 sec, compile 188.990 sec |
+
+These are observed historical artifacts, not new measurements from this task.
 
 ## H4/H5 Strict A/B Results
 
