@@ -103,6 +103,12 @@ export QRET_PATH=/path/to/qret
 export SURFACE_CODE_TOPOLOGY_PATH=/path/to/topology.yaml
 ```
 
+OpenQASM2 へ落とす前の basis decomposition 反復回数は、`SURFACE_CODE_QASM_DECOMPOSE_REPS` で指定できます。現在の default は H4/H5 の厳密 A/B で採用した `4` です。過去設定へ戻す必要がある場合は、環境変数で `8` を指定します。
+
+```bash
+export SURFACE_CODE_QASM_DECOMPOSE_REPS=8
+```
+
 `gridsynth` は変更対象ではないため、このリポジトリには同梱していません。必要なら以下で指定してください。
 
 ```bash
@@ -110,6 +116,12 @@ export GRIDSYNTH_PATH=/path/to/gridsynth
 ```
 
 未指定の場合は、`externals/bin/gridsynth` や既存のローカル quration checkout 内の `externals/bin/gridsynth` を探索します。
+
+## 実行規模と安全方針
+
+H6 以上の compile は一律禁止ではありません。ただし、task ごとに明示的な許可、予想資源、実行前の memory / swap / disk 確認、停止条件を決めた場合だけ実行します。各 benchmark report に書かれた H6 以上の制限は、その測定時点での安全条件として扱います。
+
+通常の correctness 確認や厳密 A/B は、H2 などの小規模 case と H4/H5 を優先します。H7 以上は、既存 artifact の確認を優先し、新規実行が必要な場合は task ごとに明示します。
 
 ## セットアップ
 
@@ -223,6 +235,9 @@ prepare / compile の stage 別 elapsed、Python parent RSS、qret subprocess RS
 
 - [Surface-Code Stage Profiling Report](docs/benchmarks/profiling_report.md)
 - [Surface-Code RSS Memory Profile](docs/benchmarks/rss_memory_profile_report.md)
+- [Basis Decomposition reps=4 A/B](docs/benchmarks/surface_code_basis_decomposition_reps4_ab.md)
+- [InstQueue Routing Profile](docs/benchmarks/qret_instqueue_routing_profile.md)
+- [qret Container/Lowering Design Notes](docs/benchmarks/qret_container_lowering_design_notes.md)
 
 ローカルで再測定する場合は、以下を使います。生成される `benchmark_results/` は `.gitignore` 対象です。
 
