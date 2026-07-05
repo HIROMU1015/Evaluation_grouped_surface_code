@@ -296,6 +296,19 @@ def test_architecture_sweep_efficient_controlled_rows_qpe_scale() -> None:
     assert row["total_qubit_volume"] == 1500
 
 
+def test_architecture_sweep_default_scope_is_efficient_controlled() -> None:
+    scope, qpe_power_k = sweep._circuit_scope_values({}, {})
+    row = sweep._artifact_row(None, molecule="H2", pf_label="2nd")
+
+    assert scope == sc.EFFICIENT_CONTROLLED_PF_ONE_STEP_SCOPE
+    assert qpe_power_k == 0
+    assert row["compiled_circuit_scope"] == sc.EFFICIENT_CONTROLLED_PF_ONE_STEP_SCOPE
+    assert (
+        row["qpe_scaling_model"]
+        == "linear_extrapolation_from_efficient_controlled_pf_one_step"
+    )
+
+
 def test_h2_controlled_qret_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     qret_path = Path("build/quration/qret").resolve()
     if not qret_path.exists():

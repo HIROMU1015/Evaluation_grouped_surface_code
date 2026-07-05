@@ -10,11 +10,11 @@ rotation_precision:
 qret_path:
 
 defaults:
-  # Default remains the existing uncontrolled single PF step. Use
-  # efficient_controlled_pf_one_step for QPE total scaling with an efficient
-  # k=0 controlled step, or controlled_pf_time_evolution_block with
-  # qpe_power_k for a generic correctness-baseline controlled block.
-  circuit_scope: uncontrolled_pf_one_step
+  # Standard resource estimation uses the efficient k=0 controlled PF step.
+  # Use uncontrolled_pf_one_step for legacy uncontrolled baselines, or
+  # controlled_pf_time_evolution_block with qpe_power_k for a generic
+  # correctness-baseline controlled block.
+  circuit_scope: efficient_controlled_pf_one_step
   # Use QEC mode by default so physical_qubits, code_distance, and
   # failure_probability are populated. For routing-only sweeps, override this
   # with ftqc_compile_topology in a case or local config.

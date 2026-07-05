@@ -11,7 +11,8 @@ H-chain grouped Hamiltonian の product-formula 回路を対象に、quration / 
 - H-chain grouped Hamiltonian
 - deterministic 2nd PF
 - optimized 4th PF: `4th(new_2)`
-- uncontrolled な 1 Trotter step 回路
+- 標準評価用の `efficient_controlled_pf_one_step`
+- legacy baseline 用の uncontrolled な 1 Trotter step 回路
 - 明示的に選択した場合の single controlled product-formula time-evolution block
 - quration の `SC_LS_FIXED_V0` compile
 - topology-aware routing
@@ -20,7 +21,7 @@ H-chain grouped Hamiltonian の product-formula 回路を対象に、quration / 
 
 QPE-scale の出力は、PF 誤差係数から action count を見積もり、1 step の runtime / qubit volume / magic-state 数などを線形に掛けたものです。現時点では full QPE 回路を compile しているわけではありません。
 
-デフォルトの回路 scope は引き続き `uncontrolled_pf_one_step` です。controlled 回路は明示的に選択した場合だけ生成されます。
+標準の resource estimation scope は `efficient_controlled_pf_one_step` です。これは QPE total scaling に使う `k=0` の efficient controlled PF one-step です。`uncontrolled_pf_one_step` は legacy baseline として明示的に選択した場合に使います。
 
 controlled の scope は2種類あります。
 
@@ -167,14 +168,14 @@ pip install -r requirements.txt
 
 ## Smoke Test
 
-H3 grouped Hamiltonian の 1 Trotter step を topology-aware + QEC resource estimation で compile します。
+H3 grouped Hamiltonian の efficient controlled one-step を topology-aware + QEC resource estimation で compile します。
 
 ```bash
 PYTHONPATH=src python - <<'PY'
-from trotterlib import SurfaceCodeArchitecture, compile_grouped_hchain_step
+from trotterlib import SurfaceCodeArchitecture, compile_grouped_hchain_efficient_controlled_step
 
 for pf in ("2nd", "4th(new_2)"):
-    metrics = compile_grouped_hchain_step(
+    metrics = compile_grouped_hchain_efficient_controlled_step(
         3,
         pf,
         architecture=SurfaceCodeArchitecture(),
@@ -193,6 +194,8 @@ for pf in ("2nd", "4th(new_2)"):
         print(f"  {key}: {metrics.get(key)}")
 PY
 ```
+
+uncontrolled legacy baseline を明示的に compile する場合は `compile_grouped_hchain_step()` を使います。
 
 controlled block を明示的に compile する例です。
 
@@ -261,9 +264,9 @@ routing / topology の比較だけを軽く行う場合は、local config また
 artifacts/surface_code_architecture_sweep/
 ```
 
-Markdown の QPE-scale 表は、full QPE circuit compile ではなく、uncontrolled PF 1 step からの線形外挿です。
+Markdown の QPE-scale 表は、full QPE circuit compile ではなく、標準では efficient controlled PF one-step からの線形外挿です。
 
-controlled block を architecture sweep で選択する例です。省略時は uncontrolled です。
+generic controlled block を architecture sweep で選択する例です。これは correctness baseline 用で、QPE total へは外挿しません。
 
 ```yaml
 defaults:
@@ -277,7 +280,7 @@ architecture_cases:
     qpe_power_k: 0
 ```
 
-標準の QPE total scaling 用に efficient controlled one-step を選択する例です。
+標準の QPE total scaling 用 scope は config 省略時も `efficient_controlled_pf_one_step` です。明示する場合は以下のように書きます。
 
 ```yaml
 defaults:

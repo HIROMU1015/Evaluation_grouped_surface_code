@@ -41,6 +41,7 @@ CONTROLLED_QPE_SCALING_MODEL = "none_single_controlled_block"
 EFFICIENT_CONTROLLED_QPE_SCALING_MODEL = (
     "linear_extrapolation_from_efficient_controlled_pf_one_step"
 )
+DEFAULT_CIRCUIT_SCOPE = EFFICIENT_CONTROLLED_PF_ONE_STEP_SCOPE
 
 RESULT_FIELDS = [
     "status",
@@ -215,7 +216,7 @@ def _circuit_scope_values(case: Mapping[str, Any], defaults: Mapping[str, Any]) 
     scope = str(
         case.get(
             "circuit_scope",
-            defaults.get("circuit_scope", UNCONTROLLED_PF_ONE_STEP_SCOPE),
+            defaults.get("circuit_scope", DEFAULT_CIRCUIT_SCOPE),
         )
     )
     raw_k = case.get("qpe_power_k", defaults.get("qpe_power_k"))
@@ -318,7 +319,7 @@ def _artifact_row(
     *,
     molecule: str,
     pf_label: str,
-    compiled_circuit_scope: str = UNCONTROLLED_PF_ONE_STEP_SCOPE,
+    compiled_circuit_scope: str = DEFAULT_CIRCUIT_SCOPE,
     qpe_power_k: int | None = None,
     qpe_scale: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:

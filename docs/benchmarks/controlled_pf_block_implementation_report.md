@@ -36,7 +36,9 @@ Two explicit circuit scopes are now used:
 - `controlled_pf_time_evolution_block`
 - `efficient_controlled_pf_one_step`
 
-The uncontrolled scope remains the default for existing APIs and architecture sweep configs. A controlled block is selected explicitly and is defined as:
+The explicit low-level step APIs remain backward compatible. The standard
+Evaluation architecture sweep default is now `efficient_controlled_pf_one_step`.
+The generic controlled block is selected explicitly and is defined as:
 
 ```text
 C-U_PF(t_k),  t_k = 2^k t
@@ -65,7 +67,11 @@ num_logical_qubits = num_system_qubits + 1
 control_qubit_index = num_system_qubits
 ```
 
-The implementation first builds the system PF circuit at `effective_evolution_time`, converts that circuit to a one-control Qiskit gate, appends it with the last qubit as control, then decomposes to the existing `rz/cx/sx/x` QASM2 basis.
+The generic controlled implementation first builds the system PF circuit at
+`effective_evolution_time`, converts that circuit to a one-control Qiskit gate,
+appends it with the last qubit as control, then decomposes to the existing
+`rz/cx/sx/x` QASM2 basis. The efficient implementation directly synthesizes
+system-only Clifford scaffolding around central controlled-RZ gates.
 
 ## Identity Phase
 
@@ -92,7 +98,9 @@ Added public APIs:
 - `compile_grouped_hchain_controlled_block`
 - `compile_grouped_hchain_efficient_controlled_step`
 
-Existing APIs remain backward compatible and default to `uncontrolled_pf_one_step`.
+Existing explicit uncontrolled APIs remain backward compatible. Standard
+architecture-sweep resource estimation defaults to
+`efficient_controlled_pf_one_step`.
 
 Validation:
 
@@ -124,7 +132,9 @@ Prepared artifact cache keys now include circuit scope, `qpe_power_k`, effective
 
 ## Architecture Sweep
 
-Architecture sweep accepts `circuit_scope` and `qpe_power_k` in `defaults` or per case.
+Architecture sweep accepts `circuit_scope` and `qpe_power_k` in `defaults` or per
+case. If omitted, `circuit_scope` defaults to
+`efficient_controlled_pf_one_step`.
 
 Uncontrolled rows keep:
 
@@ -152,7 +162,8 @@ For efficient controlled rows, the QPE total fields are populated by multiplying
 
 Added automated tests in `tests/test_controlled_pf_block.py`:
 
-- Existing default remains uncontrolled.
+- Existing explicit step API default remains uncontrolled.
+- Architecture sweep default scope is `efficient_controlled_pf_one_step`.
 - Controlled H2 has exactly one additional logical qubit.
 - Basis decomposition produces only existing QASM2 basis gates.
 - `k=0` and `k=1` controlled unitaries satisfy:
