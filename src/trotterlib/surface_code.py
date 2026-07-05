@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 import contextlib
 import hashlib
 import json
@@ -52,6 +53,7 @@ from .config import (
     SURFACE_CODE_RZ_CALL_CACHE_ROUND_DIGITS,
     SURFACE_CODE_RZ_HELPER_BATCH_SIZE,
     SURFACE_CODE_RZ_HELPER_OPT_MODE,
+    SURFACE_CODE_RZ_HELPER_PARALLEL_WORKERS,
     SURFACE_CODE_SAVE_MAPPING_RESULT,
     SURFACE_CODE_ROTATION_ERROR_BUDGET_FRACTION,
     SURFACE_CODE_ROTATION_PRECISION_FLOOR,
@@ -955,6 +957,7 @@ class _StageMetricsRecorder:
         self._started_monotonic = time.perf_counter()
         self._started_unix = time.time()
         self._stages: list[dict[str, Any]] = []
+        self._lock = threading.Lock()
 
     def stage(self, name: str, **details: Any) -> "_StageSpan":
         return _StageSpan(self, str(name), details)
@@ -1003,7 +1006,9 @@ class _StageMetricsRecorder:
         if exc is not None:
             event["error_type"] = type(exc).__name__
             event["error_message"] = str(exc)
-        self._stages.append(event)
+        with self._lock:
+            event["index"] = len(self._stages)
+            self._stages.append(event)
 
     def summary(
         self,
@@ -1013,6 +1018,8 @@ class _StageMetricsRecorder:
         extra: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         rss = _resource_rss_snapshot()
+        with self._lock:
+            stages = list(self._stages)
         payload: dict[str, Any] = {
             "version": _PREPARE_STAGE_METRICS_VERSION,
             "scope": self._scope,
@@ -1021,8 +1028,8 @@ class _StageMetricsRecorder:
             "started_unix_seconds": float(self._started_unix),
             "elapsed_seconds": float(time.perf_counter() - self._started_monotonic),
             "rss": rss,
-            "stage_count": int(len(self._stages)),
-            "stages": list(self._stages),
+            "stage_count": int(len(stages)),
+            "stages": stages,
             "rss_semantics": {
                 "python_current_rss_kb": (
                     "current parent Python process RSS from /proc/self/status VmRSS"
@@ -3638,6 +3645,20 @@ def _rz_helper_batch_size() -> int:
     return batch_size
 
 
+def _rz_helper_parallel_workers() -> int:
+    try:
+        worker_count = int(SURFACE_CODE_RZ_HELPER_PARALLEL_WORKERS)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "SURFACE_CODE_RZ_HELPER_PARALLEL_WORKERS must be an integer >= 1"
+        ) from exc
+    if worker_count < 1:
+        raise ValueError(
+            "SURFACE_CODE_RZ_HELPER_PARALLEL_WORKERS must be an integer >= 1"
+        )
+    return worker_count
+
+
 def _rz_helper_passes() -> list[str]:
     return [
         "ir::decompose_inst",
@@ -4263,10 +4284,16 @@ def _optimize_rz_helpers_independent_cached_batch(
         unique_misses.append(descriptor)
 
     batches = _chunked_sequence(unique_misses, configured_batch_size)
+    configured_parallel_workers = _rz_helper_parallel_workers()
+    effective_parallel_workers = (
+        min(configured_parallel_workers, len(batches)) if batches else 0
+    )
     with (
         stage_recorder.stage(
             "rz_helper_batch_plan",
             configured_batch_size=configured_batch_size,
+            configured_parallel_workers=configured_parallel_workers,
+            effective_parallel_workers=effective_parallel_workers,
             helper_count=len(descriptors),
             initial_miss_count=len(initial_misses),
             unique_miss_count=len(unique_misses),
@@ -4279,12 +4306,18 @@ def _optimize_rz_helpers_independent_cached_batch(
         span.add_result(
             initial_hit_count=len(descriptors) - len(initial_misses),
             planned_qret_invocation_count=len(batches),
+            planned_parallel_worker_count=effective_parallel_workers,
         )
 
     batch_runtime = runtime_root / "rz_call_cache" / "helper_batches"
     batch_runtime.mkdir(parents=True, exist_ok=True)
-    for batch_index, batch in enumerate(batches):
+
+    def process_batch(
+        batch_index: int,
+        batch: Sequence[_RZHelperDescriptor],
+    ) -> list[tuple[str, Mapping[str, Any], dict[str, Any]]]:
         lock_stack = contextlib.ExitStack()
+        batch_results: list[tuple[str, Mapping[str, Any], dict[str, Any]]] = []
         still_miss: list[tuple[_RZHelperDescriptor, str | None]] = []
         filled_by_other = 0
         try:
@@ -4311,18 +4344,21 @@ def _optimize_rz_helpers_independent_cached_batch(
                         )
                     )
                     if locked_invalid_reason is None:
-                        replacements[descriptor.function_name] = cached_circuit
-                        helper_results[descriptor.helper_index] = (
-                            _rz_helper_cache_hit_metadata(
-                                helper_index=descriptor.helper_index,
-                                function_name=descriptor.function_name,
-                                cache_key=descriptor.cache_key,
-                                cache_dir=descriptor.cache_dir,
-                                cached_metadata=cached_metadata,
-                                filled_by_other_process=True,
+                        filled_by_other += 1
+                        batch_results.append(
+                            (
+                                descriptor.function_name,
+                                cached_circuit,
+                                _rz_helper_cache_hit_metadata(
+                                    helper_index=descriptor.helper_index,
+                                    function_name=descriptor.function_name,
+                                    cache_key=descriptor.cache_key,
+                                    cache_dir=descriptor.cache_dir,
+                                    cached_metadata=cached_metadata,
+                                    filled_by_other_process=True,
+                                ),
                             )
                         )
-                        filled_by_other += 1
                     else:
                         still_miss.append((descriptor, locked_invalid_reason))
                 lock_span.add_result(
@@ -4332,7 +4368,7 @@ def _optimize_rz_helpers_independent_cached_batch(
                 )
 
             if not still_miss:
-                continue
+                return batch_results
 
             still_descriptors = [item[0] for item in still_miss]
             for descriptor in still_descriptors:
@@ -4393,6 +4429,7 @@ def _optimize_rz_helpers_independent_cached_batch(
                         "output_path": str(batch_output),
                         "pipeline_path": str(batch_yaml),
                         "input_size_bytes": _file_size_bytes(batch_input),
+                        "parallel_worker_count": effective_parallel_workers,
                     },
                 )
                 with (
@@ -4489,8 +4526,7 @@ def _optimize_rz_helpers_independent_cached_batch(
                             },
                         }
                         _atomic_write_json(descriptor.metadata_path, metadata)
-                        replacements[descriptor.function_name] = circuit
-                        helper_results[descriptor.helper_index] = {
+                        result = {
                             "helper_index": int(descriptor.helper_index),
                             "function_name": descriptor.function_name,
                             "cache_key": descriptor.cache_key,
@@ -4507,7 +4543,16 @@ def _optimize_rz_helpers_independent_cached_batch(
                             "qret_metrics": qret_metrics,
                             "batch_index": int(batch_index),
                             "configured_batch_size": configured_batch_size,
+                            "configured_parallel_workers": (
+                                configured_parallel_workers
+                            ),
+                            "effective_parallel_workers": (
+                                effective_parallel_workers
+                            ),
                         }
+                        batch_results.append(
+                            (descriptor.function_name, circuit, result)
+                        )
                     commit_span.add_result(committed_count=len(validated))
             finally:
                 for tmp_path in (batch_input, batch_output, batch_yaml):
@@ -4517,6 +4562,31 @@ def _optimize_rz_helpers_independent_cached_batch(
                         pass
         finally:
             lock_stack.close()
+        return batch_results
+
+    batch_results_by_index: dict[
+        int, list[tuple[str, Mapping[str, Any], dict[str, Any]]]
+    ] = {}
+    if batches and effective_parallel_workers <= 1:
+        for batch_index, batch in enumerate(batches):
+            batch_results_by_index[batch_index] = process_batch(batch_index, batch)
+    elif batches:
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=effective_parallel_workers,
+            thread_name_prefix="rz-helper-opt",
+        ) as executor:
+            futures = {
+                executor.submit(process_batch, batch_index, batch): batch_index
+                for batch_index, batch in enumerate(batches)
+            }
+            for future in concurrent.futures.as_completed(futures):
+                batch_index = futures[future]
+                batch_results_by_index[batch_index] = future.result()
+
+    for batch_index in sorted(batch_results_by_index):
+        for function_name, circuit, result in batch_results_by_index[batch_index]:
+            replacements[function_name] = circuit
+            helper_results[int(result["helper_index"])] = result
 
     for descriptor in descriptors:
         if helper_results[descriptor.helper_index] is not None:
@@ -5139,6 +5209,7 @@ def prepare_grouped_surface_code_step_artifact(
             "rz_call_cache_enabled": bool(SURFACE_CODE_RZ_CALL_CACHE),
             "rz_helper_opt_mode": _rz_helper_opt_mode(),
             "rz_helper_batch_size": _rz_helper_batch_size(),
+            "rz_helper_parallel_workers": _rz_helper_parallel_workers(),
             "integral_cache_enabled": bool(SURFACE_CODE_INTEGRAL_CACHE_ENABLED),
             "integral_cache_schema_version": _SURFACE_CODE_INTEGRAL_CACHE_VERSION,
             "step_artifact_cache_schema_version": (

@@ -109,6 +109,13 @@ OpenQASM2 へ落とす前の basis decomposition 反復回数は、`SURFACE_CODE
 export SURFACE_CODE_QASM_DECOMPOSE_REPS=8
 ```
 
+RZ helper の qret opt は helper をまとめて処理し、複数batchを並列実行します。現在の default は batch size `64`、parallel worker `8` です。負荷を抑える場合は worker 数を下げます。
+
+```bash
+export SURFACE_CODE_RZ_HELPER_BATCH_SIZE=64
+export SURFACE_CODE_RZ_HELPER_PARALLEL_WORKERS=8
+```
+
 `gridsynth` は変更対象ではないため、このリポジトリには同梱していません。必要なら以下で指定してください。
 
 ```bash

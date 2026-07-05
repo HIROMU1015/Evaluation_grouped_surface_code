@@ -729,6 +729,7 @@ def test_independent_rz_helper_flow_uses_inline_overrides(
         return original_inline(*args, **kwargs)
 
     monkeypatch.setattr(sc, "SURFACE_CODE_RZ_HELPER_OPT_MODE", "independent_helper")
+    monkeypatch.setattr(sc, "SURFACE_CODE_RZ_HELPER_BATCH_SIZE", 1)
     monkeypatch.setattr(sc, "SURFACE_CODE_CACHE_DIR", tmp_path / "cache")
     monkeypatch.setattr(sc, "_optimize_rz_helper_independent_cached", fake_optimize_helper)
     monkeypatch.setattr(sc, "_replace_ir_circuits", fail_replace)
@@ -2659,6 +2660,17 @@ def test_rz_helper_batch_size_validation(monkeypatch: Any) -> None:
         sc._rz_helper_batch_size()
 
 
+def test_rz_helper_parallel_worker_validation(monkeypatch: Any) -> None:
+    monkeypatch.setattr(sc, "SURFACE_CODE_RZ_HELPER_PARALLEL_WORKERS", "3")
+    assert sc._rz_helper_parallel_workers() == 3
+    monkeypatch.setattr(sc, "SURFACE_CODE_RZ_HELPER_PARALLEL_WORKERS", 0)
+    with pytest.raises(ValueError):
+        sc._rz_helper_parallel_workers()
+    monkeypatch.setattr(sc, "SURFACE_CODE_RZ_HELPER_PARALLEL_WORKERS", "bad")
+    with pytest.raises(ValueError):
+        sc._rz_helper_parallel_workers()
+
+
 def test_independent_rz_helper_batch_generates_cache_and_hits(
     tmp_path: Path,
     monkeypatch: Any,
@@ -2749,6 +2761,123 @@ def test_independent_rz_helper_batch_generates_cache_and_hits(
     assert sorted(replacements) == ["__helper_a()", "__helper_b()"]
     assert [item["cache_status"] for item in second_results] == ["hit", "hit"]
     assert len(qret_calls) == 1
+
+
+def test_independent_rz_helper_batch_runs_misses_with_bounded_parallelism(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    cache_root = tmp_path / "cache"
+    qret_path = tmp_path / "qret"
+    qret_path.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper_names = ["__helper_a()", "__helper_b()", "__helper_c()"]
+    full_ir = _rz_helper_cache_fixture_ir(helper_names[0])
+    for function_name in helper_names[1:]:
+        full_ir["circuit_list"].append(
+            _rz_helper_cache_fixture_ir(function_name)["circuit_list"][0]
+        )
+    helpers = [_rz_helper_fixture_metadata(name) for name in helper_names]
+    for index, helper in enumerate(helpers):
+        helper["theta"] = f"0.{index + 1}"
+        helper["key"] = f"0.{index + 1}"
+    qret_calls: list[dict[str, Any]] = []
+
+    def fake_run_qret(
+        cmd: Any,
+        *,
+        runtime_root: Path,
+        rotation_precision: float | None = None,
+        stage_recorder: Any = None,
+        stage_name: str | None = None,
+        stage_details: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        del cmd, runtime_root, rotation_precision, stage_recorder
+        assert stage_name is not None
+        assert stage_name.startswith("qret_opt_rz_helper_batch_")
+        assert stage_details is not None
+        input_path = Path(str(stage_details["input_path"]))
+        output_path = Path(str(stage_details["output_path"]))
+        with input_path.open("r", encoding="utf-8") as f:
+            payload = json.load(f)
+        assert len(payload["circuit_list"]) == 1
+        for circuit in payload["circuit_list"]:
+            circuit["bb_list"][0]["inst_list"] = [
+                {"opcode": "H", "q": 0},
+                {"opcode": "T", "q": 0},
+                {"opcode": "Return"},
+            ]
+        sc._atomic_write_json(output_path, payload, indent=None)
+        qret_calls.append(
+            {
+                "stage_name": stage_name,
+                "function_names": list(stage_details["function_names"]),
+                "parallel_worker_count": stage_details["parallel_worker_count"],
+            }
+        )
+        return {
+            "returncode": 0,
+            "gnu_time_used": False,
+            "stdout_bytes": 0,
+            "stderr_bytes": 0,
+        }
+
+    monkeypatch.setattr(sc, "SURFACE_CODE_CACHE_DIR", cache_root)
+    monkeypatch.setattr(sc, "SURFACE_CODE_RZ_HELPER_PARALLEL_WORKERS", 2)
+    monkeypatch.setattr(sc, "_run_qret", fake_run_qret)
+    qret_hash = sc.file_sha256(qret_path)
+    recorder = sc._StageMetricsRecorder(
+        scope="unit_test",
+        metadata={"case": "parallel_rz_helper"},
+    )
+
+    replacements, first_results = sc._optimize_rz_helpers_independent_cached_batch(
+        qret_path=qret_path,
+        runtime_root=tmp_path,
+        full_ir_data=full_ir,
+        helpers=helpers,
+        rotation_precision=1.0e-5,
+        qret_hash=qret_hash,
+        helper_passes=sc._rz_helper_passes(),
+        batch_size=1,
+        stage_recorder=recorder,
+    )
+    assert list(replacements) == helper_names
+    assert [item["cache_status"] for item in first_results] == [
+        "miss",
+        "miss",
+        "miss",
+    ]
+    assert [item["function_name"] for item in first_results] == helper_names
+    assert sorted(call["function_names"][0] for call in qret_calls) == helper_names
+    assert {call["parallel_worker_count"] for call in qret_calls} == {2}
+    summary = recorder.summary(status="ok")
+    plan = next(
+        stage for stage in summary["stages"] if stage["name"] == "rz_helper_batch_plan"
+    )
+    assert plan["details"]["configured_parallel_workers"] == 2
+    assert plan["details"]["effective_parallel_workers"] == 2
+    assert plan["result"]["planned_qret_invocation_count"] == 3
+    assert plan["result"]["planned_parallel_worker_count"] == 2
+
+    qret_calls.clear()
+    replacements, second_results = sc._optimize_rz_helpers_independent_cached_batch(
+        qret_path=qret_path,
+        runtime_root=tmp_path,
+        full_ir_data=full_ir,
+        helpers=helpers,
+        rotation_precision=1.0e-5,
+        qret_hash=qret_hash,
+        helper_passes=sc._rz_helper_passes(),
+        batch_size=1,
+        stage_recorder=None,
+    )
+    assert list(replacements) == helper_names
+    assert [item["cache_status"] for item in second_results] == [
+        "hit",
+        "hit",
+        "hit",
+    ]
+    assert qret_calls == []
 
 
 def test_run_rz_call_cached_opt_batch_size_one_uses_legacy_single_helper_path(
@@ -2964,6 +3093,7 @@ def test_rz_helper_opt_modes_produce_equivalent_flat_ir(
         opt_path = runtime_root / "step_opt.json"
         sc._atomic_write_json(ir_path, _rz_helper_e2e_fixture_ir(), indent=None)
         monkeypatch.setattr(sc, "SURFACE_CODE_RZ_HELPER_OPT_MODE", mode)
+        monkeypatch.setattr(sc, "SURFACE_CODE_RZ_HELPER_BATCH_SIZE", 1)
         monkeypatch.setattr(sc, "SURFACE_CODE_CACHE_DIR", tmp_path / f"cache_{mode}")
         result = sc._run_rz_call_cached_opt(
             qret_path=qret_path,
