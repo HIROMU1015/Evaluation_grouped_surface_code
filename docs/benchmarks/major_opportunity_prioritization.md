@@ -323,8 +323,129 @@ Production defaults:
 
 ### Updated Priority
 
-1. Validate bounded parallel RZ helper optimization in end-to-end H5 if the next
-   goal is final adoption evidence.
+1. After helper parallelism, Python inline remains the next elapsed target.
 2. For memory reduction, do not spend production effort on AST early release
    alone; instrument and redesign the qret parse/AST construction path instead.
-3. After helper parallelism, Python inline remains the next elapsed target.
+3. qret main cleanup skip is valid as a small speed candidate, but it is not as
+   large as the inline summary overhead.
+
+## Post-Parallel Speed Probes
+
+Date: 2026-07-05
+
+Scope:
+
+- production implementation change: none
+- measured case: H5 `4th(new_2)`
+- input: existing production `reps=4` H5 `step_ir.json` and
+  `rz_call_cache_metadata.json`
+- new larger-than-H5 execution: none
+- temporary output location: `/tmp/qret_speed_probe_h5*`
+
+### Main Cleanup Skip Probe
+
+The probe computed helper replacements once, then compared two downstream
+paths:
+
+- normal: qret main cleanup, then Python inline
+- candidate: Python inline directly from the original IR
+
+Results:
+
+| path | main cleanup | Python inline | combined | output parity |
+|---|---:|---:|---:|---|
+| normal | 1.093 sec | 9.249 sec | 10.343 sec | reference |
+| skip main cleanup | 0 sec | 9.200 sec | 9.200 sec | summary equal |
+
+The normalized instruction stream summary matched exactly:
+
+- normalized instruction stream hash:
+  `1b119248b47f65a82ca45b88ac95f9a548814e1606caa0e3c57770f0239c7177`
+- scheduled instruction count: `1,063,068`
+- emitted instruction count: `1,063,069`
+- `T` count: `236,736`
+- gate depth: `634,614`
+
+Estimated H5 saving: about `1.14 sec`. This is semantically promising, but a
+small candidate.
+
+### Python Inline Summary Overhead Probe
+
+The probe ran H5 direct inline twice with the same helper replacements:
+
+- normal inline, including the current instruction stream summary recorder
+- temporary no-op recorder, which leaves the emitted output JSON unchanged but
+  does not compute the summary
+
+Results:
+
+| mode | inline wall | output JSON SHA |
+|---|---:|---|
+| normal summary | 9.298 sec | reference |
+| no summary recorder | 5.415 sec | equal |
+
+Estimated H5 saving: about `3.88 sec` inside Python inline. This is larger than
+qret main cleanup skip and is now the strongest Python-side speed candidate
+after RZ helper parallelism.
+
+The cProfile run points to the same area: per-instruction stream observation,
+canonical JSON normalization for hash lines, and JSON dumping dominate the
+inline path. A production candidate should avoid computing the full normalized
+instruction stream summary in normal production mode, or replace it with a
+cheaper single-pass counter/hash implementation that preserves validation mode
+semantics.
+
+Implementation validation:
+
+The production implementation now defaults to metrics-only stream summaries:
+
+- `SURFACE_CODE_INLINE_STREAM_HASH=0` or unset: compute count/depth/magic
+  metrics, skip normalized stream hash
+- `SURFACE_CODE_INLINE_STREAM_HASH=1`: compute the previous full normalized
+  stream hash for strict A/B validation
+
+H5 fixed-input validation after implementation:
+
+| mode | inline wall | output JSON SHA | normalized stream hash |
+|---|---:|---|---|
+| metrics-only default | 6.037 sec | reference | `None` |
+| full-hash validation | 9.564 sec | equal | `1b119248b47f65a82ca45b88ac95f9a548814e1606caa0e3c57770f0239c7177` |
+
+The count/depth/magic metrics matched exactly:
+
+- scheduled instruction count: `1,063,068`
+- emitted instruction count: `1,063,069`
+- gate depth: `634,614`
+- step magic state count: `236,736`
+- opcode counts: equal
+
+Observed H5 inline saving after implementation: about `3.53 sec`. The step
+artifact cache key and RZ helper cache key include the hash mode, so production
+metrics-only artifacts do not collide with full-hash validation artifacts.
+
+### `json.load` Inline Probe
+
+The existing full-JSON inliner was also compared against the incremental
+inliner:
+
+| mode | inline wall | output JSON SHA | parent max RSS |
+|---|---:|---|---:|
+| incremental | 9.203 sec | reference | 197,748 KB |
+| `json.load` | 8.891 sec | equal | 335,988 KB |
+
+The full-JSON path is only about `0.31 sec` faster on H5 and costs about
+`138 MB` more parent RSS in this process. It is not a good primary production
+candidate.
+
+### Updated Speed Ranking
+
+After the RZ helper parallel implementation, the highest-value remaining speed
+candidates are:
+
+1. Python inline summary overhead: about `3.9 sec` H5 local saving, output JSON
+   unchanged in the no-summary probe.
+2. qret compile/routing internals: still about `8.6 sec` H5 compile time, but
+   previous InstQueue low-risk candidates did not explain enough of it.
+3. qret main cleanup skip: about `1.1 sec` H5 saving with summary parity.
+4. `json.load` inline: not recommended as primary because the speed win is
+   small and RSS rises materially.

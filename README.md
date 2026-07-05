@@ -116,6 +116,12 @@ export SURFACE_CODE_RZ_HELPER_BATCH_SIZE=64
 export SURFACE_CODE_RZ_HELPER_PARALLEL_WORKERS=8
 ```
 
+Python inline 後の命令列 hash は、production default では計算しません。命令数、深さ、T数などの resource metrics は引き続き集計します。A/B 検証で命令列同一性を確認する場合だけ full hash を有効にします。
+
+```bash
+export SURFACE_CODE_INLINE_STREAM_HASH=1
+```
+
 `gridsynth` は変更対象ではないため、このリポジトリには同梱していません。必要なら以下で指定してください。
 
 ```bash

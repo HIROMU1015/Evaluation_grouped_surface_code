@@ -35,6 +35,18 @@ def _positive_int_env(name: str, default: int) -> int:
     return value
 
 
+def _bool_env(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return bool(default)
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean: {raw!r}")
+
+
 _env_root = os.environ.get("TROTTER_PROJECT_ROOT")
 PROJECT_ROOT = (
     Path(_env_root).expanduser().resolve()
@@ -178,6 +190,10 @@ SURFACE_CODE_RZ_HELPER_BATCH_SIZE = _positive_int_env(
 SURFACE_CODE_RZ_HELPER_PARALLEL_WORKERS = _positive_int_env(
     "SURFACE_CODE_RZ_HELPER_PARALLEL_WORKERS",
     8,
+)
+SURFACE_CODE_INLINE_STREAM_HASH = _bool_env(
+    "SURFACE_CODE_INLINE_STREAM_HASH",
+    False,
 )
 SURFACE_CODE_RZ_CALL_CACHE_ROUND_DIGITS = None
 SURFACE_CODE_INTEGRAL_CACHE_ENABLED = (

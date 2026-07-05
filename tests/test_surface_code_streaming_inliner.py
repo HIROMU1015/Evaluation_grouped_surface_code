@@ -370,6 +370,41 @@ def test_streaming_inliner_matches_legacy_flat_ir_and_metrics(tmp_path: Path) ->
     assert not list(tmp_path.glob(".*.tmp"))
 
 
+def test_streaming_inliner_default_skips_stream_hash(tmp_path: Path) -> None:
+    input_path = tmp_path / "input.json"
+    output_path = tmp_path / "output.json"
+    _write_ir(input_path, _fixture_ir())
+
+    summary = sc._python_inline_ir(input_path, output_path)
+    stream = summary["instruction_stream"]
+
+    assert _flat_inst_list(output_path)
+    assert stream["normalized_instruction_stream_hash"] is None
+    assert stream["normalized_instruction_stream_hash_mode"] == "metrics_only"
+    assert stream["normalized_instruction_stream_hash_available"] is False
+    assert stream["emitted_instruction_count"] == 7
+    assert stream["scheduled_instruction_count"] == 6
+    assert stream["step_magic_state_count"] == 2
+
+
+def test_streaming_inliner_full_hash_mode(tmp_path: Path, monkeypatch: Any) -> None:
+    input_path = tmp_path / "input.json"
+    output_path = tmp_path / "output.json"
+    _write_ir(input_path, _fixture_ir())
+    monkeypatch.setattr(sc, "SURFACE_CODE_INLINE_STREAM_HASH", True)
+
+    summary = sc._python_inline_ir(input_path, output_path)
+    stream = summary["instruction_stream"]
+    rescanned = sc.summarize_optimized_ir(output_path)
+
+    assert stream["normalized_instruction_stream_hash"] is not None
+    assert stream["normalized_instruction_stream_hash_mode"] == "full_hash"
+    assert stream["normalized_instruction_stream_hash_available"] is True
+    assert stream["normalized_instruction_stream_hash"] == rescanned[
+        "instruction_stream"
+    ]["normalized_instruction_stream_hash"]
+
+
 def test_inline_summary_is_used_without_reloading_flat_ir(tmp_path: Path) -> None:
     input_path = tmp_path / "input.json"
     streaming_path = tmp_path / "streaming.json"

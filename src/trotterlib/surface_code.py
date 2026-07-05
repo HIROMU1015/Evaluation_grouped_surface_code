@@ -36,6 +36,7 @@ from .config import (
     SURFACE_CODE_ENTANGLEMENT_GENERATION_PERIOD,
     SURFACE_CODE_FIXED_ROTATION_PRECISION,
     SURFACE_CODE_GRIDSYNTH_PATH,
+    SURFACE_CODE_INLINE_STREAM_HASH,
     SURFACE_CODE_INTEGRAL_CACHE_ENABLED,
     SURFACE_CODE_MACHINE_TYPE,
     SURFACE_CODE_MAGIC_GENERATION_PERIOD,
@@ -2370,11 +2371,39 @@ def _normalized_instruction_line(inst: Mapping[str, Any]) -> str:
     )
 
 
+def _inline_stream_hash_enabled() -> bool:
+    value = SURFACE_CODE_INLINE_STREAM_HASH
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+        raise ValueError(
+            f"SURFACE_CODE_INLINE_STREAM_HASH must be a boolean: {value!r}"
+        )
+    return bool(value)
+
+
+def _inline_stream_hash_mode() -> str:
+    return "full_hash" if _inline_stream_hash_enabled() else "metrics_only"
+
+
 class _InstructionStreamRecorder:
-    def __init__(self, *, num_qubits: int) -> None:
+    def __init__(
+        self,
+        *,
+        num_qubits: int,
+        include_hash: bool | None = None,
+    ) -> None:
         if int(num_qubits) < 0:
             raise ValueError(f"Invalid num_qubits={num_qubits}")
-        self._stream_hash = hashlib.sha256()
+        self._include_hash = (
+            _inline_stream_hash_enabled()
+            if include_hash is None
+            else bool(include_hash)
+        )
+        self._stream_hash = hashlib.sha256() if self._include_hash else None
         self._qubit_depth = [0] * int(num_qubits)
         self._magic_layers: dict[int, int] = {}
         self._opcode_count: dict[str, int] = {}
@@ -2385,8 +2414,9 @@ class _InstructionStreamRecorder:
 
     def observe(self, inst: Mapping[str, Any]) -> None:
         opcode = str(inst.get("opcode"))
-        self._stream_hash.update(_normalized_instruction_line(inst).encode("utf-8"))
-        self._stream_hash.update(b"\n")
+        if self._stream_hash is not None:
+            self._stream_hash.update(_normalized_instruction_line(inst).encode("utf-8"))
+            self._stream_hash.update(b"\n")
         self._emitted_instruction_count += 1
         self._opcode_count[opcode] = self._opcode_count.get(opcode, 0) + 1
 
@@ -2412,7 +2442,17 @@ class _InstructionStreamRecorder:
     def summary(self) -> dict[str, Any]:
         return {
             "version": _IR_STREAM_SUMMARY_VERSION,
-            "normalized_instruction_stream_hash": self._stream_hash.hexdigest(),
+            "normalized_instruction_stream_hash": (
+                self._stream_hash.hexdigest()
+                if self._stream_hash is not None
+                else None
+            ),
+            "normalized_instruction_stream_hash_mode": (
+                "full_hash" if self._stream_hash is not None else "metrics_only"
+            ),
+            "normalized_instruction_stream_hash_available": (
+                self._stream_hash is not None
+            ),
             "emitted_instruction_count": int(self._emitted_instruction_count),
             "scheduled_instruction_count": int(self._scheduled_instruction_count),
             "call_count": int(self._call_count),
@@ -2505,8 +2545,8 @@ _RZ_QASM_LINE_RE = re.compile(
 )
 _IR_ROTATION_PRECISION_REWRITE_VERSION = "ir_param_rotation_precision_v1"
 _IR_METADATA_NORMALIZATION_VERSION = "ir_metadata_normalization_v1"
-_IR_STREAM_SUMMARY_VERSION = "ir_instruction_stream_summary_v1"
-_PYTHON_INLINE_IR_VERSION = "python_streaming_inline_ir_v1"
+_IR_STREAM_SUMMARY_VERSION = "ir_instruction_stream_summary_v2"
+_PYTHON_INLINE_IR_VERSION = "python_streaming_inline_ir_v2"
 _RZ_HELPER_INDEPENDENT_CACHE_VERSION = "rz_helper_independent_cache_v2"
 _RZ_HELPER_OPT_MODES = {"legacy_full_ir", "independent_helper"}
 _PARAMETRIZED_ROTATION_OPS = {"RX", "RY", "RZ"}
@@ -3070,6 +3110,9 @@ def _python_inline_ir(
         "scheduled_instruction_count": int(
             stream_summary["scheduled_instruction_count"]
         ),
+        "instruction_stream_hash_mode": stream_summary.get(
+            "normalized_instruction_stream_hash_mode"
+        ),
         "instruction_count_semantics": {
             "emitted_instruction_count": (
                 "all emitted flat IR instructions including Return"
@@ -3609,6 +3652,9 @@ def _python_inline_ir_incremental(
         "scheduled_instruction_count": int(
             stream_summary["scheduled_instruction_count"]
         ),
+        "instruction_stream_hash_mode": stream_summary.get(
+            "normalized_instruction_stream_hash_mode"
+        ),
         "instruction_count_semantics": {
             "emitted_instruction_count": (
                 "all emitted flat IR instructions including Return"
@@ -3837,6 +3883,7 @@ def _rz_helper_cache_payload(
         "gridsynth": _gridsynth_cache_identity(),
         "passes": list(helper_passes),
         "ignore_global_phase": "ir::ignore_global_phase" in set(helper_passes),
+        "inline_stream_hash_mode": _inline_stream_hash_mode(),
     }
     if cache_scope_identity is not None:
         payload["cache_scope_identity"] = dict(cache_scope_identity)
@@ -5089,6 +5136,7 @@ def _step_artifact_cache_key(
         "ir_rotation_precision_rewrite": _IR_ROTATION_PRECISION_REWRITE_VERSION,
         "ir_metadata_normalization": _IR_METADATA_NORMALIZATION_VERSION,
         "ir_stream_summary": _IR_STREAM_SUMMARY_VERSION,
+        "ir_stream_hash_mode": _inline_stream_hash_mode(),
         "python_inline_ir": _PYTHON_INLINE_IR_VERSION,
         "dependency_versions": _surface_code_step_dependency_versions(),
     }
@@ -5210,6 +5258,7 @@ def prepare_grouped_surface_code_step_artifact(
             "rz_helper_opt_mode": _rz_helper_opt_mode(),
             "rz_helper_batch_size": _rz_helper_batch_size(),
             "rz_helper_parallel_workers": _rz_helper_parallel_workers(),
+            "inline_stream_hash_mode": _inline_stream_hash_mode(),
             "integral_cache_enabled": bool(SURFACE_CODE_INTEGRAL_CACHE_ENABLED),
             "integral_cache_schema_version": _SURFACE_CODE_INTEGRAL_CACHE_VERSION,
             "step_artifact_cache_schema_version": (
