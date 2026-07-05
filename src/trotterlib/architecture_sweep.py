@@ -19,6 +19,7 @@ from .config import (
 )
 from .surface_code import (
     CONTROLLED_PF_TIME_EVOLUTION_BLOCK_SCOPE,
+    EFFICIENT_CONTROLLED_PF_ONE_STEP_SCOPE,
     SurfaceCodeArchitecture,
     SurfaceCodeStepArtifact,
     UNCONTROLLED_PF_ONE_STEP_SCOPE,
@@ -37,6 +38,9 @@ from .surface_code import (
 
 UNCONTROLLED_QPE_SCALING_MODEL = "linear_extrapolation_from_uncontrolled_pf_one_step"
 CONTROLLED_QPE_SCALING_MODEL = "none_single_controlled_block"
+EFFICIENT_CONTROLLED_QPE_SCALING_MODEL = (
+    "linear_extrapolation_from_efficient_controlled_pf_one_step"
+)
 
 RESULT_FIELDS = [
     "status",
@@ -319,19 +323,22 @@ def _artifact_row(
     qpe_scale: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     scope = artifact.compiled_circuit_scope if artifact is not None else compiled_circuit_scope
-    is_controlled = scope == CONTROLLED_PF_TIME_EVOLUTION_BLOCK_SCOPE
+    is_generic_controlled = scope == CONTROLLED_PF_TIME_EVOLUTION_BLOCK_SCOPE
+    is_efficient_controlled = scope == EFFICIENT_CONTROLLED_PF_ONE_STEP_SCOPE
     row = {
         "compiled_circuit_scope": scope,
         "qpe_scaling_model": (
             CONTROLLED_QPE_SCALING_MODEL
-            if is_controlled
+            if is_generic_controlled
+            else EFFICIENT_CONTROLLED_QPE_SCALING_MODEL
+            if is_efficient_controlled
             else UNCONTROLLED_QPE_SCALING_MODEL
         ),
         "molecule": molecule,
         "pf_label": pf_label,
         "qpe_power_k": artifact.qpe_power_k if artifact is not None else qpe_power_k,
     }
-    if qpe_scale is not None and not is_controlled:
+    if qpe_scale is not None and not is_generic_controlled:
         row.update(qpe_scale)
     if artifact is None:
         return row
@@ -368,7 +375,7 @@ def _scale_resource(value: Any, action_count: Any) -> Any:
 
 
 def _add_qpe_total_resource_fields(row: dict[str, Any]) -> None:
-    if row.get("compiled_circuit_scope") != UNCONTROLLED_PF_ONE_STEP_SCOPE:
+    if row.get("compiled_circuit_scope") == CONTROLLED_PF_TIME_EVOLUTION_BLOCK_SCOPE:
         reason = "single_controlled_block_not_qpe_total"
         row["qpe_effective_block_count"] = None
         row["qpe_action_count"] = None
@@ -647,15 +654,17 @@ def _append_pf_comparison_report(lines: list[str], rows: list[dict[str, Any]]) -
     rows = [
         row
         for row in rows
-        if row.get("compiled_circuit_scope") == UNCONTROLLED_PF_ONE_STEP_SCOPE
+        if row.get("compiled_circuit_scope")
+        in {UNCONTROLLED_PF_ONE_STEP_SCOPE, EFFICIENT_CONTROLLED_PF_ONE_STEP_SCOPE}
     ]
     if not rows:
         lines.extend(
             [
                 "## PF-Step Linear Scaling Comparison",
                 "",
-                "No uncontrolled PF one-step rows are present; QPE-scale linear "
-                "extrapolation is not reported for controlled block rows.",
+                "No linearly scalable PF one-step rows are present; QPE-scale "
+                "linear extrapolation is not reported for generic controlled "
+                "block rows.",
                 "",
             ]
         )
@@ -668,8 +677,10 @@ def _append_pf_comparison_report(lines: list[str], rows: list[dict[str, Any]]) -
         [
             "## PF-Step Linear Scaling Comparison",
             "",
-            "These totals are linear extrapolations from one uncontrolled PF step. "
-            "They are not compiled full QPE circuits with ancilla, controlled-U, "
+            "These totals are linear extrapolations from one compiled PF step. "
+            "For efficient controlled rows, only the Pauli rotations' central "
+            "RZ gates are controlled. These are not compiled full QPE circuits "
+            "with phase-register ancilla, "
             "inverse QFT, measurements, or repeated QPE iterations.",
             "",
         ]
@@ -1025,11 +1036,11 @@ def run_surface_code_architecture_sweep(config_path: str | Path) -> dict[str, An
                     raw_case,
                     default_values,
                 )
-                is_controlled = (
+                is_generic_controlled = (
                     compiled_circuit_scope == CONTROLLED_PF_TIME_EVOLUTION_BLOCK_SCOPE
                 )
                 qpe_scale = None
-                if not is_controlled:
+                if not is_generic_controlled:
                     if qpe_scale_cache is None:
                         qpe_scale_cache = _qpe_scale_row(
                             ham_name,

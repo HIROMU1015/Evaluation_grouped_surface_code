@@ -53,6 +53,78 @@ def add_clique_to_circuit_grouper(
     return exp_term_count
 
 
+def _qiskit_circuit_qubit(term_index: int, num_qubits: int) -> int:
+    # Match term_to_sparse_pauli: the leftmost SparsePauliOp label maps to the
+    # highest-index Qiskit circuit qubit.
+    return int(num_qubits) - 1 - int(term_index)
+
+
+def _apply_pauli_basis_change(
+    circuit: QuantumCircuit,
+    mapped_term: Sequence[tuple[int, str]],
+) -> None:
+    for qubit, pauli in mapped_term:
+        if pauli == "X":
+            circuit.h(qubit)
+        elif pauli == "Y":
+            circuit.sdg(qubit)
+            circuit.h(qubit)
+        elif pauli == "Z":
+            continue
+        else:
+            raise ValueError(f"Unsupported Pauli operator: {pauli!r}")
+
+
+def _undo_pauli_basis_change(
+    circuit: QuantumCircuit,
+    mapped_term: Sequence[tuple[int, str]],
+) -> None:
+    for qubit, pauli in reversed(mapped_term):
+        if pauli == "X":
+            circuit.h(qubit)
+        elif pauli == "Y":
+            circuit.h(qubit)
+            circuit.s(qubit)
+        elif pauli == "Z":
+            continue
+        else:
+            raise ValueError(f"Unsupported Pauli operator: {pauli!r}")
+
+
+def add_clique_to_circuit_efficient_controlled(
+    commuting_clique: Sequence[QubitOperator],
+    time: float,
+    num_qubits: int,
+    weight: float,
+    circuit: QuantumCircuit,
+    control_qubit: int,
+) -> int:
+    """Append controlled Pauli rotations while keeping Clifford work system-only."""
+    exp_term_count = 0
+    for hamiltonian in commuting_clique:
+        for term, coeff in hamiltonian.terms.items():
+            if not term:
+                continue
+            angle = float(coeff.real) * float(weight) * float(time)
+            mapped_term = [
+                (_qiskit_circuit_qubit(index, num_qubits), pauli)
+                for index, pauli in term
+            ]
+            active_qubits = [qubit for qubit, _pauli in mapped_term]
+            if not active_qubits:
+                continue
+            target = active_qubits[-1]
+            _apply_pauli_basis_change(circuit, mapped_term)
+            for qubit in active_qubits[:-1]:
+                circuit.cx(qubit, target)
+            circuit.crz(2.0 * angle, control_qubit, target)
+            for qubit in reversed(active_qubits[:-1]):
+                circuit.cx(qubit, target)
+            _undo_pauli_basis_change(circuit, mapped_term)
+            exp_term_count += 1
+    return exp_term_count
+
+
 def w_trotter_grouper(
     circuit: QuantumCircuit,
     commuting_cliques: Sequence[Sequence[QubitOperator]],
@@ -67,6 +139,33 @@ def w_trotter_grouper(
     for term_idx, weight in iter_pf_steps(len(commuting_cliques), weights):
         exp_term_count += add_clique_to_circuit_grouper(
             commuting_cliques[term_idx], time, num_qubits, weight, circuit
+        )
+    return exp_term_count
+
+
+def w_trotter_grouper_efficient_controlled(
+    circuit: QuantumCircuit,
+    commuting_cliques: Sequence[Sequence[QubitOperator]],
+    time: float,
+    num_qubits: int,
+    pf_label: PFLabel,
+    control_qubit: int,
+) -> int:
+    """Append an efficient k=0 controlled PF step.
+
+    Only each Pauli rotation's central RZ is controlled. Basis changes, parity
+    compute, and parity uncompute are applied on system qubits only.
+    """
+    weights = _get_w_list(pf_label)
+    exp_term_count = 0
+    for term_idx, weight in iter_pf_steps(len(commuting_cliques), weights):
+        exp_term_count += add_clique_to_circuit_efficient_controlled(
+            commuting_cliques[term_idx],
+            time,
+            num_qubits,
+            weight,
+            circuit,
+            control_qubit,
         )
     return exp_term_count
 

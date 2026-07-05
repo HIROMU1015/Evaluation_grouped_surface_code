@@ -131,10 +131,12 @@ SurfaceCodeArchitectureConfig = SurfaceCodeArchitecture
 
 UNCONTROLLED_PF_ONE_STEP_SCOPE = "uncontrolled_pf_one_step"
 CONTROLLED_PF_TIME_EVOLUTION_BLOCK_SCOPE = "controlled_pf_time_evolution_block"
+EFFICIENT_CONTROLLED_PF_ONE_STEP_SCOPE = "efficient_controlled_pf_one_step"
 COMPILED_CIRCUIT_SCOPES = frozenset(
     {
         UNCONTROLLED_PF_ONE_STEP_SCOPE,
         CONTROLLED_PF_TIME_EVOLUTION_BLOCK_SCOPE,
+        EFFICIENT_CONTROLLED_PF_ONE_STEP_SCOPE,
     }
 )
 
@@ -148,7 +150,7 @@ class _CircuitScopeSpec:
 
     @property
     def is_controlled(self) -> bool:
-        return self.compiled_circuit_scope == CONTROLLED_PF_TIME_EVOLUTION_BLOCK_SCOPE
+        return self.num_control_qubits == 1
 
 
 def _validate_qpe_power_k(value: Any) -> int:
@@ -178,6 +180,19 @@ def _circuit_scope_spec(
             qpe_power_k=None,
             time_multiplier=1,
             num_control_qubits=0,
+        )
+    if scope == EFFICIENT_CONTROLLED_PF_ONE_STEP_SCOPE:
+        if qpe_power_k is None:
+            k = 0
+        else:
+            k = _validate_qpe_power_k(qpe_power_k)
+        if k != 0:
+            raise ValueError("efficient_controlled_pf_one_step only supports qpe_power_k=0")
+        return _CircuitScopeSpec(
+            compiled_circuit_scope=scope,
+            qpe_power_k=0,
+            time_multiplier=1,
+            num_control_qubits=1,
         )
     k = _validate_qpe_power_k(qpe_power_k)
     return _CircuitScopeSpec(
@@ -2197,6 +2212,74 @@ def _build_grouped_surface_code_controlled_block_circuit_from_integrals(
     }
 
 
+def _build_grouped_surface_code_efficient_controlled_step_circuit_from_integrals(
+    ham_name: str,
+    pf_label: PFLabel,
+    *,
+    base_step_time: float,
+    constant: Any,
+    one_body: Any,
+    two_body: Any,
+) -> tuple[Any, dict[str, Any]]:
+    from qiskit import QuantumCircuit
+
+    from .qiskit_time_evolution_grouping import (
+        w_trotter_grouper_efficient_controlled,
+    )
+
+    spec = _circuit_scope_spec(EFFICIENT_CONTROLLED_PF_ONE_STEP_SCOPE)
+    (
+        num_system_qubits,
+        commuting_cliques,
+        total_identity_coefficient,
+        identity_coefficients,
+    ) = _grouped_surface_code_operator_data_from_integrals(
+        ham_name,
+        constant=constant,
+        one_body=one_body,
+        two_body=two_body,
+    )
+    control_qubit_index = num_system_qubits
+    controlled_qc = QuantumCircuit(num_system_qubits + 1)
+    w_trotter_grouper_efficient_controlled(
+        controlled_qc,
+        commuting_cliques,
+        float(base_step_time),
+        num_system_qubits,
+        normalize_pf_label(pf_label),
+        control_qubit_index,
+    )
+    identity_phase_angle = _identity_phase_angle_for_pf_sequence(
+        identity_coefficients=identity_coefficients,
+        pf_label=pf_label,
+        evolution_time=float(base_step_time),
+    )
+    if not math.isclose(identity_phase_angle, 0.0, rel_tol=0.0, abs_tol=1.0e-15):
+        controlled_qc.p(identity_phase_angle, control_qubit_index)
+    controlled_qc.global_phase = 0.0
+    return controlled_qc, {
+        "compiled_circuit_scope": EFFICIENT_CONTROLLED_PF_ONE_STEP_SCOPE,
+        "num_system_qubits": int(num_system_qubits),
+        "num_control_qubits": 1,
+        "num_logical_qubits": int(num_system_qubits + 1),
+        "control_qubit_index": int(control_qubit_index),
+        "qpe_power_k": int(spec.qpe_power_k or 0),
+        "time_multiplier": int(spec.time_multiplier),
+        "base_step_time": float(base_step_time),
+        "effective_evolution_time": float(base_step_time),
+        "identity_coefficient": float(total_identity_coefficient),
+        "identity_phase_angle": float(identity_phase_angle),
+        "identity_phase_convention": (
+            "PhaseGate(theta) on the control qubit with "
+            "theta=-sum_j w_j*c_identity_j*t"
+        ),
+        "controlled_synthesis": (
+            "system basis change, system parity compute, controlled-RZ, "
+            "system parity uncompute, system basis change back"
+        ),
+    }
+
+
 def build_grouped_surface_code_step_circuit(
     ham_name: str,
     pf_label: PFLabel,
@@ -2217,6 +2300,18 @@ def build_grouped_surface_code_step_circuit(
         stage_recorder=stage_recorder,
     )
     if spec.is_controlled:
+        if spec.compiled_circuit_scope == EFFICIENT_CONTROLLED_PF_ONE_STEP_SCOPE:
+            qc, _metadata = (
+                _build_grouped_surface_code_efficient_controlled_step_circuit_from_integrals(
+                    ham_name,
+                    pf_label,
+                    base_step_time=step_time,
+                    constant=resolved.constant,
+                    one_body=resolved.one_body,
+                    two_body=resolved.two_body,
+                )
+            )
+            return qc
         qc, _metadata = _build_grouped_surface_code_controlled_block_circuit_from_integrals(
             ham_name,
             pf_label,
@@ -2252,6 +2347,22 @@ def build_grouped_surface_code_controlled_block_circuit(
         stage_recorder=stage_recorder,
         compiled_circuit_scope=CONTROLLED_PF_TIME_EVOLUTION_BLOCK_SCOPE,
         qpe_power_k=qpe_power_k,
+    )
+
+
+def build_grouped_surface_code_efficient_controlled_step_circuit(
+    ham_name: str,
+    pf_label: PFLabel,
+    *,
+    step_time: float,
+    stage_recorder: _StageMetricsRecorder | None = None,
+) -> Any:
+    return build_grouped_surface_code_step_circuit(
+        ham_name,
+        pf_label,
+        step_time=step_time,
+        stage_recorder=stage_recorder,
+        compiled_circuit_scope=EFFICIENT_CONTROLLED_PF_ONE_STEP_SCOPE,
     )
 
 
@@ -5332,17 +5443,32 @@ def prepare_grouped_surface_code_step_artifact(
 
         with stage_recorder.stage("build_step_circuit") as span:
             if scope_spec.is_controlled:
-                qc, circuit_metadata = (
-                    _build_grouped_surface_code_controlled_block_circuit_from_integrals(
-                        ham_name,
-                        pf_label,
-                        base_step_time=step_t,
-                        qpe_power_k=int(scope_spec.qpe_power_k or 0),
-                        constant=resolved_integrals.constant,
-                        one_body=resolved_integrals.one_body,
-                        two_body=resolved_integrals.two_body,
+                if (
+                    scope_spec.compiled_circuit_scope
+                    == EFFICIENT_CONTROLLED_PF_ONE_STEP_SCOPE
+                ):
+                    qc, circuit_metadata = (
+                        _build_grouped_surface_code_efficient_controlled_step_circuit_from_integrals(
+                            ham_name,
+                            pf_label,
+                            base_step_time=step_t,
+                            constant=resolved_integrals.constant,
+                            one_body=resolved_integrals.one_body,
+                            two_body=resolved_integrals.two_body,
+                        )
                     )
-                )
+                else:
+                    qc, circuit_metadata = (
+                        _build_grouped_surface_code_controlled_block_circuit_from_integrals(
+                            ham_name,
+                            pf_label,
+                            base_step_time=step_t,
+                            qpe_power_k=int(scope_spec.qpe_power_k or 0),
+                            constant=resolved_integrals.constant,
+                            one_body=resolved_integrals.one_body,
+                            two_body=resolved_integrals.two_body,
+                        )
+                    )
             else:
                 qc = _build_grouped_surface_code_step_circuit_from_integrals(
                     ham_name,
@@ -6411,6 +6537,28 @@ def prepare_grouped_surface_code_controlled_block_artifact(
     )
 
 
+def prepare_grouped_surface_code_efficient_controlled_step_artifact(
+    ham_name: str,
+    pf_label: PFLabel,
+    *,
+    target_error: float = TARGET_ERROR,
+    architecture: SurfaceCodeArchitecture | None = None,
+    step_time: float | None = None,
+    rotation_precision: float | None = None,
+    use_original: bool = False,
+) -> SurfaceCodeStepArtifact:
+    return prepare_grouped_surface_code_step_artifact(
+        ham_name,
+        pf_label,
+        target_error=target_error,
+        architecture=architecture,
+        step_time=step_time,
+        rotation_precision=rotation_precision,
+        use_original=use_original,
+        compiled_circuit_scope=EFFICIENT_CONTROLLED_PF_ONE_STEP_SCOPE,
+    )
+
+
 def generate_grouped_surface_code_controlled_block_metrics(
     ham_name: str,
     pf_label: PFLabel,
@@ -6432,6 +6580,28 @@ def generate_grouped_surface_code_controlled_block_metrics(
         use_original=use_original,
         compiled_circuit_scope=CONTROLLED_PF_TIME_EVOLUTION_BLOCK_SCOPE,
         qpe_power_k=qpe_power_k,
+    )
+
+
+def generate_grouped_surface_code_efficient_controlled_step_metrics(
+    ham_name: str,
+    pf_label: PFLabel,
+    *,
+    target_error: float = TARGET_ERROR,
+    architecture: SurfaceCodeArchitecture | None = None,
+    step_time: float | None = None,
+    rotation_precision: float | None = None,
+    use_original: bool = False,
+) -> Dict[str, Any]:
+    return generate_grouped_surface_code_step_metrics(
+        ham_name,
+        pf_label,
+        target_error=target_error,
+        architecture=architecture,
+        step_time=step_time,
+        rotation_precision=rotation_precision,
+        use_original=use_original,
+        compiled_circuit_scope=EFFICIENT_CONTROLLED_PF_ONE_STEP_SCOPE,
     )
 
 
@@ -6471,9 +6641,29 @@ def compile_grouped_hchain_controlled_block(
     )
 
 
+def compile_grouped_hchain_efficient_controlled_step(
+    chain_length: int,
+    pf_label: PFLabel,
+    *,
+    target_error: float = TARGET_ERROR,
+    architecture: SurfaceCodeArchitecture | None = None,
+    use_original: bool = False,
+) -> Dict[str, Any]:
+    return generate_grouped_surface_code_efficient_controlled_step_metrics(
+        grouped_hchain_ham_name(chain_length),
+        pf_label,
+        target_error=target_error,
+        architecture=architecture,
+        use_original=use_original,
+    )
+
+
 _generate_surface_code_step_metrics = generate_grouped_surface_code_step_metrics
 _build_grouped_surface_code_step_circuit = build_grouped_surface_code_step_circuit
 _build_grouped_surface_code_controlled_block_circuit = (
     build_grouped_surface_code_controlled_block_circuit
+)
+_build_grouped_surface_code_efficient_controlled_step_circuit = (
+    build_grouped_surface_code_efficient_controlled_step_circuit
 )
 _surface_code_compile_pipeline_yaml = compile_pipeline_yaml

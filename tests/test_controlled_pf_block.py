@@ -67,6 +67,24 @@ def test_controlled_block_qubit_count_and_basis_decomposition(tmp_path: Path) ->
     assert {inst.operation.name for inst in basis.data} <= set(sc.SURFACE_CODE_QASM_BASIS_GATES)
 
 
+def test_efficient_controlled_step_uses_central_controlled_rz(tmp_path: Path) -> None:
+    ham = sc.grouped_hchain_ham_name(2)
+    step_time = sc.surface_code_step_time(ham, "2nd")
+    efficient = sc.build_grouped_surface_code_efficient_controlled_step_circuit(
+        ham,
+        "2nd",
+        step_time=step_time,
+    )
+    ops = efficient.count_ops()
+    basis = sc._basis_circuit(efficient, runtime_root=tmp_path)
+
+    assert efficient.num_qubits == 5
+    assert int(ops.get("crz", 0)) > 0
+    assert not any("circuit" in inst.operation.name for inst in efficient.data)
+    assert basis.num_qubits == 5
+    assert {inst.operation.name for inst in basis.data} <= set(sc.SURFACE_CODE_QASM_BASIS_GATES)
+
+
 @pytest.mark.parametrize("qpe_power_k", [0, 1])
 def test_controlled_block_unitary_branches_include_identity_phase(qpe_power_k: int) -> None:
     ham = sc.grouped_hchain_ham_name(2)
@@ -108,6 +126,36 @@ def test_controlled_block_unitary_branches_include_identity_phase(qpe_power_k: i
     assert not np.allclose(control1, system_matrix, atol=1.0e-8)
 
 
+def test_efficient_controlled_step_unitary_matches_generic_k0_baseline() -> None:
+    ham = sc.grouped_hchain_ham_name(2)
+    base_step_time = sc.surface_code_step_time(ham, "2nd")
+    constant, one_body, two_body = _h2_integrals()
+    efficient, metadata = (
+        sc._build_grouped_surface_code_efficient_controlled_step_circuit_from_integrals(
+            ham,
+            "2nd",
+            base_step_time=base_step_time,
+            constant=constant,
+            one_body=one_body,
+            two_body=two_body,
+        )
+    )
+    generic, _generic_metadata = sc._build_grouped_surface_code_controlled_block_circuit_from_integrals(
+        ham,
+        "2nd",
+        base_step_time=base_step_time,
+        qpe_power_k=0,
+        constant=constant,
+        one_body=one_body,
+        two_body=two_body,
+    )
+
+    assert metadata["compiled_circuit_scope"] == sc.EFFICIENT_CONTROLLED_PF_ONE_STEP_SCOPE
+    assert metadata["qpe_power_k"] == 0
+    assert metadata["time_multiplier"] == 1
+    assert np.allclose(Operator(efficient).data, Operator(generic).data, atol=1.0e-8)
+
+
 def test_qpe_power_k_uses_scaled_time_not_repeated_steps() -> None:
     ham = sc.grouped_hchain_ham_name(2)
     step_time = sc.surface_code_step_time(ham, "2nd")
@@ -136,6 +184,19 @@ def test_controlled_scope_validation() -> None:
         sc._circuit_scope_spec(sc.CONTROLLED_PF_TIME_EVOLUTION_BLOCK_SCOPE, qpe_power_k=1.5)  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="only valid"):
         sc._circuit_scope_spec(sc.UNCONTROLLED_PF_ONE_STEP_SCOPE, qpe_power_k=0)
+    assert (
+        sc._circuit_scope_spec(sc.EFFICIENT_CONTROLLED_PF_ONE_STEP_SCOPE).qpe_power_k
+        == 0
+    )
+    assert (
+        sc._circuit_scope_spec(
+            sc.EFFICIENT_CONTROLLED_PF_ONE_STEP_SCOPE,
+            qpe_power_k=0,
+        ).time_multiplier
+        == 1
+    )
+    with pytest.raises(ValueError, match="only supports qpe_power_k=0"):
+        sc._circuit_scope_spec(sc.EFFICIENT_CONTROLLED_PF_ONE_STEP_SCOPE, qpe_power_k=1)
     with pytest.raises(ValueError, match="Unknown compiled_circuit_scope"):
         sc._circuit_scope_spec("unknown_scope")
 
@@ -171,8 +232,18 @@ def test_step_artifact_cache_key_separates_scope_and_k() -> None:
         effective_evolution_time=0.25,
         num_control_qubits=1,
     )
+    efficient = sc._step_artifact_cache_key(
+        **base,
+        compiled_circuit_scope=sc.EFFICIENT_CONTROLLED_PF_ONE_STEP_SCOPE,
+        qpe_power_k=0,
+        time_multiplier=1,
+        effective_evolution_time=0.125,
+        num_control_qubits=1,
+    )
 
     assert uncontrolled != controlled_k0
+    assert uncontrolled != efficient
+    assert controlled_k0 != efficient
     assert controlled_k0 != controlled_k1
     assert controlled_k0 == sc._step_artifact_cache_key(
         **base,
@@ -202,6 +273,29 @@ def test_architecture_sweep_controlled_rows_do_not_qpe_scale() -> None:
     assert row["total_runtime_with_topology_unavailable_reason"] == "single_controlled_block_not_qpe_total"
 
 
+def test_architecture_sweep_efficient_controlled_rows_qpe_scale() -> None:
+    row = {
+        "compiled_circuit_scope": sc.EFFICIENT_CONTROLLED_PF_ONE_STEP_SCOPE,
+        "qpe_action_count": 3,
+        "step_magic_state_count": 10,
+        "step_magic_state_depth": 4,
+        "runtime_without_topology": 100,
+        "runtime_without_topology_unavailable_reason": None,
+        "runtime_with_topology": 120,
+        "runtime_with_topology_unavailable_reason": None,
+        "runtime_difference_vs_topology_free": 20,
+        "runtime_difference_vs_topology_free_unavailable_reason": None,
+        "qubit_volume": 500,
+        "qubit_volume_unavailable_reason": None,
+    }
+    sweep._add_qpe_total_resource_fields(row)
+
+    assert row["total_magic_state_count"] == 30
+    assert row["total_magic_state_depth"] == 12
+    assert row["total_runtime_with_topology"] == 360
+    assert row["total_qubit_volume"] == 1500
+
+
 def test_h2_controlled_qret_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     qret_path = Path("build/quration/qret").resolve()
     if not qret_path.exists():
@@ -224,5 +318,34 @@ def test_h2_controlled_qret_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 
     assert metrics["compiled_circuit_scope"] == sc.CONTROLLED_PF_TIME_EVOLUTION_BLOCK_SCOPE
     assert metrics["qpe_power_k"] == 0
+    assert metrics["num_control_qubits"] == 1
+    assert Path(metrics["compile_info_json"]).exists()
+
+
+def test_h2_efficient_controlled_qret_smoke(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    qret_path = Path("build/quration/qret").resolve()
+    if not qret_path.exists():
+        pytest.skip("qret binary is not built")
+
+    monkeypatch.setattr(sc, "SURFACE_CODE_CACHE_DIR", tmp_path / "cache")
+    architecture = sc.SurfaceCodeArchitecture(
+        compile_mode="ftqc_compile",
+        qret_path=qret_path,
+        skip_compile_output=True,
+        compile_info_output_mode="summary",
+    )
+
+    metrics = sc.compile_grouped_hchain_efficient_controlled_step(
+        2,
+        "2nd",
+        architecture=architecture,
+    )
+
+    assert metrics["compiled_circuit_scope"] == sc.EFFICIENT_CONTROLLED_PF_ONE_STEP_SCOPE
+    assert metrics["qpe_power_k"] == 0
+    assert metrics["time_multiplier"] == 1
     assert metrics["num_control_qubits"] == 1
     assert Path(metrics["compile_info_json"]).exists()

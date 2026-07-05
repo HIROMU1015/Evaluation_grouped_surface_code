@@ -20,15 +20,32 @@ H-chain grouped Hamiltonian の product-formula 回路を対象に、quration / 
 
 QPE-scale の出力は、PF 誤差係数から action count を見積もり、1 step の runtime / qubit volume / magic-state 数などを線形に掛けたものです。現時点では full QPE 回路を compile しているわけではありません。
 
-デフォルトの回路 scope は引き続き `uncontrolled_pf_one_step` です。controlled block は明示的に `controlled_pf_time_evolution_block` を選択した場合だけ生成されます。
+デフォルトの回路 scope は引き続き `uncontrolled_pf_one_step` です。controlled 回路は明示的に選択した場合だけ生成されます。
 
-controlled block は、1 つの非負整数 `k` を指定して次を compile します。
+controlled の scope は2種類あります。
+
+- `controlled_pf_time_evolution_block`: system PF circuit 全体を `to_gate().control(1)` で制御化する correctness / qret pipeline baseline
+- `efficient_controlled_pf_one_step`: 各 Pauli rotation の中央の controlled-RZ だけに control qubit を関与させる、QPE total scaling 用の one-step 実装
+
+generic controlled block は、1 つの非負整数 `k` を指定して次を compile します。
 
 ```text
 C-U_PF(t_k),  t_k = 2^k t
 ```
 
 ここで `t` は既存の `surface_code_step_time()` で求める base step time です。`U_PF(t_k)` は product-formula 生成へ時間 `t_k` を渡した 1 つの PF sequence であり、`[U_PF(t)]^(2^k)` の反復回路ではありません。各実行では 1 つの `k` だけを compile します。
+
+efficient controlled one-step は `k=0` の標準評価用 block です。各 Pauli exponential を
+
+```text
+system basis change
+system parity compute
+controlled-RZ
+system parity uncompute
+system basis change back
+```
+
+として合成し、basis change や parity compute/uncompute は system qubit 上だけで実行します。
 
 controlled block に含まれるものは、system logical qubits、最後の index に置く control logical qubit 1 個、controlled product-formula time-evolution です。Hadamard、QPE 位相レジスタ全体、複数の controlled block、inverse QFT、measurement、feed-forward、固有状態準備、追加 work ancilla は含みません。logical qubit 数は常に `system qubits + 1 control qubit` です。
 
@@ -41,7 +58,7 @@ controlled block では Hamiltonian の恒等項を global phase として捨て
 - QPE 反復を明示的に展開した回路の compile
 - step 間の factory stock や測定フィードバックを含む QPE 全体の動的評価
 
-controlled block の compile 結果は single controlled PF time-evolution block の実測であり、QPE 全体の resource estimate ではありません。controlled scope では architecture sweep の QPE linear extrapolation total fields は `N/A` として扱います。
+generic controlled block の compile 結果は single controlled PF time-evolution block の実測であり、QPE 全体の resource estimate ではありません。この scope では architecture sweep の QPE linear extrapolation total fields は `N/A` として扱います。`efficient_controlled_pf_one_step` の行だけは、既存の `qpe_action_count` を掛ける linear total の対象になります。
 
 ## H-chain の物理条件
 
@@ -205,6 +222,26 @@ for key in (
 PY
 ```
 
+QPE total scaling 用の efficient controlled one-step を compile する例です。
+
+```bash
+PYTHONPATH=src python - <<'PY'
+from trotterlib import (
+    SurfaceCodeArchitecture,
+    compile_grouped_hchain_efficient_controlled_step,
+)
+
+metrics = compile_grouped_hchain_efficient_controlled_step(
+    2,
+    "2nd",
+    architecture=SurfaceCodeArchitecture(compile_mode="ftqc_compile"),
+)
+print(metrics["compiled_circuit_scope"])
+print(metrics["num_logical_qubits"])
+print(metrics["step_rz_count"])
+PY
+```
+
 ## Architecture Sweep
 
 標準設定は以下です。
@@ -240,7 +277,18 @@ architecture_cases:
     qpe_power_k: 0
 ```
 
-controlled 行の出力では `compiled_circuit_scope`、`qpe_power_k`、`time_multiplier`、`base_step_time`、`effective_evolution_time`、`num_system_qubits`、`num_control_qubits` が設定され、QPE 全体への線形外挿 field は `N/A` になります。
+標準の QPE total scaling 用に efficient controlled one-step を選択する例です。
+
+```yaml
+defaults:
+  circuit_scope: efficient_controlled_pf_one_step
+
+architecture_cases:
+  - name: efficient_controlled
+    compile_mode: ftqc_compile
+```
+
+generic controlled 行の出力では `compiled_circuit_scope`、`qpe_power_k`、`time_multiplier`、`base_step_time`、`effective_evolution_time`、`num_system_qubits`、`num_control_qubits` が設定され、QPE 全体への線形外挿 field は `N/A` になります。efficient controlled 行では `qpe_scaling_model` が `linear_extrapolation_from_efficient_controlled_pf_one_step` になり、total fields は `qpe_action_count` 倍として出力されます。
 
 ## Profiling
 

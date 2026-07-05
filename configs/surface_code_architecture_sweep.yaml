@@ -11,8 +11,9 @@ qret_path:
 
 defaults:
   # Default remains the existing uncontrolled single PF step. Use
-  # controlled_pf_time_evolution_block with qpe_power_k in a case or local
-  # config to compile one controlled PF block instead.
+  # efficient_controlled_pf_one_step for QPE total scaling with an efficient
+  # k=0 controlled step, or controlled_pf_time_evolution_block with
+  # qpe_power_k for a generic correctness-baseline controlled block.
   circuit_scope: uncontrolled_pf_one_step
   # Use QEC mode by default so physical_qubits, code_distance, and
   # failure_probability are populated. For routing-only sweeps, override this
