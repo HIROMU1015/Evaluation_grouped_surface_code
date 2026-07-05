@@ -2955,7 +2955,9 @@ def test_rz_helper_opt_modes_produce_equivalent_flat_ir(
 
     monkeypatch.setattr(sc, "_run_qret", fake_run_qret)
 
-    def run_mode(mode: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    def run_mode(
+        mode: str,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any], Path, dict[str, Any]]:
         runtime_root = tmp_path / mode
         runtime_root.mkdir()
         ir_path = runtime_root / "step_ir.json"
@@ -2972,11 +2974,30 @@ def test_rz_helper_opt_modes_produce_equivalent_flat_ir(
             rotation_precision=1.0e-5,
             stage_recorder=None,
         )
-        return _flat_inst_list(opt_path), result["inline_summary"]["instruction_stream"]
+        return (
+            _flat_inst_list(opt_path),
+            result["inline_summary"]["instruction_stream"],
+            runtime_root,
+            result,
+        )
 
-    legacy_flat, legacy_stream = run_mode("legacy_full_ir")
-    independent_flat, independent_stream = run_mode("independent_helper")
+    legacy_flat, legacy_stream, legacy_root, legacy_result = run_mode("legacy_full_ir")
+    independent_flat, independent_stream, independent_root, independent_result = (
+        run_mode("independent_helper")
+    )
 
     assert independent_flat == legacy_flat
     for key in stream_keys:
         assert independent_stream[key] == legacy_stream[key]
+    for runtime_root, result in (
+        (legacy_root, legacy_result),
+        (independent_root, independent_result),
+    ):
+        cache_dir = runtime_root / "rz_call_cache"
+        assert not list(cache_dir.glob("rz_helper_*.json"))
+        assert not (cache_dir / "main_before_python_inline.json").exists()
+        assert result["main_pre_inline_retained"] is False
+        assert result["transient_cleanup"]["main_pre_inline_removed"] is True
+    assert (
+        legacy_result["transient_cleanup"]["legacy_helper_output_removed_count"] == 1
+    )

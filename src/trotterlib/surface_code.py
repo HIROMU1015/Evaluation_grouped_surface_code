@@ -694,6 +694,16 @@ def _file_size_bytes(path: str | Path | None) -> int | None:
         return None
 
 
+def _unlink_file_if_exists(path: str | Path | None) -> bool:
+    if path is None:
+        return False
+    try:
+        Path(path).expanduser().unlink()
+        return True
+    except FileNotFoundError:
+        return False
+
+
 def _existing_file_sizes(paths: Mapping[str, str | Path | None]) -> dict[str, int]:
     sizes: dict[str, int] = {}
     for key, path in paths.items():
@@ -4592,36 +4602,49 @@ def _run_rz_call_cached_opt(
     helper_cache_results: list[dict[str, Any]] = []
     circuit_overrides: Mapping[str, Mapping[str, Any]] | None = None
     helper_integration_mode = "legacy_full_ir"
+    removed_legacy_helper_output_count = 0
+    removed_legacy_helper_output_bytes = 0
     if helper_opt_mode == "legacy_full_ir":
         for index, helper in enumerate(helpers):
-            pass_output = cache_dir / f"rz_helper_{index:04d}.json"
-            pass_yaml = cache_dir / f"rz_helper_{index:04d}.yaml"
-            pass_yaml.write_text(
-                opt_pipeline_yaml(
-                    ir_path=current_input,
-                    opt_path=pass_output,
-                    passes=helper_passes,
-                    entry_name=str(helper["function_name"]),
-                ),
-                encoding="utf-8",
-            )
-            qret_metrics = _run_qret(
-                [str(qret_path), "opt", "--pipeline", str(pass_yaml), "--verbose"],
-                runtime_root=runtime_root,
-                rotation_precision=rotation_precision,
-                stage_recorder=stage_recorder,
-                stage_name=f"qret_opt_rz_helper_{index:04d}",
-                stage_details={
-                    "helper_index": int(index),
-                    "helper_function_name": str(helper["function_name"]),
-                    "helper_key": helper.get("key"),
-                    "helper_theta": helper.get("theta"),
-                    "helper_opt_mode": helper_opt_mode,
-                    "input_path": str(current_input),
-                    "output_path": str(pass_output),
-                    "pipeline_path": str(pass_yaml),
-                },
-            )
+            previous_input = current_input
+            pass_output = _atomic_temp_path(cache_dir / "rz_helper_legacy_pass.json")
+            pass_yaml = _atomic_temp_path(cache_dir / "rz_helper_legacy_pass.yaml")
+            try:
+                try:
+                    pass_output.unlink()
+                except FileNotFoundError:
+                    pass
+                pass_yaml.write_text(
+                    opt_pipeline_yaml(
+                        ir_path=current_input,
+                        opt_path=pass_output,
+                        passes=helper_passes,
+                        entry_name=str(helper["function_name"]),
+                    ),
+                    encoding="utf-8",
+                )
+                qret_metrics = _run_qret(
+                    [str(qret_path), "opt", "--pipeline", str(pass_yaml), "--verbose"],
+                    runtime_root=runtime_root,
+                    rotation_precision=rotation_precision,
+                    stage_recorder=stage_recorder,
+                    stage_name=f"qret_opt_rz_helper_{index:04d}",
+                    stage_details={
+                        "helper_index": int(index),
+                        "helper_function_name": str(helper["function_name"]),
+                        "helper_key": helper.get("key"),
+                        "helper_theta": helper.get("theta"),
+                        "helper_opt_mode": helper_opt_mode,
+                        "input_path": str(current_input),
+                        "output_path": str(pass_output),
+                        "pipeline_path": str(pass_yaml),
+                    },
+                )
+            except Exception:
+                _unlink_file_if_exists(pass_output)
+                raise
+            finally:
+                _unlink_file_if_exists(pass_yaml)
             helper_cache_results.append(
                 {
                     "helper_index": int(index),
@@ -4630,6 +4653,11 @@ def _run_rz_call_cached_opt(
                     "qret_metrics": qret_metrics,
                 }
             )
+            if previous_input != ir_path:
+                previous_size = _file_size_bytes(previous_input)
+                if _unlink_file_if_exists(previous_input):
+                    removed_legacy_helper_output_count += 1
+                    removed_legacy_helper_output_bytes += int(previous_size or 0)
             current_input = pass_output
     else:
         helper_integration_mode = "python_inline_overrides"
@@ -4725,13 +4753,20 @@ def _run_rz_call_cached_opt(
             "helper_integration_mode": helper_integration_mode,
         },
     )
+    if helper_opt_mode == "legacy_full_ir" and current_input != ir_path:
+        current_input_size = _file_size_bytes(current_input)
+        if _unlink_file_if_exists(current_input):
+            removed_legacy_helper_output_count += 1
+            removed_legacy_helper_output_bytes += int(current_input_size or 0)
+    _unlink_file_if_exists(main_yaml)
+    main_pre_inline_size_bytes = _file_size_bytes(main_pre_inline)
     with (
         stage_recorder.stage(
             "python_streaming_inline",
             input_path=str(main_pre_inline),
             output_path=str(opt_path),
             helper_override_count=len(circuit_overrides or {}),
-            input_size_bytes=_file_size_bytes(main_pre_inline),
+            input_size_bytes=main_pre_inline_size_bytes,
         )
         if stage_recorder is not None
         else _null_stage()
@@ -4743,10 +4778,12 @@ def _run_rz_call_cached_opt(
             circuit_overrides=circuit_overrides,
             incremental_input=bool(circuit_overrides),
         )
+        removed_main_pre_inline = _unlink_file_if_exists(main_pre_inline)
         span.add_result(
             helper_override_count=len(circuit_overrides or {}),
             input_mode=inline_summary.get("input_mode"),
-            input_size_bytes=_file_size_bytes(main_pre_inline),
+            input_size_bytes=main_pre_inline_size_bytes,
+            input_removed_after_inline=removed_main_pre_inline,
             output_size_bytes=_file_size_bytes(opt_path),
             emitted_instruction_count=inline_summary.get("emitted_instruction_count"),
             scheduled_instruction_count=inline_summary.get(
@@ -4765,6 +4802,17 @@ def _run_rz_call_cached_opt(
         inline_summary_path = runtime_root / "python_inline_summary.json"
         _atomic_write_json(inline_summary_path, inline_summary)
         span.add_result(output_size_bytes=_file_size_bytes(inline_summary_path))
+    with (
+        stage_recorder.stage("cleanup_rz_call_transient_files")
+        if stage_recorder is not None
+        else _null_stage()
+    ) as span:
+        span.add_result(
+            legacy_helper_output_removed_count=removed_legacy_helper_output_count,
+            legacy_helper_output_removed_bytes=removed_legacy_helper_output_bytes,
+            main_pre_inline_removed=removed_main_pre_inline,
+            main_pre_inline_size_bytes=main_pre_inline_size_bytes,
+        )
     return {
         "mode": "rz_call_cached_streaming_python_inline",
         "helper_opt_mode": helper_opt_mode,
@@ -4790,6 +4838,17 @@ def _run_rz_call_cached_opt(
             "helpers": helper_cache_results,
         },
         "main_pre_inline_path": str(main_pre_inline),
+        "main_pre_inline_retained": False,
+        "transient_cleanup": {
+            "legacy_helper_output_removed_count": (
+                removed_legacy_helper_output_count
+            ),
+            "legacy_helper_output_removed_bytes": (
+                removed_legacy_helper_output_bytes
+            ),
+            "main_pre_inline_removed": removed_main_pre_inline,
+            "main_pre_inline_size_bytes": main_pre_inline_size_bytes,
+        },
         "inline_summary": inline_summary,
     }
 
