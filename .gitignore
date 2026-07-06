@@ -45,3 +45,6 @@ Quration_QS18*.pdf
 third_party/quration/cmake_test_discovery_*.json
 third_party/quration/output_*.asm
 third_party/quration/pipeline_state_*.json
+
+AGENT_*.md
+artifacts/surface_code_architecture_sweep_h*/
