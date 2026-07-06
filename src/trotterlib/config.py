@@ -79,6 +79,7 @@ BETA = 1.2
 P_DIR: dict[PFLabel, int] = {
     "2nd": 2,
     "4th(new_2)": 4,
+    "8th(Morales)": 8,
 }
 
 _PF_LABEL_ALIASES = {
@@ -87,6 +88,9 @@ _PF_LABEL_ALIASES = {
     "4th(new_2)": "4th(new_2)",
     "4th_new_2": "4th(new_2)",
     "4th-new-2": "4th(new_2)",
+    "8th(morales)": "8th(Morales)",
+    "8th_morales": "8th(Morales)",
+    "8th-morales": "8th(Morales)",
 }
 
 
@@ -147,15 +151,15 @@ DECOMPO_NUM: Dict[str, Dict[PFLabel, int]] = {
 }
 
 PF_RZ_LAYER: Dict[str, Dict[PFLabel, int]] = {
-    "H2": {"2nd": 9, "4th(new_2)": 29},
-    "H3": {"2nd": 39, "4th(new_2)": 163},
-    "H4": {"2nd": 99, "4th(new_2)": 459},
-    "H5": {"2nd": 341, "4th(new_2)": 1657},
-    "H6": {"2nd": 568, "4th(new_2)": 2780},
-    "H7": {"2nd": 1064, "4th(new_2)": 5252},
-    "H8": {"2nd": 1220, "4th(new_2)": 6016},
-    "H9": {"2nd": 2442, "4th(new_2)": 12118},
-    "H10": {"2nd": 3172, "4th(new_2)": 15756},
+    "H2": {"2nd": 9, "4th(new_2)": 29, "8th(Morales)": 89},
+    "H3": {"2nd": 39, "4th(new_2)": 163, "8th(Morales)": 35765},
+    "H4": {"2nd": 99, "4th(new_2)": 459, "8th(Morales)": 68069},
+    "H5": {"2nd": 341, "4th(new_2)": 1657, "8th(Morales)": 109573},
+    "H6": {"2nd": 568, "4th(new_2)": 2780, "8th(Morales)": 161394},
+    "H7": {"2nd": 1064, "4th(new_2)": 5252, "8th(Morales)": 225780},
+    "H8": {"2nd": 1220, "4th(new_2)": 6016, "8th(Morales)": 297117},
+    "H9": {"2nd": 2442, "4th(new_2)": 12118, "8th(Morales)": 381054},
+    "H10": {"2nd": 3172, "4th(new_2)": 15756, "8th(Morales)": 623104},
     "H11": {"2nd": 4511, "4th(new_2)": 22447},
     "H12": {"2nd": 4865, "4th(new_2)": 24205},
     "H13": {"2nd": 7476, "4th(new_2)": 37248},
