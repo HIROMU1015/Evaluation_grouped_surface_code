@@ -8,10 +8,14 @@
 #include <boost/program_options.hpp>
 #include <fmt/format.h>
 
+#include <cstdlib>
 #include <iostream>
+#include <string>
+#include <string_view>
 
 #include "qret/base/json.h"
 #include "qret/base/log.h"
+#include "qret/base/rss_profile.h"
 #include "qret/cmd/common.h"
 #include "qret/frontend/builder.h"
 #include "qret/frontend/openqasm2.h"
@@ -23,15 +27,73 @@
 #include "qret/parser/openqasm3.h"
 
 namespace qret::cmd {
+namespace {
+bool EnvFlagEnabled(const char* name) {
+    const auto* raw = std::getenv(name);
+    if (raw == nullptr) {
+        return false;
+    }
+    const auto value = std::string_view(raw);
+    return !(value.empty() || value == "0" || value == "false" || value == "False");
+}
+
+bool ReleaseAstBeforeSaveEnabled() {
+    return EnvFlagEnabled("QRET_PARSE_RELEASE_AST_BEFORE_SAVE");
+}
+
+std::size_t CountFunctions(const qret::ir::Module& module) {
+    auto count = std::size_t{0};
+    for ([[maybe_unused]] const auto& func : module) {
+        ++count;
+    }
+    return count;
+}
+
+qret::Json ParseProfileExtra(
+        const std::string& input,
+        const std::string& output,
+        std::size_t statement_count = 0,
+        std::size_t include_count = 0,
+        std::size_t function_count = 0
+) {
+    auto extra = qret::Json::object();
+    extra["input"] = input;
+    extra["output"] = output;
+    extra["statement_count"] = statement_count;
+    extra["include_count"] = include_count;
+    extra["function_count"] = function_count;
+    extra["release_ast_before_save"] = ReleaseAstBeforeSaveEnabled();
+    return extra;
+}
+}  // namespace
+
 ReturnStatus ParseOpenQASM2(const std::string& input, const std::string& output) {
+    qret::rss_profile::Mark("parse_entry", ParseProfileExtra(input, output));
+
     LOG_INFO("Construct OpenQASM2 ast.");
     auto ast = qret::openqasm2::ParseOpenQASM2File(input);
+    qret::rss_profile::Mark(
+            "parse_after_ast_construct",
+            ParseProfileExtra(input, output, ast.sts.size(), ast.incls.size())
+    );
 
     LOG_INFO("Build IR from OpenQASM2 ast.");
     qret::ir::IRContext context;
     auto* module = qret::ir::Module::Create("OpenQASM2", context);
     auto builder = qret::frontend::CircuitBuilder(module);
     qret::frontend::BuildCircuitFromAST(ast, builder);
+    qret::rss_profile::Mark(
+            "parse_after_build_ir",
+            ParseProfileExtra(input, output, ast.sts.size(), ast.incls.size(), CountFunctions(*module))
+    );
+
+    if (ReleaseAstBeforeSaveEnabled()) {
+        ast = qret::openqasm2::Program{};
+        qret::rss_profile::Mark(
+                "parse_after_ast_release",
+                ParseProfileExtra(input, output, ast.sts.size(), ast.incls.size(), CountFunctions(*module))
+        );
+    }
 
     LOG_INFO("Save IR.");
     auto ofs = std::ofstream(output);
@@ -41,21 +103,51 @@ ReturnStatus ParseOpenQASM2(const std::string& input, const std::string& output)
     }
 
     auto j = qret::Json();
+    qret::rss_profile::Mark(
+            "parse_before_json_dom",
+            ParseProfileExtra(input, output, ast.sts.size(), ast.incls.size(), CountFunctions(*module))
+    );
     j = *module;
+    qret::rss_profile::Mark(
+            "parse_after_json_dom",
+            ParseProfileExtra(input, output, ast.sts.size(), ast.incls.size(), CountFunctions(*module))
+    );
     ofs << j << std::endl;
     ofs.close();
+    qret::rss_profile::Mark(
+            "parse_after_stream_write",
+            ParseProfileExtra(input, output, ast.sts.size(), ast.incls.size(), CountFunctions(*module))
+    );
 
     return ReturnStatus::Success;
 }
 ReturnStatus ParseOpenQASM3(const std::string& input, const std::string& output) {
+    qret::rss_profile::Mark("parse_entry", ParseProfileExtra(input, output));
+
     LOG_INFO("Construct OpenQASM3 ast.");
     auto ast = qret::openqasm3::ParseOpenQASM3File(input);
+    qret::rss_profile::Mark(
+            "parse_after_ast_construct",
+            ParseProfileExtra(input, output, ast.sts.size(), ast.incls.size())
+    );
 
     LOG_INFO("Build IR from OpenQASM3 ast.");
     qret::ir::IRContext context;
     auto* module = qret::ir::Module::Create("OpenQASM3", context);
     auto builder = qret::frontend::CircuitBuilder(module);
     qret::frontend::BuildCircuitFromAST(ast, builder);
+    qret::rss_profile::Mark(
+            "parse_after_build_ir",
+            ParseProfileExtra(input, output, ast.sts.size(), ast.incls.size(), CountFunctions(*module))
+    );
+
+    if (ReleaseAstBeforeSaveEnabled()) {
+        ast = qret::openqasm2::Program{};
+        qret::rss_profile::Mark(
+                "parse_after_ast_release",
+                ParseProfileExtra(input, output, ast.sts.size(), ast.incls.size(), CountFunctions(*module))
+        );
+    }
 
     LOG_INFO("Save IR.");
     auto ofs = std::ofstream(output);
@@ -65,9 +157,21 @@ ReturnStatus ParseOpenQASM3(const std::string& input, const std::string& output)
     }
 
     auto j = qret::Json();
+    qret::rss_profile::Mark(
+            "parse_before_json_dom",
+            ParseProfileExtra(input, output, ast.sts.size(), ast.incls.size(), CountFunctions(*module))
+    );
     j = *module;
+    qret::rss_profile::Mark(
+            "parse_after_json_dom",
+            ParseProfileExtra(input, output, ast.sts.size(), ast.incls.size(), CountFunctions(*module))
+    );
     ofs << j << std::endl;
     ofs.close();
+    qret::rss_profile::Mark(
+            "parse_after_stream_write",
+            ParseProfileExtra(input, output, ast.sts.size(), ast.incls.size(), CountFunctions(*module))
+    );
 
     return ReturnStatus::Success;
 }
