@@ -1,0 +1,231 @@
+{
+  "cnot_count": 44320,
+  "cnot_distance_stats": {
+    "count": 44320,
+    "max": 17,
+    "mean": 7.885018050541516,
+    "median": 7.0,
+    "min": 2,
+    "sum": 349464
+  },
+  "instruction_type_counts": {
+    "ALLOCATE": 11,
+    "ALLOCATE_MAGIC_FACTORY": 4,
+    "CNOT": 44320,
+    "DEALLOCATE": 11,
+    "HADAMARD": 569105,
+    "LATTICE_SURGERY_MAGIC": 475906,
+    "PROBABILITY_HINT": 475906,
+    "TWIST": 1086926
+  },
+  "logical_bbox": {
+    "x_max": 8,
+    "x_min": 0,
+    "y_max": 9,
+    "y_min": 0
+  },
+  "logical_bbox_area": 90,
+  "logical_qubit_coords": [
+    {
+      "coord": [
+        8,
+        9,
+        0
+      ],
+      "logical_qubit": 0
+    },
+    {
+      "coord": [
+        8,
+        5,
+        0
+      ],
+      "logical_qubit": 1
+    },
+    {
+      "coord": [
+        6,
+        8,
+        0
+      ],
+      "logical_qubit": 2
+    },
+    {
+      "coord": [
+        6,
+        4,
+        0
+      ],
+      "logical_qubit": 3
+    },
+    {
+      "coord": [
+        6,
+        2,
+        0
+      ],
+      "logical_qubit": 4
+    },
+    {
+      "coord": [
+        8,
+        7,
+        0
+      ],
+      "logical_qubit": 5
+    },
+    {
+      "coord": [
+        6,
+        0,
+        0
+      ],
+      "logical_qubit": 6
+    },
+    {
+      "coord": [
+        4,
+        8,
+        0
+      ],
+      "logical_qubit": 7
+    },
+    {
+      "coord": [
+        2,
+        6,
+        0
+      ],
+      "logical_qubit": 8
+    },
+    {
+      "coord": [
+        0,
+        2,
+        0
+      ],
+      "logical_qubit": 9
+    },
+    {
+      "coord": [
+        0,
+        0,
+        0
+      ],
+      "logical_qubit": 10
+    }
+  ],
+  "magic_factory_coords": [
+    {
+      "coord": [
+        9,
+        0,
+        0
+      ],
+      "symbol": 0
+    },
+    {
+      "coord": [
+        9,
+        1,
+        0
+      ],
+      "symbol": 1
+    },
+    {
+      "coord": [
+        9,
+        2,
+        0
+      ],
+      "symbol": 2
+    },
+    {
+      "coord": [
+        9,
+        3,
+        0
+      ],
+      "symbol": 3
+    }
+  ],
+  "magic_operation_count_by_factory": {
+    "0": 475906
+  },
+  "magic_operation_count_by_logical_qubit": {
+    "0": 161304,
+    "1": 109760,
+    "2": 70656,
+    "3": 35972,
+    "4": 11420,
+    "5": 50792,
+    "6": 24480,
+    "7": 9744,
+    "8": 1152,
+    "9": 576,
+    "10": 50
+  },
+  "magic_operation_distance_stats": {
+    "count": 475906,
+    "max": 13,
+    "mean": 8.375456497711733,
+    "median": 10.0,
+    "min": 3,
+    "sum": 3985930
+  },
+  "nearest_magic_distance_by_logical": [
+    {
+      "distance": 7,
+      "logical_qubit": 0
+    },
+    {
+      "distance": 3,
+      "logical_qubit": 1
+    },
+    {
+      "distance": 8,
+      "logical_qubit": 2
+    },
+    {
+      "distance": 4,
+      "logical_qubit": 3
+    },
+    {
+      "distance": 3,
+      "logical_qubit": 4
+    },
+    {
+      "distance": 5,
+      "logical_qubit": 5
+    },
+    {
+      "distance": 3,
+      "logical_qubit": 6
+    },
+    {
+      "distance": 10,
+      "logical_qubit": 7
+    },
+    {
+      "distance": 10,
+      "logical_qubit": 8
+    },
+    {
+      "distance": 9,
+      "logical_qubit": 9
+    },
+    {
+      "distance": 9,
+      "logical_qubit": 10
+    }
+  ],
+  "nearest_magic_distance_stats": {
+    "count": 11,
+    "max": 10,
+    "mean": 6.454545454545454,
+    "median": 7.0,
+    "min": 3,
+    "sum": 71
+  },
+  "program_instruction_count": 2652189
+}

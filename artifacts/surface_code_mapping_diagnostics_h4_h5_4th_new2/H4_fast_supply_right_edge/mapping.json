@@ -1,0 +1,178 @@
+{
+  "format": "quration_sc_ls_fixed_v0_mapping",
+  "schema_version": "0.1",
+  "ham_name": "H4_sto-3g_singlet_distance_100_charge_0_grouping",
+  "molecule": "H4",
+  "pf_label": "4th(new_2)",
+  "num_logical_qubits": 9,
+  "optimized_ir_hash": "6bca956b993ce88c16105a9cca48e0bb8b48bef7446d3cd872aa30a622c1cf0b",
+  "compile_mode": "ftqc_compile_topology_qec",
+  "topology_path": "/home/abe/Project/Evaluation_grouped_surface_code/configs/topologies/tutorial_factory_right_edge.yaml",
+  "topology_hash": "14512f0d1ea4e28c09596b988d3fd8ee1bd076b52452878141b2992772720514",
+  "machine_type": "Dim2",
+  "magic_generation_period": 8,
+  "maximum_magic_state_stock": 10000,
+  "entanglement_generation_period": 100,
+  "maximum_entangled_state_stock": 10,
+  "reaction_time": 1,
+  "logical_qubit_mapping": [
+    {
+      "logical_qubit": 0,
+      "dir": 0,
+      "coord": [
+        8,
+        9,
+        0
+      ],
+      "beat": 0,
+      "z": 0,
+      "raw": "ALLOCATE q0 (8,9,0) 0"
+    },
+    {
+      "logical_qubit": 1,
+      "dir": 0,
+      "coord": [
+        8,
+        5,
+        0
+      ],
+      "beat": 0,
+      "z": 0,
+      "raw": "ALLOCATE q1 (8,5,0) 0"
+    },
+    {
+      "logical_qubit": 2,
+      "dir": 0,
+      "coord": [
+        6,
+        8,
+        0
+      ],
+      "beat": 0,
+      "z": 0,
+      "raw": "ALLOCATE q2 (6,8,0) 0"
+    },
+    {
+      "logical_qubit": 3,
+      "dir": 0,
+      "coord": [
+        6,
+        4,
+        0
+      ],
+      "beat": 0,
+      "z": 0,
+      "raw": "ALLOCATE q3 (6,4,0) 0"
+    },
+    {
+      "logical_qubit": 4,
+      "dir": 0,
+      "coord": [
+        6,
+        2,
+        0
+      ],
+      "beat": 0,
+      "z": 0,
+      "raw": "ALLOCATE q4 (6,2,0) 0"
+    },
+    {
+      "logical_qubit": 5,
+      "dir": 0,
+      "coord": [
+        8,
+        7,
+        0
+      ],
+      "beat": 0,
+      "z": 0,
+      "raw": "ALLOCATE q5 (8,7,0) 0"
+    },
+    {
+      "logical_qubit": 6,
+      "dir": 0,
+      "coord": [
+        6,
+        0,
+        0
+      ],
+      "beat": 0,
+      "z": 0,
+      "raw": "ALLOCATE q6 (6,0,0) 0"
+    },
+    {
+      "logical_qubit": 7,
+      "dir": 0,
+      "coord": [
+        4,
+        8,
+        0
+      ],
+      "beat": 0,
+      "z": 0,
+      "raw": "ALLOCATE q7 (4,8,0) 0"
+    },
+    {
+      "logical_qubit": 8,
+      "dir": 0,
+      "coord": [
+        2,
+        6,
+        0
+      ],
+      "beat": 0,
+      "z": 0,
+      "raw": "ALLOCATE q8 (2,6,0) 0"
+    }
+  ],
+  "magic_factory_mapping": [
+    {
+      "symbol": 0,
+      "coord": [
+        9,
+        0,
+        0
+      ],
+      "beat": 0,
+      "z": 0,
+      "raw": "ALLOCATE_MAGIC_FACTORY m0 (9,0,0)"
+    },
+    {
+      "symbol": 1,
+      "coord": [
+        9,
+        1,
+        0
+      ],
+      "beat": 0,
+      "z": 0,
+      "raw": "ALLOCATE_MAGIC_FACTORY m1 (9,1,0)"
+    },
+    {
+      "symbol": 2,
+      "coord": [
+        9,
+        2,
+        0
+      ],
+      "beat": 0,
+      "z": 0,
+      "raw": "ALLOCATE_MAGIC_FACTORY m2 (9,2,0)"
+    },
+    {
+      "symbol": 3,
+      "coord": [
+        9,
+        3,
+        0
+      ],
+      "beat": 0,
+      "z": 0,
+      "raw": "ALLOCATE_MAGIC_FACTORY m3 (9,3,0)"
+    }
+  ],
+  "entanglement_factory_mapping": [],
+  "logical_qubit_mapping_count": 9,
+  "magic_factory_mapping_count": 4,
+  "entanglement_factory_mapping_count": 0
+}
