@@ -1,0 +1,17 @@
+START: 2026-07-07T21:03:51+09:00
+PWD: /home/abe/Project/Evaluation_grouped_surface_code
+HEAD: 57be23a03c30096b4b4a591d157c21d9e431e9aa
+STATUS:
+?? artifacts/surface_code_magic_supply_cheap_h2_h10_center/
+?? configs/surface_code_magic_supply_cheap_h2_h10_center.yaml
+CONFIG:
+-rw-rw-r-- 1 abe abe 2009 Jul  7 21:03 configs/surface_code_magic_supply_cheap_h2_h10_center.yaml
+TOPOLOGY:
+-rw-rw-r-- 1 abe abe 225 Jul  7 03:16 configs/topologies/tutorial_factory_center_block.yaml
+QRET:
+-rwxr-xr-x 1 abe abe 16672 Jul  5 18:24 build/quration/qret
+jsonl: /home/abe/Project/Evaluation_grouped_surface_code/artifacts/surface_code_magic_supply_cheap_h2_h10_center/results.jsonl
+csv: /home/abe/Project/Evaluation_grouped_surface_code/artifacts/surface_code_magic_supply_cheap_h2_h10_center/results.csv
+markdown: /home/abe/Project/Evaluation_grouped_surface_code/artifacts/surface_code_magic_supply_cheap_h2_h10_center/results.md
+cases: success=108 failed=0 skipped=0
+END: 2026-07-07T22:06:02+09:00

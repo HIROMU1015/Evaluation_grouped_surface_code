@@ -153,3 +153,69 @@ center vs left:
 - `artifacts/surface_code_mapping_diagnostics_h4_h5_4th_new2/summary.md`
 - `artifacts/surface_code_mapping_diagnostics_h4_h5_4th_new2/diagnostics.csv`
 - `artifacts/surface_code_mapping_diagnostics_h4_h5_4th_new2/diagnostics.jsonl`
+
+## 2026-07-07: H2-H10 cheap magic supply diagnostic
+
+### Purpose
+
+Evaluate whether surface-code QPE-scale resource estimates are still limited by
+magic-state supply when the topology is fixed to `factory_center_block` and the
+magic generation period is reduced below the previous fast-supply setting.
+
+### Conditions
+
+- Molecules: H2-H10.
+- PF labels: `2nd` and `4th(new_2)`.
+- Circuit scope: `efficient_controlled_pf_one_step`.
+- Topology: fixed `factory_center_block`.
+- Magic regimes: period 15, 8, 4, 2, 1 with stock 10000, plus period 1 with stock 1000000.
+- Rows: 108 expected, 108 success, 0 failed, 0 skipped.
+
+This is not a full QPE compile. QPE-scale totals are linear extrapolations from
+one compiled/profiled efficient controlled PF step.
+
+### Observations
+
+- Magic count and magic depth are invariant across all magic regimes for each
+  molecule/PF group.
+- `cheap_p1_center` and `cheap_p1_large_stock_center` are identical in runtime
+  and qubit volume for all 18 molecule/PF groups.
+- Runtime improvement saturates strongly with H-chain size. From `fast_p8_center`
+  to `cheap_p1_center`, H10 improves by 0.0176% for 2nd PF and 0.0034% for
+  4th(new_2).
+- Weighted across H2-H10, `p15 -> p1` improves runtime by 0.0753% for 2nd PF
+  and 0.0169% for 4th(new_2).
+- Exposed spatial fields (`chip_cells`, `physical_qubits`, `code_distance`) do
+  not vary across regimes within a molecule/PF group.
+
+### Interpretation
+
+- The cheap magic assumptions affect scheduling/resource estimates, not logical
+  magic demand.
+- For larger H-chains under this fixed topology and factory-count setup, magic
+  supply does not appear to be the dominant runtime bottleneck.
+- Qubit-volume changes larger than runtime changes are not explained by the
+  exposed spatial fields and likely require compile-info or mapping diagnostics
+  to separate internal occupancy from scheduling effects.
+
+### Unresolved
+
+- Why qret qubit-volume percentages can exceed runtime percentages when exposed
+  spatial fields are fixed.
+- Whether left/right topology variants respond differently to cheap magic.
+- How these diagnostics would change under a real STAR architecture model.
+
+### Next Work
+
+- If needed, run mapping/compile-info diagnostics for small and large H cases
+  under p8 and p1.
+- Repeat the same magic supply diagnostic for other topology placements only if
+  topology/supply interaction becomes the focus.
+
+### References
+
+- `docs/benchmarks/surface_code_magic_supply_cheap_h2_h10_center.md`
+- `artifacts/surface_code_magic_supply_cheap_h2_h10_center/results.csv`
+- `artifacts/surface_code_magic_supply_cheap_h2_h10_center/results.jsonl`
+- `artifacts/surface_code_magic_supply_cheap_h2_h10_center/results.md`
+- `artifacts/surface_code_magic_supply_cheap_h2_h10_center/logs/run.log`

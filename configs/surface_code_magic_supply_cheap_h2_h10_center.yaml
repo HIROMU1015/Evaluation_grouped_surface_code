@@ -1,0 +1,95 @@
+targets:
+  molecules:
+    - H2
+    - H3
+    - H4
+    - H5
+    - H6
+    - H7
+    - H8
+    - H9
+    - H10
+  pf_labels:
+    - 2nd
+    - 4th(new_2)
+
+target_error: 0.00015936001019904
+rotation_precision:
+qret_path:
+
+defaults:
+  circuit_scope: efficient_controlled_pf_one_step
+  compile_mode: ftqc_compile_topology_qec
+  topology: factory_center_block
+  machine_type: Dim2
+  magic_generation_period: 15
+  maximum_magic_state_stock:
+    policy: fixed
+    value: 10000
+  entanglement_generation_period: 100
+  maximum_entangled_state_stock: 10
+  reaction_time: 1
+  skip_compile_output: true
+
+qec:
+  physical_error_rate: 0.001
+  drop_rate: 0.1
+  code_cycle_time_sec: 0.000001
+  allowed_failure_prob: 0.01
+
+topologies:
+  factory_center_block:
+    enabled: true
+    path: configs/topologies/tutorial_factory_center_block.yaml
+
+architecture_cases:
+  - name: normal_p15_center
+    topology: factory_center_block
+    magic_generation_period: 15
+    maximum_magic_state_stock:
+      policy: fixed
+      value: 10000
+
+  - name: fast_p8_center
+    topology: factory_center_block
+    magic_generation_period: 8
+    maximum_magic_state_stock:
+      policy: fixed
+      value: 10000
+
+  - name: cheap_p4_center
+    topology: factory_center_block
+    magic_generation_period: 4
+    maximum_magic_state_stock:
+      policy: fixed
+      value: 10000
+
+  - name: cheap_p2_center
+    topology: factory_center_block
+    magic_generation_period: 2
+    maximum_magic_state_stock:
+      policy: fixed
+      value: 10000
+
+  - name: cheap_p1_center
+    topology: factory_center_block
+    magic_generation_period: 1
+    maximum_magic_state_stock:
+      policy: fixed
+      value: 10000
+
+  - name: cheap_p1_large_stock_center
+    topology: factory_center_block
+    magic_generation_period: 1
+    maximum_magic_state_stock:
+      policy: fixed
+      value: 1000000
+
+output:
+  directory: artifacts/surface_code_magic_supply_cheap_h2_h10_center
+  jsonl: results.jsonl
+  csv: results.csv
+  markdown: results.md
+
+cache:
+  reuse_compile_results: true
