@@ -1,5 +1,7 @@
 # Surface-code architecture sensitivity note
 
+> このノートは初期の統合メモである。今後の主な追記は `architecture_research_log.md` に日付付きエントリとして行う。
+
 ## 1. このノートの目的
 
 このノートは、`Evaluation_grouped_surface_code` で現在調べている研究方針、既存実験結果、解釈、未解決点、次の作業方針をまとめるための引き継ぎメモである。
