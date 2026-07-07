@@ -1,0 +1,19 @@
+START 2026-07-07T03:17:23+09:00
+PWD /home/abe/Project/Evaluation_grouped_surface_code
+HEAD a4910defcfb1cc7e8c2cd2cd309bbf63c46cb919
+STATUS
+?? artifacts/surface_code_topology_sweep_h2_h11_baseline_fast/
+?? configs/surface_code_topology_sweep_h2_h11_baseline_fast.yaml
+?? configs/topologies/
+CONFIG configs/surface_code_topology_sweep_h2_h11_baseline_fast.yaml
+TOPOLOGY FILES
+-rw-rw-r-- 1 abe abe 225 Jul  7 03:16 configs/topologies/tutorial_factory_center_block.yaml
+-rw-rw-r-- 1 abe abe 225 Jul  7 03:16 configs/topologies/tutorial_factory_left_edge.yaml
+-rw-rw-r-- 1 abe abe 225 Jul  7 03:16 configs/topologies/tutorial_factory_right_edge.yaml
+QRET
+RUN topology sweep
+jsonl: /home/abe/Project/Evaluation_grouped_surface_code/artifacts/surface_code_topology_sweep_h2_h11_baseline_fast/results.jsonl
+csv: /home/abe/Project/Evaluation_grouped_surface_code/artifacts/surface_code_topology_sweep_h2_h11_baseline_fast/results.csv
+markdown: /home/abe/Project/Evaluation_grouped_surface_code/artifacts/surface_code_topology_sweep_h2_h11_baseline_fast/results.md
+cases: success=120 failed=0 skipped=0
+END 2026-07-07T05:49:40+09:00
