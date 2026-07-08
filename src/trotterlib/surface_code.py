@@ -5861,6 +5861,61 @@ def _coord_list(value: Any) -> list[int] | None:
     return [int(item) for item in value]
 
 
+def _int_list(value: Any) -> list[int]:
+    if not isinstance(value, list):
+        return []
+    result: list[int] = []
+    for item in value:
+        try:
+            result.append(int(item))
+        except (TypeError, ValueError):
+            continue
+    return result
+
+
+def _coord_key(coord: Sequence[int] | None) -> str | None:
+    if coord is None:
+        return None
+    return ",".join(str(int(item)) for item in coord)
+
+
+def _manhattan_distance(a: Sequence[int] | None, b: Sequence[int] | None) -> int | None:
+    if a is None or b is None:
+        return None
+    if len(a) < 2 or len(b) < 2:
+        return None
+    return abs(int(a[0]) - int(b[0])) + abs(int(a[1]) - int(b[1]))
+
+
+def _numeric_stats(values: Sequence[int]) -> dict[str, Any]:
+    if not values:
+        return {
+            "count": 0,
+            "min": None,
+            "max": None,
+            "sum": 0,
+            "mean": None,
+            "median": None,
+        }
+    sorted_values = sorted(int(value) for value in values)
+    count = len(sorted_values)
+    midpoint = count // 2
+    median = (
+        float(sorted_values[midpoint])
+        if count % 2 == 1
+        else 0.5 * (sorted_values[midpoint - 1] + sorted_values[midpoint])
+    )
+    total = int(sum(sorted_values))
+    return {
+        "count": int(count),
+        "min": int(sorted_values[0]),
+        "max": int(sorted_values[-1]),
+        "sum": total,
+        "mean": float(total / count),
+        "median": median,
+    }
+
+
 def _extract_mapping_result(
     *,
     mapping_state_path: Path,
@@ -5874,10 +5929,12 @@ def _extract_mapping_result(
     logical_qubits: list[dict[str, Any]] = []
     magic_factories: list[dict[str, Any]] = []
     entanglement_factories: list[dict[str, Any]] = []
+    instruction_type_counts: dict[str, int] = {}
     for inst in state.get("program", []):
         if not isinstance(inst, Mapping):
             continue
         inst_type = str(inst.get("type"))
+        instruction_type_counts[inst_type] = instruction_type_counts.get(inst_type, 0) + 1
         coord = _coord_list(inst.get("dest"))
         metadata = inst.get("metadata") if isinstance(inst.get("metadata"), Mapping) else {}
         entry = {
@@ -5914,10 +5971,108 @@ def _extract_mapping_result(
     magic_factories.sort(key=lambda item: int(item["symbol"]))
     entanglement_factories.sort(key=lambda item: int(item["symbol"]))
 
+    logical_coord_by_qubit = {
+        int(item["logical_qubit"]): item.get("coord")
+        for item in logical_qubits
+        if item.get("coord") is not None
+    }
+    magic_coord_by_symbol = {
+        int(item["symbol"]): item.get("coord")
+        for item in magic_factories
+        if item.get("coord") is not None
+    }
+    magic_count_by_factory: dict[str, int] = {}
+    magic_count_by_factory_coordinate: dict[str, int] = {}
+    magic_count_by_logical_qubit: dict[str, int] = {}
+    magic_operation_distances: list[int] = []
+    cnot_distances: list[int] = []
+    for inst in state.get("program", []):
+        if not isinstance(inst, Mapping):
+            continue
+        inst_type = str(inst.get("type"))
+        if inst_type == "LATTICE_SURGERY_MAGIC":
+            symbol = _single_int(inst.get("mtarget"))
+            qtargets = _int_list(inst.get("qtarget"))
+            if symbol is not None:
+                symbol_key = str(symbol)
+                magic_count_by_factory[symbol_key] = (
+                    magic_count_by_factory.get(symbol_key, 0) + 1
+                )
+                coord_key = _coord_key(magic_coord_by_symbol.get(symbol))
+                if coord_key is not None:
+                    magic_count_by_factory_coordinate[coord_key] = (
+                        magic_count_by_factory_coordinate.get(coord_key, 0) + 1
+                    )
+            if qtargets:
+                qubit_key = str(qtargets[0])
+                magic_count_by_logical_qubit[qubit_key] = (
+                    magic_count_by_logical_qubit.get(qubit_key, 0) + 1
+                )
+            if symbol is not None and qtargets:
+                distance = _manhattan_distance(
+                    logical_coord_by_qubit.get(qtargets[0]),
+                    magic_coord_by_symbol.get(symbol),
+                )
+                if distance is not None:
+                    magic_operation_distances.append(distance)
+        elif inst_type == "CNOT":
+            qtargets = _int_list(inst.get("qtarget"))
+            if len(qtargets) >= 2:
+                distance = _manhattan_distance(
+                    logical_coord_by_qubit.get(qtargets[0]),
+                    logical_coord_by_qubit.get(qtargets[1]),
+                )
+                if distance is not None:
+                    cnot_distances.append(distance)
+
+    nearest_magic_distance_by_logical: list[dict[str, Any]] = []
+    nearest_magic_distances: list[int] = []
+    for logical_qubit, logical_coord in sorted(logical_coord_by_qubit.items()):
+        distances = [
+            distance
+            for distance in (
+                _manhattan_distance(logical_coord, magic_coord)
+                for magic_coord in magic_coord_by_symbol.values()
+            )
+            if distance is not None
+        ]
+        if not distances:
+            continue
+        nearest = int(min(distances))
+        nearest_magic_distances.append(nearest)
+        nearest_magic_distance_by_logical.append(
+            {"logical_qubit": int(logical_qubit), "distance": nearest}
+        )
+
+    logical_x_values = [
+        int(coord[0])
+        for coord in logical_coord_by_qubit.values()
+        if isinstance(coord, list) and len(coord) >= 2
+    ]
+    logical_y_values = [
+        int(coord[1])
+        for coord in logical_coord_by_qubit.values()
+        if isinstance(coord, list) and len(coord) >= 2
+    ]
+    logical_bbox: dict[str, Any] | None = None
+    logical_bbox_area: int | None = None
+    if logical_x_values and logical_y_values:
+        x_min = min(logical_x_values)
+        x_max = max(logical_x_values)
+        y_min = min(logical_y_values)
+        y_max = max(logical_y_values)
+        logical_bbox = {
+            "x_min": int(x_min),
+            "x_max": int(x_max),
+            "y_min": int(y_min),
+            "y_max": int(y_max),
+        }
+        logical_bbox_area = int((x_max - x_min + 1) * (y_max - y_min + 1))
+
     topology_path = Path(architecture.topology_path).expanduser().resolve()
     payload = {
         "format": "quration_sc_ls_fixed_v0_mapping",
-        "schema_version": "0.1",
+        "schema_version": "0.2",
         "ham_name": artifact.ham_name,
         "molecule": artifact.molecule,
         "pf_label": artifact.pf_label,
@@ -5938,6 +6093,20 @@ def _extract_mapping_result(
         "logical_qubit_mapping_count": int(len(logical_qubits)),
         "magic_factory_mapping_count": int(len(magic_factories)),
         "entanglement_factory_mapping_count": int(len(entanglement_factories)),
+        "program_instruction_count": int(sum(instruction_type_counts.values())),
+        "instruction_type_counts": instruction_type_counts,
+        "logical_bbox": logical_bbox,
+        "logical_bbox_area": logical_bbox_area,
+        "magic_operation_count_by_factory": magic_count_by_factory,
+        "magic_operation_count_by_factory_coordinate": (
+            magic_count_by_factory_coordinate
+        ),
+        "magic_operation_count_by_logical_qubit": magic_count_by_logical_qubit,
+        "magic_operation_distance_stats": _numeric_stats(magic_operation_distances),
+        "nearest_magic_distance_by_logical": nearest_magic_distance_by_logical,
+        "nearest_magic_distance_stats": _numeric_stats(nearest_magic_distances),
+        "cnot_count": int(len(cnot_distances)),
+        "cnot_distance_stats": _numeric_stats(cnot_distances),
     }
     _atomic_write_json(mapping_result_path, payload)
 
@@ -5948,6 +6117,7 @@ def save_surface_code_mapping_result(
     architecture: SurfaceCodeArchitecture,
     runtime_root: Path,
     reuse_cache: bool = True,
+    stage_recorder: _StageMetricsRecorder | None = None,
 ) -> dict[str, Any]:
     if not _compile_uses_topology(architecture.compile_mode):
         return {
@@ -5995,6 +6165,15 @@ def save_surface_code_mapping_result(
             ],
             runtime_root=runtime_root,
             rotation_precision=artifact.rotation_precision,
+            stage_recorder=stage_recorder,
+            stage_name="qret_mapping_result",
+            stage_details={
+                "input_path": str(artifact.optimized_ir_path),
+                "output_path": str(mapping_state_path),
+                "compile_info_path": str(mapping_compile_info_path),
+                "pipeline_path": str(mapping_yaml_path),
+                "compile_mode": "mapping_only",
+            },
         )
         _extract_mapping_result(
             mapping_state_path=mapping_state_path,
@@ -6185,6 +6364,7 @@ def compile_prepared_surface_code_step_artifact(
                     architecture=architecture,
                     runtime_root=runtime_root,
                     reuse_cache=reuse_cache,
+                    stage_recorder=stage_recorder,
                 )
                 span.add_result(**mapping_metadata)
         else:

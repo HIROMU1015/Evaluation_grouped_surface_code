@@ -220,6 +220,77 @@ one compiled/profiled efficient controlled PF step.
 - `artifacts/surface_code_magic_supply_cheap_h2_h10_center/results.md`
 - `artifacts/surface_code_magic_supply_cheap_h2_h10_center/logs/run.log`
 
+## 2026-07-08: factory symbol / m0 diagnostic
+
+### Purpose
+
+Test whether qret chooses magic factories by symbol number or by geometry for
+`LATTICE_SURGERY_MAGIC`, using a fixed factory coordinate set and only changing
+the symbol-to-coordinate assignment.
+
+### Conditions
+
+- Molecules: H4-H7.
+- PF: `4th(new_2)`.
+- Circuit scope: `efficient_controlled_pf_one_step`.
+- Compile mode: `ftqc_compile_topology_qec`.
+- Magic period: 15.
+- Magic stock: fixed 10000.
+- Topology variants: `m0_left`, `m0_center`, `m0_right`, `m0_far_corner`.
+- Factory coordinate set fixed to `(0,0)`, `(4,4)`, `(9,0)`, `(9,9)`.
+- H4/H5 were mandatory; H6/H7 were run after safety checks.
+- H8 or larger was not executed.
+
+This is not a full QPE compile. No QPE phase register, inverse QFT,
+measurement, feed-forward, or repeated QPE circuit was generated.
+
+### Observations
+
+- All 16 executed cases succeeded.
+- All `LATTICE_SURGERY_MAGIC` operations used magic factory symbol `0`.
+- The used magic factory coordinate always followed the coordinate assigned to
+  `m0`.
+- Mean magic-delivery distance changed with the m0 coordinate.
+- Active area and qubit volume were mostly invariant under symbol-only
+  permutations; the far-corner m0 case caused only a small increase.
+- Peak RSS by phase: H4/H5 `7,732,048 KB`, H6 `16,812,476 KB`, H7
+  `32,465,496 KB`.
+- Raw `mapping_state.json` files were not retained.
+
+### Interpretation
+
+- The result is consistent with qret selecting magic factory symbol `0`, rather
+  than selecting the nearest available magic factory by geometry.
+- Earlier topology-sweep resource differences cannot be attributed to symbol
+  assignment alone, because this symbol-only permutation leaves active area and
+  qubit volume nearly unchanged.
+- The earlier differences likely involve the full factory coordinate set,
+  layout occupancy, or other qret scheduling details.
+
+### Unresolved
+
+- The implementation reason for symbol-0 selection in quration/qret.
+- Whether a qret setting exists to make multiple magic factories effective.
+- Whether the same behavior holds for other PF labels or larger molecules.
+
+### Next Work
+
+- Audit quration/qret factory-selection logic for `LATTICE_SURGERY_MAGIC`.
+- Test whether changing factory count or removing nonzero factories changes
+  scheduling/resource metrics.
+- If needed, construct a diagnostic where only `m0` exists at each candidate
+  coordinate.
+
+### References
+
+- `docs/benchmarks/surface_code_factory_symbol_m0_diagnostic_h4_h7.md`
+- `artifacts/surface_code_factory_symbol_m0_diagnostic_h4_h7/diagnostics.csv`
+- `artifacts/surface_code_factory_symbol_m0_diagnostic_h4_h7/diagnostics.jsonl`
+- `artifacts/surface_code_factory_symbol_m0_diagnostic_h4_h7/summary.md`
+- `artifacts/surface_code_factory_symbol_m0_diagnostic_h4_h7/logs/h4_h5_run.log`
+- `artifacts/surface_code_factory_symbol_m0_diagnostic_h4_h7/logs/h6_run.log`
+- `artifacts/surface_code_factory_symbol_m0_diagnostic_h4_h7/logs/h7_run.log`
+
 ---
 
 ## 2026-07-08: architecture sensitivity の解釈更新と優先順位

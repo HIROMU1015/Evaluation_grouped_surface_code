@@ -1,0 +1,71 @@
+targets:
+  molecules:
+    - H4
+    - H5
+  pf_labels:
+    - 4th(new_2)
+
+target_error: 0.00015936001019904
+rotation_precision:
+qret_path:
+
+defaults:
+  circuit_scope: efficient_controlled_pf_one_step
+  compile_mode: ftqc_compile_topology_qec
+  topology: m0_left
+  machine_type: Dim2
+  magic_generation_period: 15
+  maximum_magic_state_stock:
+    policy: fixed
+    value: 10000
+  entanglement_generation_period: 100
+  maximum_entangled_state_stock: 10
+  reaction_time: 1
+  skip_compile_output: true
+  compile_info_output_mode: summary
+  save_mapping_result: true
+
+qec:
+  physical_error_rate: 0.001
+  drop_rate: 0.1
+  code_cycle_time_sec: 0.000001
+  allowed_failure_prob: 0.01
+
+topologies:
+  m0_left:
+    enabled: true
+    path: configs/topologies/factory_symbol_perm_m0_left.yaml
+
+  m0_center:
+    enabled: true
+    path: configs/topologies/factory_symbol_perm_m0_center.yaml
+
+  m0_right:
+    enabled: true
+    path: configs/topologies/factory_symbol_perm_m0_right.yaml
+
+  m0_far_corner:
+    enabled: true
+    path: configs/topologies/factory_symbol_perm_m0_far_corner.yaml
+
+architecture_cases:
+  - name: m0_left
+    topology: m0_left
+
+  - name: m0_center
+    topology: m0_center
+
+  - name: m0_right
+    topology: m0_right
+
+  - name: m0_far_corner
+    topology: m0_far_corner
+
+output:
+  directory: artifacts/surface_code_factory_symbol_m0_diagnostic_h4_h7
+  jsonl: h4_h5_results.jsonl
+  csv: h4_h5_results.csv
+  markdown: h4_h5_results.md
+
+cache:
+  reuse_compile_results: true

@@ -1,0 +1,51 @@
+START: 2026-07-08T16:04:24+09:00
+PWD: /home/abe/Project/Evaluation_grouped_surface_code
+HEAD: 8e0c19ede493f942a8faf520f5f1fdf5b3ae7863
+STATUS:
+ M src/trotterlib/surface_code.py
+?? artifacts/surface_code_factory_symbol_m0_diagnostic_h4_h7/
+?? configs/surface_code_factory_symbol_m0_diagnostic_h4_h5.yaml
+?? configs/surface_code_factory_symbol_m0_diagnostic_h6.yaml
+?? configs/surface_code_factory_symbol_m0_diagnostic_h7.yaml
+?? configs/topologies/factory_symbol_perm_m0_center.yaml
+?? configs/topologies/factory_symbol_perm_m0_far_corner.yaml
+?? configs/topologies/factory_symbol_perm_m0_left.yaml
+?? configs/topologies/factory_symbol_perm_m0_right.yaml
+?? scripts/analyze_factory_symbol_m0_diagnostic.py
+CONFIG:
+-rw-rw-r-- 1 abe abe 1455 Jul  8 15:49 configs/surface_code_factory_symbol_m0_diagnostic_h7.yaml
+TOPOLOGIES:
+-rw-rw-r-- 1 abe abe 225 Jul  8 15:49 configs/topologies/factory_symbol_perm_m0_center.yaml
+-rw-rw-r-- 1 abe abe 225 Jul  8 15:49 configs/topologies/factory_symbol_perm_m0_far_corner.yaml
+-rw-rw-r-- 1 abe abe 225 Jul  8 15:49 configs/topologies/factory_symbol_perm_m0_left.yaml
+-rw-rw-r-- 1 abe abe 225 Jul  8 15:49 configs/topologies/factory_symbol_perm_m0_right.yaml
+QRET:
+-rwxr-xr-x 1 abe abe 16672 Jul  5 18:24 build/quration/qret
+jsonl: /home/abe/Project/Evaluation_grouped_surface_code/artifacts/surface_code_factory_symbol_m0_diagnostic_h4_h7/h7_results.jsonl
+csv: /home/abe/Project/Evaluation_grouped_surface_code/artifacts/surface_code_factory_symbol_m0_diagnostic_h4_h7/h7_results.csv
+markdown: /home/abe/Project/Evaluation_grouped_surface_code/artifacts/surface_code_factory_symbol_m0_diagnostic_h4_h7/h7_results.md
+cases: success=4 failed=0 skipped=0
+	Command being timed: ".venv/bin/python scripts/run_surface_code_architecture_sweep.py --config configs/surface_code_factory_symbol_m0_diagnostic_h7.yaml"
+	User time (seconds): 619.87
+	System time (seconds): 53.36
+	Percent of CPU this job got: 101%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 11:05.54
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 32465496
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 58176756
+	Voluntary context switches: 661
+	Involuntary context switches: 61784
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 18433192
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
+END: 2026-07-08T16:15:30+09:00
