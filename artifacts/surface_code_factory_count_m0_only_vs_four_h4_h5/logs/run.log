@@ -1,0 +1,42 @@
+START: 2026-07-08T16:50:36+09:00
+PWD: /home/abe/Project/Evaluation_grouped_surface_code
+HEAD: 6c95ede076b754b0732cf65c83dfe59bd7cdfd15
+STATUS:
+?? artifacts/surface_code_factory_count_m0_only_vs_four_h4_h5/
+?? configs/surface_code_factory_count_m0_only_vs_four_h4_h5.yaml
+?? configs/topologies/factory_m0_only_center.yaml
+?? configs/topologies/factory_m0_only_far_corner.yaml
+?? configs/topologies/factory_m0_only_left.yaml
+?? configs/topologies/factory_m0_only_right.yaml
+CONFIG:
+-rw-rw-r-- 1 abe abe 2217 Jul  8 16:50 configs/surface_code_factory_count_m0_only_vs_four_h4_h5.yaml
+QRET:
+-rwxr-xr-x 1 abe abe 16672 Jul  5 18:24 build/quration/qret
+jsonl: /home/abe/Project/Evaluation_grouped_surface_code/artifacts/surface_code_factory_count_m0_only_vs_four_h4_h5/results.jsonl
+csv: /home/abe/Project/Evaluation_grouped_surface_code/artifacts/surface_code_factory_count_m0_only_vs_four_h4_h5/results.csv
+markdown: /home/abe/Project/Evaluation_grouped_surface_code/artifacts/surface_code_factory_count_m0_only_vs_four_h4_h5/results.md
+cases: success=16 failed=0 skipped=0
+	Command being timed: ".venv/bin/python scripts/run_surface_code_architecture_sweep.py --config configs/surface_code_factory_count_m0_only_vs_four_h4_h5.yaml"
+	User time (seconds): 231.80
+	System time (seconds): 20.54
+	Percent of CPU this job got: 103%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 4:04.20
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 7731864
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 19310544
+	Voluntary context switches: 1906
+	Involuntary context switches: 169926
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 6057664
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
+END: 2026-07-08T16:54:40+09:00

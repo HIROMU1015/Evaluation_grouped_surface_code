@@ -389,3 +389,89 @@ cheap magic condition を全 topology に広げる作業も、topology/supply in
 - 複数 factory を実効的に使わせる設定があるか。
 - qubit volume 変化が runtime 変化より大きく出る case で、内部 occupancy がどう変わっているか。
 - STAR-like cheap magic condition を quration/qret 上でどの程度表現できるか。
+
+---
+
+## 2026-07-08: qret factory selection audit and m0-only diagnostic
+
+### 目的
+
+直近の factory symbol / m0 diagnostic で、compact `mapping.json` 上の
+`LATTICE_SURGERY_MAGIC` が全 case で magic factory symbol `0` を使っていた理由を、
+quration/qret source と小規模 diagnostic で確認する。
+
+### 条件
+
+- Source audit は vendored `third_party/quration` を read-only で実施。
+- quration/qret 実装変更なし。
+- Optional diagnostic は H4/H5、PF=`4th(new_2)`、`efficient_controlled_pf_one_step` のみ。
+- full QPE compile ではない。
+- QPE phase register、inverse QFT、measurement、feed-forward、repeated QPE circuit は生成していない。
+- H6 以上は今回実行していない。
+
+### Source Audit の観測
+
+- standard non-PBC lowering では、T/TDag が `LATTICE_SURGERY_MAGIC` に落ちるとき
+  `MSymbol{0}` が初期値として入る。
+- Evaluation の compact `mapping.json` は `init_compile_info -> mapping -> dump_compile_info`
+  の mapping-only artifact であり、後続の `routing` pass を含まない。
+- そのため、前回の `used factory symbol = 0` は pre-routing/lowering の観測であって、
+  final routed factory usage の証拠ではない。
+- qret routing 側には、同一 plane 上の全 available magic factory から BFS / Steiner search を行い、
+  選ばれた factory symbol を `LATTICE_SURGERY_MAGIC` に書き戻す処理がある。
+- CLI / machine option には topology、PBC mode、cultivation、global period、global stock はあるが、
+  factory selection policy を明示的に切り替える option は見つからなかった。
+- topology YAML は `magic_factory: [{symbol, coord}, ...]` で symbol と coordinate を直接表す。
+  per-factory period / stock / capacity field は見つからなかった。
+
+### Optional Diagnostic の観測
+
+H4/H5 で、同じ m0 coordinate の `m0-only topology` と `4-factory topology` を比較した。
+
+- success: 16
+- failed: 0
+- skipped: 0
+- elapsed wall time: 4:04.20
+- outer peak RSS: 7,731,864 KB
+- swaps: 0
+
+主な結果:
+
+- H4 runtime: m0-only `2,769,017`、four-factory `814,084`。
+- H5 runtime: m0-only `7,138,609`、four-factory `2,122,295`。
+- H4 qubit volume: m0-only 約 `26.7M-28.3M`、four-factory 約 `9.26M`。
+- H5 qubit volume: m0-only 約 `83.7M-87.1M`、four-factory 約 `28.18M`。
+- compact mapping artifact は m0-only / four-factory の両方で symbol `0` を報告する。
+
+### 解釈
+
+`LATTICE_SURGERY_MAGIC` が source 上「常に symbol 0 を使う」とは言えない。
+正確には、standard lowering は symbol 0 を初期値にするが、routing は複数 factory から
+経路探索して factory symbol を更新できる。
+
+したがって、前回の m0 diagnostic は pre-routing mapping の観測としては正しいが、
+final routed execution が非0 factory を使わない証拠ではない。
+
+H4/H5 の m0-only vs four-factory では、four-factory が runtime と qubit volume を大きく下げた。
+これは、pre-routing artifact が symbol 0 だけを示していても、非0 factory が routed resource に
+実効的に効いていることを示す。
+
+### 未解決点
+
+- final routed factory usage を compact に抽出する Evaluation 側 artifact はまだない。
+- 同じ効果が PF=`2nd` や H6 以上でも同程度かは未確認。
+- four-factory 内での coordinate set / layout / scheduling 効果を、factory count 効果から分離する必要がある。
+
+### 次の作業
+
+- H4/H5 に限定して、final routed instruction から factory usage を compact 抽出する方法を検討する。
+- 今後の topology sweep は、factory count と magic supply を固定したうえで coordinate/layout 効果を見る。
+- PF=`2nd` でも小規模に同じ source/dynamic 解釈が成り立つか確認する。
+
+### 参照
+
+- `docs/benchmarks/qret_magic_factory_selection_audit.md`
+- `artifacts/surface_code_factory_count_m0_only_vs_four_h4_h5/summary.md`
+- `artifacts/surface_code_factory_count_m0_only_vs_four_h4_h5/diagnostics.csv`
+- `artifacts/surface_code_factory_count_m0_only_vs_four_h4_h5/diagnostics.jsonl`
+- `artifacts/surface_code_factory_count_m0_only_vs_four_h4_h5/logs/run.log`
