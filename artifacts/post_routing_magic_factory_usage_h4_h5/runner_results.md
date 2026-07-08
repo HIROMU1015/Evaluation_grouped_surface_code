@@ -79,4 +79,3 @@ These totals are linear extrapolations from one compiled PF step. For efficient 
 | four_factory_m0_center | success | 15 | 10,000 | 2,122,295 | N/A | 2,122,265 | 30 | 28,179,832 | N/A | 96 | 43,200 | 15 | 475,906 | 451,262 |
 | four_factory_m0_right | success | 15 | 10,000 | 2,122,295 | N/A | 2,122,265 | 30 | 28,179,832 | N/A | 96 | 43,200 | 15 | 475,906 | 451,262 |
 | four_factory_m0_far_corner | success | 15 | 10,000 | 2,122,295 | N/A | 2,122,265 | 30 | 28,193,204 | N/A | 96 | 43,200 | 15 | 475,906 | 451,262 |
-

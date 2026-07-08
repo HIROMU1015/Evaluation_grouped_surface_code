@@ -35,4 +35,3 @@ These totals are linear extrapolations from one compiled PF step. For efficient 
 | case | status | magic period | stock | runtime topo | runtime vs baseline | runtime no topo | runtime diff vs no topo | qubit volume | qv vs baseline | cells | physical qubits | code distance | magic count | magic depth |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | four_factory_m0_center | success | 15 | 10,000 | 814,084 | N/A | 814,083 | 1 | 9,263,731 | N/A | 96 | 32,448 | 13 | 184,600 | 173,748 |
-
