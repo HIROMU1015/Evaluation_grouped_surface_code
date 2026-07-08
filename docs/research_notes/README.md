@@ -10,7 +10,7 @@
   - surface-code architecture sensitivity の主な研究日誌。
   - 同一 PF・同一 molecule・同一 logical circuit を固定したときに、topology、factory placement、magic-state supply、routing / mapping、grid size、factory count が resource metrics にどう効くかを記録する。
 - `qpe_scope_and_semantics.md`
-  - full QPE ではないこと、QPE-scale 外挿の意味論、observed result と estimated total の区別をまとめる基準メモ。
+  - full QPE ではないこと、QPE-scale 外挿の意味論、controlled 化の標準 scope、observed result と estimated total の区別をまとめる基準メモ。
 - `surface_code_architecture_sensitivity_note.md`
   - 初期の統合メモ。今後の主な追記先は `architecture_research_log.md` とする。
 
