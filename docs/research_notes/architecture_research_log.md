@@ -475,3 +475,88 @@ H4/H5 の m0-only vs four-factory では、four-factory が runtime と qubit vo
 - `artifacts/surface_code_factory_count_m0_only_vs_four_h4_h5/diagnostics.csv`
 - `artifacts/surface_code_factory_count_m0_only_vs_four_h4_h5/diagnostics.jsonl`
 - `artifacts/surface_code_factory_count_m0_only_vs_four_h4_h5/logs/run.log`
+
+---
+
+## 2026-07-08: post-routing magic factory usage diagnostic
+
+### 目的
+
+Evaluation の compact `mapping.json` は pre-routing / lowering 段階の情報であり、
+final routed `LATTICE_SURGERY_MAGIC` の factory usage を示さない。H4/H5 の小規模
+case に限定し、qret の post-routing pipeline-state から final factory symbol / coordinate
+usage を compact に抽出した。
+
+### 条件
+
+- H4/H5 only。
+- PF=`4th(new_2)` only。
+- circuit_scope=`efficient_controlled_pf_one_step` only。
+- compile_mode=`ftqc_compile_topology_qec`。
+- magic_generation_period=15、stock fixed 10000。
+- four-factory topology variants のみ。
+- full QPE compile ではない。
+- QPE phase register、inverse QFT、measurement、feed-forward、repeated QPE circuit は生成していない。
+- H6 以上は実行していない。
+- quration/qret 実装変更なし。
+
+### Schema Probe
+
+H4 `four_factory_m0_center` で `skip_compile_output=false` を使い、
+qret の `step_sc_ls_fixed_v0.json` を確認した。
+
+- final routed instructions は `program[*]` にある。
+- magic instruction は `type: LATTICE_SURGERY_MAGIC` を持つ。
+- final routed factory symbol は `mtarget` に入る。
+- H4 probe では `mtarget` が全 magic instruction にあり、confidence は high。
+
+### 観測
+
+H4/H5 x 4 topology の 8 case はすべて成功した。missing factory symbol count は全 case で 0。
+
+H4:
+
+- magic ops: 184600 / case。
+- coordinate counts は全 symbol permutation で
+  `(0,0):21789`, `(4,4):54270`, `(9,0):54271`, `(9,9):54270`。
+- symbol counts は coordinate に割り当てた symbol に応じて入れ替わる。
+
+H5:
+
+- magic ops: 475906 / case。
+- coordinate counts は全 symbol permutation で
+  `(0,0):51466`, `(4,4):141485`, `(9,0):141471`, `(9,9):141484`。
+- symbol counts は coordinate に割り当てた symbol に応じて入れ替わる。
+
+### 解釈
+
+post-routing では symbols 0, 1, 2, 3 がすべて使われている。したがって、
+以前の compact `mapping.json` 上の symbol 0 only は pre-routing artifact の観測であり、
+final routed execution が symbol 0 だけを使うという意味ではない。
+
+m0-only vs four-factory の runtime / qubit-volume gap は、非0 factory が実際に
+final routed instruction に使われていることと整合する。少なくとも H4/H5、
+PF=`4th(new_2)`、`efficient_controlled_pf_one_step` では、four-factory resource row は
+実効的な multi-factory routed usage を含む。
+
+### 未解決点
+
+- H6 以上や他 PF label で同じ分布になるかは未確認。
+- route distance、queue ordering、stock tie-break の詳細は今回の compact artifact からは読めない。
+- production sweep で post-routing factory usage を常時保存する場合の最小 artifact schema は
+  まだ実装していない。
+
+### 次の作業
+
+- future architecture sweep に compact post-routing factory usage artifact を追加するか検討する。
+- topology / factory placement 解析では、symbol counts より coordinate counts を主指標にする。
+- 必要なら route distance / stock state まで踏み込む diagnostic を別途設計する。
+
+### Artifacts
+
+- `docs/benchmarks/post_routing_magic_factory_usage_h4_h5.md`
+- `artifacts/post_routing_magic_factory_usage_h4_h5/post_routing_factory_usage.csv`
+- `artifacts/post_routing_magic_factory_usage_h4_h5/post_routing_factory_usage.jsonl`
+- `artifacts/post_routing_magic_factory_usage_h4_h5/summary.md`
+- `artifacts/post_routing_magic_factory_usage_h4_h5/logs/run.log`
+- raw_tmp は compact extraction 後に削除済み。

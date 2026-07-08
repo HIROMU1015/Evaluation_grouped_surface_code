@@ -1,0 +1,439 @@
+{
+  "candidate_field_names_used": {
+    "mtarget": 184600
+  },
+  "case_name": "H4_four_factory_m0_center_schema_probe",
+  "confidence": "high",
+  "final_factory_coordinate_counts": {
+    "(0,0)": 21789,
+    "(4,4)": 54270,
+    "(9,0)": 54271,
+    "(9,9)": 54270
+  },
+  "final_factory_symbol_counts": {
+    "0": 54270,
+    "1": 21789,
+    "2": 54271,
+    "3": 54270
+  },
+  "input_json_size_bytes": 234601065,
+  "missing_factory_symbol_count": 0,
+  "molecule": "H4",
+  "pf_label": "4th(new_2)",
+  "sample_instruction_paths": [
+    "$.program[17]",
+    "$.program[22]",
+    "$.program[27]",
+    "$.program[32]",
+    "$.program[37]",
+    "$.program[41]",
+    "$.program[45]",
+    "$.program[50]",
+    "$.program[54]",
+    "$.program[58]",
+    "$.program[62]",
+    "$.program[66]"
+  ],
+  "sample_previews": [
+    {
+      "candidate_fields": [
+        {
+          "field": "mtarget",
+          "priority": 0,
+          "symbol": "3",
+          "value_preview": [
+            3
+          ]
+        }
+      ],
+      "path": "$.program[17]",
+      "preview": {
+        "...": "4 more keys",
+        "ccreate": [
+          10
+        ],
+        "cdepend": [],
+        "condition": [],
+        "ehtarget": [],
+        "etarget": [],
+        "mtarget": [
+          3
+        ],
+        "qtarget": [
+          0
+        ],
+        "type": "LATTICE_SURGERY_MAGIC"
+      },
+      "resolved_field": "mtarget",
+      "resolved_symbol": "3"
+    },
+    {
+      "candidate_fields": [
+        {
+          "field": "mtarget",
+          "priority": 0,
+          "symbol": "3",
+          "value_preview": [
+            3
+          ]
+        }
+      ],
+      "path": "$.program[22]",
+      "preview": {
+        "...": "4 more keys",
+        "ccreate": [
+          11
+        ],
+        "cdepend": [],
+        "condition": [],
+        "ehtarget": [],
+        "etarget": [],
+        "mtarget": [
+          3
+        ],
+        "qtarget": [
+          0
+        ],
+        "type": "LATTICE_SURGERY_MAGIC"
+      },
+      "resolved_field": "mtarget",
+      "resolved_symbol": "3"
+    },
+    {
+      "candidate_fields": [
+        {
+          "field": "mtarget",
+          "priority": 0,
+          "symbol": "3",
+          "value_preview": [
+            3
+          ]
+        }
+      ],
+      "path": "$.program[27]",
+      "preview": {
+        "...": "4 more keys",
+        "ccreate": [
+          12
+        ],
+        "cdepend": [],
+        "condition": [],
+        "ehtarget": [],
+        "etarget": [],
+        "mtarget": [
+          3
+        ],
+        "qtarget": [
+          0
+        ],
+        "type": "LATTICE_SURGERY_MAGIC"
+      },
+      "resolved_field": "mtarget",
+      "resolved_symbol": "3"
+    },
+    {
+      "candidate_fields": [
+        {
+          "field": "mtarget",
+          "priority": 0,
+          "symbol": "3",
+          "value_preview": [
+            3
+          ]
+        }
+      ],
+      "path": "$.program[32]",
+      "preview": {
+        "...": "4 more keys",
+        "ccreate": [
+          13
+        ],
+        "cdepend": [],
+        "condition": [],
+        "ehtarget": [],
+        "etarget": [],
+        "mtarget": [
+          3
+        ],
+        "qtarget": [
+          0
+        ],
+        "type": "LATTICE_SURGERY_MAGIC"
+      },
+      "resolved_field": "mtarget",
+      "resolved_symbol": "3"
+    },
+    {
+      "candidate_fields": [
+        {
+          "field": "mtarget",
+          "priority": 0,
+          "symbol": "0",
+          "value_preview": [
+            0
+          ]
+        }
+      ],
+      "path": "$.program[37]",
+      "preview": {
+        "...": "4 more keys",
+        "ccreate": [
+          14
+        ],
+        "cdepend": [],
+        "condition": [],
+        "ehtarget": [],
+        "etarget": [],
+        "mtarget": [
+          0
+        ],
+        "qtarget": [
+          0
+        ],
+        "type": "LATTICE_SURGERY_MAGIC"
+      },
+      "resolved_field": "mtarget",
+      "resolved_symbol": "0"
+    },
+    {
+      "candidate_fields": [
+        {
+          "field": "mtarget",
+          "priority": 0,
+          "symbol": "3",
+          "value_preview": [
+            3
+          ]
+        }
+      ],
+      "path": "$.program[41]",
+      "preview": {
+        "...": "4 more keys",
+        "ccreate": [
+          15
+        ],
+        "cdepend": [],
+        "condition": [],
+        "ehtarget": [],
+        "etarget": [],
+        "mtarget": [
+          3
+        ],
+        "qtarget": [
+          0
+        ],
+        "type": "LATTICE_SURGERY_MAGIC"
+      },
+      "resolved_field": "mtarget",
+      "resolved_symbol": "3"
+    },
+    {
+      "candidate_fields": [
+        {
+          "field": "mtarget",
+          "priority": 0,
+          "symbol": "3",
+          "value_preview": [
+            3
+          ]
+        }
+      ],
+      "path": "$.program[45]",
+      "preview": {
+        "...": "4 more keys",
+        "ccreate": [
+          16
+        ],
+        "cdepend": [],
+        "condition": [],
+        "ehtarget": [],
+        "etarget": [],
+        "mtarget": [
+          3
+        ],
+        "qtarget": [
+          0
+        ],
+        "type": "LATTICE_SURGERY_MAGIC"
+      },
+      "resolved_field": "mtarget",
+      "resolved_symbol": "3"
+    },
+    {
+      "candidate_fields": [
+        {
+          "field": "mtarget",
+          "priority": 0,
+          "symbol": "3",
+          "value_preview": [
+            3
+          ]
+        }
+      ],
+      "path": "$.program[50]",
+      "preview": {
+        "...": "4 more keys",
+        "ccreate": [
+          17
+        ],
+        "cdepend": [],
+        "condition": [],
+        "ehtarget": [],
+        "etarget": [],
+        "mtarget": [
+          3
+        ],
+        "qtarget": [
+          0
+        ],
+        "type": "LATTICE_SURGERY_MAGIC"
+      },
+      "resolved_field": "mtarget",
+      "resolved_symbol": "3"
+    },
+    {
+      "candidate_fields": [
+        {
+          "field": "mtarget",
+          "priority": 0,
+          "symbol": "3",
+          "value_preview": [
+            3
+          ]
+        }
+      ],
+      "path": "$.program[54]",
+      "preview": {
+        "...": "4 more keys",
+        "ccreate": [
+          18
+        ],
+        "cdepend": [],
+        "condition": [],
+        "ehtarget": [],
+        "etarget": [],
+        "mtarget": [
+          3
+        ],
+        "qtarget": [
+          0
+        ],
+        "type": "LATTICE_SURGERY_MAGIC"
+      },
+      "resolved_field": "mtarget",
+      "resolved_symbol": "3"
+    },
+    {
+      "candidate_fields": [
+        {
+          "field": "mtarget",
+          "priority": 0,
+          "symbol": "3",
+          "value_preview": [
+            3
+          ]
+        }
+      ],
+      "path": "$.program[58]",
+      "preview": {
+        "...": "4 more keys",
+        "ccreate": [
+          19
+        ],
+        "cdepend": [],
+        "condition": [],
+        "ehtarget": [],
+        "etarget": [],
+        "mtarget": [
+          3
+        ],
+        "qtarget": [
+          0
+        ],
+        "type": "LATTICE_SURGERY_MAGIC"
+      },
+      "resolved_field": "mtarget",
+      "resolved_symbol": "3"
+    },
+    {
+      "candidate_fields": [
+        {
+          "field": "mtarget",
+          "priority": 0,
+          "symbol": "3",
+          "value_preview": [
+            3
+          ]
+        }
+      ],
+      "path": "$.program[62]",
+      "preview": {
+        "...": "4 more keys",
+        "ccreate": [
+          20
+        ],
+        "cdepend": [],
+        "condition": [],
+        "ehtarget": [],
+        "etarget": [],
+        "mtarget": [
+          3
+        ],
+        "qtarget": [
+          0
+        ],
+        "type": "LATTICE_SURGERY_MAGIC"
+      },
+      "resolved_field": "mtarget",
+      "resolved_symbol": "3"
+    },
+    {
+      "candidate_fields": [
+        {
+          "field": "mtarget",
+          "priority": 0,
+          "symbol": "3",
+          "value_preview": [
+            3
+          ]
+        }
+      ],
+      "path": "$.program[66]",
+      "preview": {
+        "...": "4 more keys",
+        "ccreate": [
+          21
+        ],
+        "cdepend": [],
+        "condition": [],
+        "ehtarget": [],
+        "etarget": [],
+        "mtarget": [
+          3
+        ],
+        "qtarget": [
+          0
+        ],
+        "type": "LATTICE_SURGERY_MAGIC"
+      },
+      "resolved_field": "mtarget",
+      "resolved_symbol": "3"
+    }
+  ],
+  "topology_factory_coordinates": [
+    "(0,0)",
+    "(4,4)",
+    "(9,0)",
+    "(9,9)"
+  ],
+  "topology_factory_symbols": {
+    "0": "(4,4)",
+    "1": "(0,0)",
+    "2": "(9,0)",
+    "3": "(9,9)"
+  },
+  "topology_path": "configs/topologies/factory_symbol_perm_m0_center.yaml",
+  "topology_variant": "four_factory_m0_center",
+  "total_lattice_surgery_magic_ops": 184600,
+  "unresolved_instruction_paths": []
+}

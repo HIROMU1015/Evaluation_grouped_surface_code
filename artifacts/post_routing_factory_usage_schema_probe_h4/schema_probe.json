@@ -1,0 +1,586 @@
+{
+  "context_depth": 2,
+  "input": "/home/abe/Project/Evaluation_grouped_surface_code/artifacts/post_routing_factory_usage_schema_probe_h4/raw_tmp/surface_code_cache/gr/ftqc_compile_topology_qec/H4_sto-3g_singlet_distance_100_charge_0_grouping__4th_new_2_/84e69dafee8f4edc/step_sc_ls_fixed_v0.json",
+  "max_records": 8,
+  "needle": "LATTICE_SURGERY_MAGIC",
+  "records": [
+    {
+      "candidate_fields": [
+        {
+          "key": "use_magic_state_cultivation",
+          "path": "$.use_magic_state_cultivation",
+          "preview": false
+        },
+        {
+          "key": "magic_factory_seed_offset",
+          "path": "$.magic_factory_seed_offset",
+          "preview": 0
+        },
+        {
+          "key": "magic_generation_period",
+          "path": "$.magic_generation_period",
+          "preview": 15
+        },
+        {
+          "key": "prob_magic_state_creation",
+          "path": "$.prob_magic_state_creation",
+          "preview": 1.0
+        },
+        {
+          "key": "maximum_magic_state_stock",
+          "path": "$.maximum_magic_state_stock",
+          "preview": 10000
+        },
+        {
+          "key": "coord",
+          "path": "$.topology[0].coord",
+          "preview": [
+            10,
+            10,
+            0
+          ]
+        },
+        {
+          "key": "magic_factory",
+          "path": "$.topology[0].magic_factory",
+          "preview": [
+            {
+              "...": "2 keys"
+            },
+            {
+              "...": "2 keys"
+            },
+            {
+              "...": "2 keys"
+            },
+            {
+              "...": "2 keys"
+            }
+          ]
+        },
+        {
+          "key": "ALLOCATE_MAGIC_FACTORY",
+          "path": "$.gate_count_detail.ALLOCATE_MAGIC_FACTORY",
+          "preview": 4
+        },
+        {
+          "key": "LATTICE_SURGERY_MAGIC",
+          "path": "$.gate_count_detail.LATTICE_SURGERY_MAGIC",
+          "preview": 184600
+        },
+        {
+          "key": "magic_state_consumption_count",
+          "path": "$.magic_state_consumption_count",
+          "preview": 184600
+        },
+        {
+          "key": "magic_state_consumption_depth",
+          "path": "$.magic_state_consumption_depth",
+          "preview": 173748
+        },
+        {
+          "key": "magic_state_consumption_rate",
+          "path": "$.magic_state_consumption_rate",
+          "preview": []
+        },
+        {
+          "key": "magic_state_consumption_rate_ave",
+          "path": "$.magic_state_consumption_rate_ave",
+          "preview": 0.0
+        },
+        {
+          "key": "magic_state_consumption_rate_peak",
+          "path": "$.magic_state_consumption_rate_peak",
+          "preview": 0
+        },
+        {
+          "key": "runtime_estimation_magic_state_consumption_count",
+          "path": "$.runtime_estimation_magic_state_consumption_count",
+          "preview": 2769000
+        },
+        {
+          "key": "runtime_estimation_magic_state_consumption_depth",
+          "path": "$.runtime_estimation_magic_state_consumption_depth",
+          "preview": 2606220
+        },
+        {
+          "key": "magic_factory_count",
+          "path": "$.magic_factory_count",
+          "preview": 4
+        },
+        {
+          "key": "entanglement_factory_count",
+          "path": "$.entanglement_factory_count",
+          "preview": 0
+        }
+      ],
+      "json_path": "$.opt.compile_info",
+      "keys": [
+        "use_magic_state_cultivation",
+        "magic_factory_seed_offset",
+        "magic_generation_period",
+        "prob_magic_state_creation",
+        "maximum_magic_state_stock",
+        "entanglement_generation_period",
+        "maximum_entangled_state_stock",
+        "reaction_time",
+        "topology",
+        "runtime",
+        "runtime_without_topology",
+        "gate_count",
+        "gate_count_detail",
+        "gate_depth",
+        "gate_throughput",
+        "gate_throughput_ave",
+        "gate_throughput_peak",
+        "measurement_feedback_count",
+        "measurement_feedback_depth",
+        "measurement_feedback_rate",
+        "measurement_feedback_rate_ave",
+        "measurement_feedback_rate_peak",
+        "runtime_estimation_measurement_feedback_count",
+        "runtime_estimation_measurement_feedback_depth",
+        "magic_state_consumption_count",
+        "magic_state_consumption_depth",
+        "magic_state_consumption_rate",
+        "magic_state_consumption_rate_ave",
+        "magic_state_consumption_rate_peak",
+        "runtime_estimation_magic_state_consumption_count",
+        "runtime_estimation_magic_state_consumption_depth",
+        "magic_factory_count",
+        "entanglement_consumption_count",
+        "entanglement_consumption_depth",
+        "entanglement_consumption_rate",
+        "entanglement_consumption_rate_ave",
+        "entanglement_consumption_rate_peak",
+        "runtime_estimation_entanglement_consumption_count",
+        "runtime_estimation_entanglement_consumption_depth",
+        "entanglement_factory_count",
+        "chip_cell_count",
+        "chip_cell_algorithmic_qubit",
+        "chip_cell_algorithmic_qubit_ave",
+        "chip_cell_algorithmic_qubit_peak",
+        "chip_cell_algorithmic_qubit_ratio",
+        "chip_cell_algorithmic_qubit_ratio_ave",
+        "chip_cell_algorithmic_qubit_ratio_peak",
+        "chip_cell_active_qubit_area",
+        "chip_cell_active_qubit_area_ave",
+        "chip_cell_active_qubit_area_peak",
+        "chip_cell_active_qubit_area_ratio",
+        "chip_cell_active_qubit_area_ratio_ave",
+        "chip_cell_active_qubit_area_ratio_peak",
+        "qubit_volume",
+        "code_distance",
+        "execution_time_sec",
+        "num_physical_qubits"
+      ],
+      "preview": {
+        "...": "49 more keys",
+        "entanglement_generation_period": 100,
+        "magic_factory_seed_offset": 0,
+        "magic_generation_period": 15,
+        "maximum_entangled_state_stock": 10,
+        "maximum_magic_state_stock": 10000,
+        "prob_magic_state_creation": 1.0,
+        "reaction_time": 1,
+        "use_magic_state_cultivation": false
+      }
+    },
+    {
+      "candidate_fields": [
+        {
+          "key": "ALLOCATE_MAGIC_FACTORY",
+          "path": "$.ALLOCATE_MAGIC_FACTORY",
+          "preview": 4
+        },
+        {
+          "key": "LATTICE_SURGERY_MAGIC",
+          "path": "$.LATTICE_SURGERY_MAGIC",
+          "preview": 184600
+        }
+      ],
+      "json_path": "$.opt.compile_info.gate_count_detail",
+      "keys": [
+        "ALLOCATE",
+        "ALLOCATE_MAGIC_FACTORY",
+        "DEALLOCATE",
+        "TWIST",
+        "HADAMARD",
+        "LATTICE_SURGERY_MAGIC",
+        "CNOT",
+        "PROBABILITY_HINT"
+      ],
+      "preview": {
+        "ALLOCATE": 9,
+        "ALLOCATE_MAGIC_FACTORY": 4,
+        "CNOT": 15128,
+        "DEALLOCATE": 9,
+        "HADAMARD": 218977,
+        "LATTICE_SURGERY_MAGIC": 184600,
+        "PROBABILITY_HINT": 184600,
+        "TWIST": 417023
+      }
+    },
+    {
+      "candidate_fields": [
+        {
+          "key": "qtarget",
+          "path": "$.qtarget",
+          "preview": [
+            0
+          ]
+        },
+        {
+          "key": "mtarget",
+          "path": "$.mtarget",
+          "preview": [
+            3
+          ]
+        },
+        {
+          "key": "etarget",
+          "path": "$.etarget",
+          "preview": []
+        },
+        {
+          "key": "ehtarget",
+          "path": "$.ehtarget",
+          "preview": []
+        }
+      ],
+      "json_path": "$.program[17]",
+      "keys": [
+        "type",
+        "qtarget",
+        "ccreate",
+        "cdepend",
+        "mtarget",
+        "etarget",
+        "ehtarget",
+        "condition",
+        "ancilla",
+        "metadata",
+        "raw",
+        "basis_list"
+      ],
+      "preview": {
+        "...": "4 more keys",
+        "ccreate": [
+          10
+        ],
+        "cdepend": [],
+        "condition": [],
+        "ehtarget": [],
+        "etarget": [],
+        "mtarget": [
+          3
+        ],
+        "qtarget": [
+          0
+        ],
+        "type": "LATTICE_SURGERY_MAGIC"
+      }
+    },
+    {
+      "candidate_fields": [
+        {
+          "key": "qtarget",
+          "path": "$.qtarget",
+          "preview": [
+            0
+          ]
+        },
+        {
+          "key": "mtarget",
+          "path": "$.mtarget",
+          "preview": [
+            3
+          ]
+        },
+        {
+          "key": "etarget",
+          "path": "$.etarget",
+          "preview": []
+        },
+        {
+          "key": "ehtarget",
+          "path": "$.ehtarget",
+          "preview": []
+        }
+      ],
+      "json_path": "$.program[22]",
+      "keys": [
+        "type",
+        "qtarget",
+        "ccreate",
+        "cdepend",
+        "mtarget",
+        "etarget",
+        "ehtarget",
+        "condition",
+        "ancilla",
+        "metadata",
+        "raw",
+        "basis_list"
+      ],
+      "preview": {
+        "...": "4 more keys",
+        "ccreate": [
+          11
+        ],
+        "cdepend": [],
+        "condition": [],
+        "ehtarget": [],
+        "etarget": [],
+        "mtarget": [
+          3
+        ],
+        "qtarget": [
+          0
+        ],
+        "type": "LATTICE_SURGERY_MAGIC"
+      }
+    },
+    {
+      "candidate_fields": [
+        {
+          "key": "qtarget",
+          "path": "$.qtarget",
+          "preview": [
+            0
+          ]
+        },
+        {
+          "key": "mtarget",
+          "path": "$.mtarget",
+          "preview": [
+            3
+          ]
+        },
+        {
+          "key": "etarget",
+          "path": "$.etarget",
+          "preview": []
+        },
+        {
+          "key": "ehtarget",
+          "path": "$.ehtarget",
+          "preview": []
+        }
+      ],
+      "json_path": "$.program[27]",
+      "keys": [
+        "type",
+        "qtarget",
+        "ccreate",
+        "cdepend",
+        "mtarget",
+        "etarget",
+        "ehtarget",
+        "condition",
+        "ancilla",
+        "metadata",
+        "raw",
+        "basis_list"
+      ],
+      "preview": {
+        "...": "4 more keys",
+        "ccreate": [
+          12
+        ],
+        "cdepend": [],
+        "condition": [],
+        "ehtarget": [],
+        "etarget": [],
+        "mtarget": [
+          3
+        ],
+        "qtarget": [
+          0
+        ],
+        "type": "LATTICE_SURGERY_MAGIC"
+      }
+    },
+    {
+      "candidate_fields": [
+        {
+          "key": "qtarget",
+          "path": "$.qtarget",
+          "preview": [
+            0
+          ]
+        },
+        {
+          "key": "mtarget",
+          "path": "$.mtarget",
+          "preview": [
+            3
+          ]
+        },
+        {
+          "key": "etarget",
+          "path": "$.etarget",
+          "preview": []
+        },
+        {
+          "key": "ehtarget",
+          "path": "$.ehtarget",
+          "preview": []
+        }
+      ],
+      "json_path": "$.program[32]",
+      "keys": [
+        "type",
+        "qtarget",
+        "ccreate",
+        "cdepend",
+        "mtarget",
+        "etarget",
+        "ehtarget",
+        "condition",
+        "ancilla",
+        "metadata",
+        "raw",
+        "basis_list"
+      ],
+      "preview": {
+        "...": "4 more keys",
+        "ccreate": [
+          13
+        ],
+        "cdepend": [],
+        "condition": [],
+        "ehtarget": [],
+        "etarget": [],
+        "mtarget": [
+          3
+        ],
+        "qtarget": [
+          0
+        ],
+        "type": "LATTICE_SURGERY_MAGIC"
+      }
+    },
+    {
+      "candidate_fields": [
+        {
+          "key": "qtarget",
+          "path": "$.qtarget",
+          "preview": [
+            0
+          ]
+        },
+        {
+          "key": "mtarget",
+          "path": "$.mtarget",
+          "preview": [
+            0
+          ]
+        },
+        {
+          "key": "etarget",
+          "path": "$.etarget",
+          "preview": []
+        },
+        {
+          "key": "ehtarget",
+          "path": "$.ehtarget",
+          "preview": []
+        }
+      ],
+      "json_path": "$.program[37]",
+      "keys": [
+        "type",
+        "qtarget",
+        "ccreate",
+        "cdepend",
+        "mtarget",
+        "etarget",
+        "ehtarget",
+        "condition",
+        "ancilla",
+        "metadata",
+        "raw",
+        "basis_list"
+      ],
+      "preview": {
+        "...": "4 more keys",
+        "ccreate": [
+          14
+        ],
+        "cdepend": [],
+        "condition": [],
+        "ehtarget": [],
+        "etarget": [],
+        "mtarget": [
+          0
+        ],
+        "qtarget": [
+          0
+        ],
+        "type": "LATTICE_SURGERY_MAGIC"
+      }
+    },
+    {
+      "candidate_fields": [
+        {
+          "key": "qtarget",
+          "path": "$.qtarget",
+          "preview": [
+            0
+          ]
+        },
+        {
+          "key": "mtarget",
+          "path": "$.mtarget",
+          "preview": [
+            3
+          ]
+        },
+        {
+          "key": "etarget",
+          "path": "$.etarget",
+          "preview": []
+        },
+        {
+          "key": "ehtarget",
+          "path": "$.ehtarget",
+          "preview": []
+        }
+      ],
+      "json_path": "$.program[41]",
+      "keys": [
+        "type",
+        "qtarget",
+        "ccreate",
+        "cdepend",
+        "mtarget",
+        "etarget",
+        "ehtarget",
+        "condition",
+        "ancilla",
+        "metadata",
+        "raw",
+        "basis_list"
+      ],
+      "preview": {
+        "...": "4 more keys",
+        "ccreate": [
+          15
+        ],
+        "cdepend": [],
+        "condition": [],
+        "ehtarget": [],
+        "etarget": [],
+        "mtarget": [
+          3
+        ],
+        "qtarget": [
+          0
+        ],
+        "type": "LATTICE_SURGERY_MAGIC"
+      }
+    }
+  ],
+  "records_emitted": 8
+}
