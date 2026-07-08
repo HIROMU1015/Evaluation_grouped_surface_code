@@ -219,3 +219,102 @@ one compiled/profiled efficient controlled PF step.
 - `artifacts/surface_code_magic_supply_cheap_h2_h10_center/results.jsonl`
 - `artifacts/surface_code_magic_supply_cheap_h2_h10_center/results.md`
 - `artifacts/surface_code_magic_supply_cheap_h2_h10_center/logs/run.log`
+
+---
+
+## 2026-07-08: architecture sensitivity の解釈更新と優先順位
+
+### 目的
+
+topology sweep、H4/H5 mapping-only diagnostic、H2-H10 cheap magic supply
+diagnostic を踏まえて、今後の解析軸を明確にする。
+
+### 研究方針の再確認
+
+現在の主題は、PF=`2nd` と PF=`4th(new_2)` のどちらが小さいかを単純に
+比較することではない。
+
+PF は層別条件として扱い、主解析では同一 PF・同一 molecule・同一 logical
+circuit を固定した上で、topology、factory placement、magic-state supply、
+mapping geometry が resource metrics にどう効くかを見る。
+
+特に重視する metric は次である。
+
+- runtime
+- qubit volume
+- active area
+- mapping / magic delivery geometry
+- magic-state scheduling
+
+### 解釈の更新
+
+H2-H11 topology sweep では、factory placement の left/center/right 変更は
+runtime にはほぼ現れなかった。一方で、qubit volume には一貫した ordering が出た。
+`center_block` は qubit volume 最小、`left_edge` は最大になりやすい。
+
+したがって、現時点では「runtime差が小さいので architecture 効果がない」とは
+解釈しない。むしろ topology / factory placement の効果は、今回の条件では
+時間資源よりも qubit volume、active area、mapping geometry 側に出ている可能性が高い。
+
+H4/H5 mapping-only diagnostic では、`center_block` の qubit volume 最小が
+`chip_cell_active_qubit_area_ave` の最小と対応していた。また、この条件では
+`LATTICE_SURGERY_MAGIC` が全 case で magic factory symbol `0` のみを使っていた。
+
+このため、factory 4個を置いた topology sweep は、少なくとも H4/H5 では
+factory set 全体の比較ではなく、実効的には `m0` placement sweep として効いていた
+可能性がある。これは今後の topology 設計と結果解釈を左右する重要な仮説である。
+
+cheap magic supply diagnostic では、period を 15, 8, 4, 2, 1 まで下げても、
+大きい H-chain の runtime 改善は小さかった。weighted `p15 -> p1` 改善は
+PF=`2nd` で `0.0753%`、PF=`4th(new_2)` で `0.0169%` だった。
+また、`cheap_p1_center` と `cheap_p1_large_stock_center` は全 molecule/PF group で
+一致した。
+
+この結果により、以前の「period 8 が弱すぎたため大きい H-chain で効果が見えない」
+という解釈は弱くなった。少なくとも center topology、factory count 4、現行 qret
+設定では、大きい H-chain の runtime 律速は magic generation period ではない可能性が高い。
+
+### 方針決定
+
+- PF 間比較を主題にしない。
+- PF は architecture 効果を見るための層別条件として扱う。
+- topology / factory placement / `m0` selection / active area / mapping diagnostics を優先する。
+- cheap magic supply は diagnostic condition として扱う。
+- `cheap_p1` や `cheap_p1_large_stock` を STAR architecture そのものの実装・評価と書かない。
+- full QPE compile ではなく、`efficient_controlled_pf_one_step` からの QPE-scale 線形外挿であることを引き続き明記する。
+
+### 次の優先作業
+
+1. factory symbol / `m0` diagnostic
+
+同じ factory 座標集合で symbol 順序だけを入れ替え、qret が symbol `0` を優先して
+使っているのか、座標・距離・別の rule で factory を選んでいるのかを確認する。
+
+2. 大きい H-chain の mapping-only diagnostic
+
+H8/H10 または H8/H11 で、H4/H5 と同じ `m0` 使用・active area ordering が維持されるかを
+確認する。H5 mapping-only diagnostic でも peak RSS が大きかったため、H8 以上では
+memory を監視しながら小さく始める。
+
+3. cheap magic と topology の相互作用確認
+
+必要になった場合だけ、left/right topology で p8 と p1 を少数 case 比較する。
+現時点では、factory symbol / `m0` diagnostic より優先度は低い。
+
+### 優先度を下げる作業
+
+`cheap_p1_center` と `cheap_p1_large_stock_center` が全条件で一致したため、
+同じ条件で stock だけをさらに大きくする検証の優先度は低い。
+
+cheap magic condition を全 topology に広げる作業も、topology/supply interaction を
+主題にすると決めるまでは保留でよい。
+
+### 未解決点
+
+- H2-H11 全体で `m0` のみが使われるか。
+- PF=`2nd` でも H4/H5 `4th(new_2)` と同じ mapping 構造が出るか。
+- qret が magic factory symbol `0` を使う理由。
+- factory symbol 順序を変えると qubit volume ordering が変わるか。
+- 複数 factory を実効的に使わせる設定があるか。
+- qubit volume 変化が runtime 変化より大きく出る case で、内部 occupancy がどう変わっているか。
+- STAR-like cheap magic condition を quration/qret 上でどの程度表現できるか。

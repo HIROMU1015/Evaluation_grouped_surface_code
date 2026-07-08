@@ -109,6 +109,18 @@ QPE-scale total は、one-step result に action count を掛けた線形外挿�
 
 `runtime`, `qubit_volume`, `magic-state count` などの total field は、対象 row が `efficient_controlled_pf_one_step` のときに QPE-scale estimate として扱う。
 
+## diagnostic regime の扱い
+
+`fast_supply`、`cheap_p1`、`cheap_p1_large_stock` などは、architecture sensitivity
+を見るための diagnostic condition である。
+
+`cheap_p1` や `cheap_p1_large_stock` は STAR-like cheap magic assumption を意識した
+条件だが、STAR architecture そのものを実装・評価した結果ではない。
+
+diagnostic condition は production adopted な標準条件と区別する。特に cheap magic
+condition で得た傾向を、標準 architecture result や STAR architecture result として
+表現してはならない。
+
 ## architecture sweep の意味論
 
 architecture sweep では logical circuit を変えない。
@@ -127,5 +139,6 @@ architecture effect を主張する場合は、同一 molecule / 同一 PF / 同
 
 ## 更新履歴
 
+- 2026-07-08: diagnostic regime の扱いを追記。
 - 2026-07-08: controlled 化の実装詳細、generic controlled baseline と efficient controlled one-step の区別、identity phase の扱いを追記。
 - 2026-07-07: 初版。既存 topology sweep と architecture sensitivity note の意味論を分離して整理。
