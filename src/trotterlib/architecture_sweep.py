@@ -224,6 +224,11 @@ def _circuit_scope_values(case: Mapping[str, Any], defaults: Mapping[str, Any]) 
     return spec.compiled_circuit_scope, spec.qpe_power_k
 
 
+def _rotation_precision_value(case: Mapping[str, Any], config: Mapping[str, Any]) -> float | None:
+    raw = case.get("rotation_precision", config.get("rotation_precision"))
+    return None if raw in (None, "") else float(raw)
+
+
 def _qec_values(config: Mapping[str, Any]) -> dict[str, Any]:
     qec = config.get("qec", {})
     if qec is None:
@@ -1015,11 +1020,6 @@ def run_surface_code_architecture_sweep(config_path: str | Path) -> dict[str, An
     reuse_compile_cache = bool(cache_config.get("reuse_compile_results", True))
 
     target_error = float(config.get("target_error", TARGET_ERROR))
-    rotation_precision = config.get("rotation_precision")
-    rotation_precision_value = (
-        None if rotation_precision in (None, "") else float(rotation_precision)
-    )
-
     rows: list[dict[str, Any]] = []
     for molecule in molecules:
         molecule_text = str(molecule)
@@ -1027,7 +1027,10 @@ def run_surface_code_architecture_sweep(config_path: str | Path) -> dict[str, An
         for pf_label in pf_labels:
             default_values = _default_case_values(config)
             qpe_scale_cache: dict[str, Any] | None = None
-            artifact_cache: dict[tuple[str, int | None], SurfaceCodeStepArtifact] = {}
+            artifact_cache: dict[
+                tuple[str, int | None, float | None],
+                SurfaceCodeStepArtifact,
+            ] = {}
 
             for raw_case in cases:
                 if not isinstance(raw_case, Mapping):
@@ -1069,7 +1072,12 @@ def run_surface_code_architecture_sweep(config_path: str | Path) -> dict[str, An
                     continue
 
                 try:
-                    artifact_key = (compiled_circuit_scope, case_qpe_power_k)
+                    rotation_precision_value = _rotation_precision_value(raw_case, config)
+                    artifact_key = (
+                        compiled_circuit_scope,
+                        case_qpe_power_k,
+                        rotation_precision_value,
+                    )
                     artifact = artifact_cache.get(artifact_key)
                     if artifact is None:
                         prepare_architecture = SurfaceCodeArchitecture(

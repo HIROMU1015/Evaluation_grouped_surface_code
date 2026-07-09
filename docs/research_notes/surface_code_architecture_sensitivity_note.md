@@ -219,7 +219,27 @@ STAR-like cheap magic を見るには、`magic_generation_period=1` または `2
 
 ただし、これは STAR architecture そのものを実装しているとは書かない。`cheap_magic` は diagnostic only として扱う。
 
-### Phase E: topology variants 追加
+### Phase E: STAR-like cheap arbitrary-rotation diagnostic
+
+これまでの cheap magic sweep は、T magic state の生成周期を短くする diagnostic であり、logical magic demand、magic count、magic depth は基本的に変わらない。
+
+STAR-like な任意角回転方式を疑似的に見るには、供給周期だけではなく、arbitrary rotation の Clifford+T synthesis cost 自体を下げる介入の方が本質に近い。
+
+次の検証では、`magic_generation_period=15`、factory count、stock、topology を固定したまま、`rotation_precision` を緩めることで arbitrary-rotation synthesis cost を下げた diagnostic を行う。
+
+この検証で見る指標は次である。
+
+- magic count
+- magic depth
+- runtime with topology
+- qubit volume
+- active area
+- code distance
+- physical qubits
+
+この検証は STAR implementation ではなく、`STAR-like cheap arbitrary rotation assumption` または `diagnostic reduction of arbitrary-rotation synthesis cost` として扱う。
+
+### Phase F: topology variants 追加
 
 `center_block` が有利である理由を確認した後、次の variant を検討する。
 
@@ -237,7 +257,7 @@ STAR-like cheap magic を見るには、`magic_generation_period=1` または `2
 - full QPE compile と書かない。
 - QPE-scale estimated totals と observed one-step compile/profile result を区別する。
 - H4/H5 mapping-only diagnostic の結果を H2-H11 全体へ断定的に一般化しない。
-- STAR-like と書く場合は、cheap magic supply assumption の diagnostic であり、STAR topology そのものではないと明記する。
+- STAR-like と書く場合は、cheap magic supply assumption または cheap arbitrary-rotation assumption の diagnostic であり、STAR topology そのものではないと明記する。
 - 「factory 4 個を使った」と書く場合、現行 diagnostic では `m0` のみ使用だった点を併記する。
 - runtime 差が小さいことと、architecture 効果がないことを混同しない。qubit volume には明確に効いている。
 
