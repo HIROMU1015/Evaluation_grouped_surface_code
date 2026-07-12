@@ -166,6 +166,9 @@ def _run_case(
         )
 
     path_stats = diagnostic["path_stats_by_type"]["LATTICE_SURGERY_MAGIC"]
+    cnot_path_stats = diagnostic["path_stats_by_type"]["CNOT"]
+    cnot_attempts = int(diagnostic["attempts_by_type"]["CNOT"])
+    cnot_failures = int(diagnostic["failed_attempts_by_type"]["CNOT"])
     factory_use = diagnostic["magic_routing_distribution"]["factory_use_count"]
     coord_by_symbol = _factory_coord_by_symbol(record)
     factory_use_by_coord: dict[tuple[int, int], int] = {}
@@ -228,6 +231,15 @@ def _run_case(
             path_stats["mean_path_coordinates_per_instruction"]
         ),
         "magic_max_path_coordinates": int(path_stats["max_path_coordinates"]),
+        "cnot_attempts": cnot_attempts,
+        "cnot_failed_attempts": cnot_failures,
+        "cnot_failed_attempt_fraction": (
+            cnot_failures / cnot_attempts if cnot_attempts else 0.0
+        ),
+        "cnot_mean_path_coordinates": float(
+            cnot_path_stats["mean_path_coordinates_per_instruction"]
+        ),
+        "cnot_max_path_coordinates": int(cnot_path_stats["max_path_coordinates"]),
         "magic_total_stock_min": int(diagnostic["magic_total_stock_min"]),
         "magic_total_stock_mean": float(diagnostic["magic_total_stock_mean"]),
         "magic_available_factory_count_mean": float(

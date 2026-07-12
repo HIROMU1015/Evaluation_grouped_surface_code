@@ -1,0 +1,62 @@
+experiment: fixed_circuit_routing_capacity_sweep_paired_precision
+schema_version: 1
+
+source:
+  results_csv: artifacts/surface_code_grid_capacity_sweep_h4_h7_4th/results.csv
+  topology_name: aware_10x10
+  pf_label: 4th(new_2)
+
+topology_manifest: configs/topologies/routing_capacity_h4_h7_4th/routing_capacity_manifest.json
+
+molecules:
+  - H4
+  - H5
+  - H6
+  - H7
+
+rotation_precisions:
+  - 1.0e-5
+  - 1.0e-2
+
+routing_conditions:
+  - remote_ban_control
+  - distributed_obstacles
+  - central_choke
+
+fixed_conditions:
+  reaction_time: 1
+  factory_count: 4
+  grid_size: [10, 10]
+  machine_type: Dim2
+  ban_count: 8
+  usable_non_factory_cells: 88
+  minimum_free_egress_per_factory: 2
+  magic_generation_period: 15
+  maximum_magic_state_stock: 10000
+  entanglement_generation_period: 100
+  maximum_entangled_state_stock: 10
+  physical_error_rate: 0.001
+  drop_rate: 0.1
+  code_cycle_time_sec: 0.000001
+  allowed_failure_prob: 0.01
+
+comparison_policy:
+  baseline_condition: remote_ban_control
+  compare_within_precision: true
+  compare_absolute_runtime_across_precision: false
+  interpretation: distinguish data-side CNOT congestion from residual magic-delivery congestion using operation-specific diagnostics
+
+primary_metrics:
+  - runtime
+  - runtime_change_vs_remote_control
+  - runtime_topology_overhead
+
+diagnostic_metrics:
+  - cnot_failed_attempt_fraction
+  - cnot_mean_path_coordinates
+  - magic_failed_attempts
+  - magic_mean_path_coordinates
+  - factory_egress_blocked
+  - route_disconnected
+
+output_directory: artifacts/surface_code_routing_capacity_sweep_h4_h7_4th_paired

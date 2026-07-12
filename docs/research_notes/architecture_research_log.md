@@ -1874,3 +1874,111 @@ d=13/15/17、H6はd=15/17/19、cheap H4/H5はr=100でd=13から15へ変わった
 - `artifacts/surface_code_reaction_time_sweep_h4_h7_4th_paired/summary.md`
 - `artifacts/surface_code_reaction_time_sweep_h4_h7_4th_paired/results.csv`
 - `artifacts/surface_code_reaction_time_sweep_h4_h7_4th_paired/results.jsonl`
+
+## 2026-07-13: paired-precision fixed-budget routing-capacity sweep
+
+### Question and design
+
+logical-cell capacityを変えずにrouting形状だけを悪化させたとき、data-side CNOT routingが
+fixed-circuit runtimeのcritical pathへ入るかを調べた。H4-H7、`4th(new_2)`、10x10 logical
+mapping、中央4 factory、reaction time=1、magic period=15、stock=10000を固定し、各precisionで
+次の3条件を比較した。
+
+```text
+rotation_precision: 1e-5, 1e-2
+routing condition:
+  remote_ban_control
+  distributed_obstacles
+  central_choke
+```
+
+全条件でbanは8 cell、usable non-factory cellは88、各factoryの初期free egressは2である。
+`remote_ban_control`は遠隔セルへのbanをcontrolとし、`distributed_obstacles`は同じban数を分散、
+`central_choke`はfactory egressを保ったまま左右間routingを狭いcorridorへ集約した。static preflight
+では全weighted CNOT pairに経路があり、logical qubit routing graphも連結している。
+
+各molecule/precision内ではQASM/optimized IR、logical workload、magic demand/depthが一致した。
+precision間では回路が異なるため絶対runtime差をarchitecture effectとして扱わず、それぞれの
+precision内で`remote_ban_control`比を評価する。
+
+### Observed runtime sensitivity
+
+central chokeのruntime penaltyは次のとおりだった。
+
+| molecule | penalty at 1e-5 | penalty at 1e-2 |
+| --- | ---: | ---: |
+| H4 | +0.0016% | +0.0055% |
+| H5 | +0.0023% | +0.0326% |
+| H6 | +0.0067% | +0.1080% |
+| H7 | +0.0093% | +0.0421% |
+
+`distributed_obstacles`のruntime penaltyはさらに小さく、`1e-5`では最大+0.0022%、`1e-2`では
+最大+0.0077%だった。H6 `1e-2`では-0.0013%となったが9 beat差にすぎず、routing改善とは
+解釈しない。
+
+cheap-RZではcentral-choke penaltyがconventionalより相対的に大きくなったが、最大でもH6の
++0.1080%である。したがって「magic需要を減らすとdata-side routing感度が相対的に見えやすくなる」
+傾向は観測されたものの、今回のfixed-budget chokeは大きなruntime差を生むarchitecture条件では
+なかった。
+
+### Routing pressure and qubit volume
+
+central chokeによりCNOT mean pathはcontrol比で約61.99-81.68%増加した。static weighted CNOT
+distanceもH4-H7でそれぞれ+51,296、+134,192、+294,520、+851,760となり、動的診断でも
+`route_disconnected` retryが増えたcaseがある。よって、routing負荷を実際に変えられなかったため
+runtime差が小さかった、という説明は支持されない。
+
+一方、central chokeのqubit-volume penaltyは明確だった。
+
+| molecule | QV penalty at 1e-5 | QV penalty at 1e-2 |
+| --- | ---: | ---: |
+| H4 | +2.7232% | +6.5875% |
+| H5 | +1.6733% | +5.6837% |
+| H6 | +2.3909% | +5.5701% |
+| H7 | +2.0053% | +6.8424% |
+
+code distanceは各molecule/precision内の3 topologyで共通だったため、このintra-precision QV差に
+code-distance threshold crossingは混在しない。経路長・retry増加がruntime critical pathでは
+ほぼ隠蔽された一方、cell-time occupancyやrouting用空間資源には反映された可能性が高い。
+
+### Interpretation and policy update
+
+今回の結果は、routing distanceや局所的なchokeがresourceへ無関係であることを意味しない。
+同じcell budgetで平均CNOT pathを約2倍にする程度では、qret schedulerが待ちをほぼ並列化でき、
+主にspace-time volumeへ影響した、という限定的な結果である。これは診断集約値に基づく推定であり、
+個々のretryがどのdependency pathで隠蔽されたかは未追跡である。
+
+runtime-primary探索としては、10x10 single-plane内のban配置をさらに細かく振る優先度を下げる。
+より強い候補としては、通信そのものへ明示的latencyを持つplane間通信などを評価する。ただし、
+usable capacityをさらに減らしたhard-threshold近傍ではroutingがcritical pathへ入る可能性が残るため、
+今回の結果を全grid容量へ一般化しない。
+
+### State classification
+
+| item | classification |
+| --- | --- |
+| H4-H7 x 2 precision x 3 routing conditionの24 case成功 | observed |
+| fixed logical workload / cell budget / factory egressの一致 | observed |
+| central chokeでCNOT mean pathが約61.99-81.68%増加 | observed |
+| central chokeのruntime penaltyが最大+0.1080% | observed |
+| central chokeのQV penaltyが+1.67-6.84% | observed |
+| cheap-RZでnormalized routing sensitivityが相対的に増加 | observed, but small in absolute magnitude |
+| tested chokeがlarge-runtime architecture conditionである | evaluated and rejected |
+| schedulerがrouting waitをcritical path外で隠蔽した | inference from aggregate diagnostics |
+| hard capacity threshold / inter-plane communicationのruntime感度 | unresolved |
+
+### Execution resources
+
+- 24 caseをtmux内で逐次実行
+- qret peak RSS: 3,362,304 KiB（約3.21 GiB）
+- GNU timeのswap count: 0
+- cgroup guard: `MemoryHigh=44G`, `MemoryMax=48G`
+- 実行後に診断パッチを復元し、通常版qretを再ビルド済み
+
+### References
+
+- `configs/surface_code_routing_capacity_sweep_h4_h7_4th_paired.yaml`
+- `configs/topologies/routing_capacity_h4_h7_4th/routing_capacity_manifest.json`
+- `artifacts/surface_code_routing_capacity_sweep_h4_h7_4th_paired/summary.md`
+- `artifacts/surface_code_routing_capacity_sweep_h4_h7_4th_paired/results.csv`
+- `artifacts/surface_code_routing_capacity_sweep_h4_h7_4th_paired/results.jsonl`
