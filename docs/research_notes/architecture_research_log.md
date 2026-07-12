@@ -1192,3 +1192,73 @@ operation別path length、同時cell occupancyを直接取得し、congestion in
 - `artifacts/surface_code_runtime_grid_threshold_h5_h7_4th/summary.md`
 - `artifacts/surface_code_runtime_grid_threshold_h5_h7_4th/results.csv`
 - `artifacts/surface_code_runtime_grid_threshold_h5_h7_4th/results.jsonl`
+
+## 2026-07-12: H7 8x8 routing diagnostic
+
+### Question
+
+fixed-circuit runtime grid sweepで観測したH7 8x8の`+11.121544%` penaltyが、どのoperationの
+routing挙動と対応するかを調べた。H5 8x8をcontrolとし、H7 8x8、8x10、10x10を同じ
+optimized IRから再compileした。qretへaggregate diagnosticをローカルに追加し、operation別の
+`ScLsSimulator::Run` attempt / rejectionと、routing後ancilla path長を取得した。
+
+診断有効時のruntime、topology-free runtime、gate count/depth、magic count/depth、QV、
+code distance、physical qubitsが既存compile_infoと一致することを全4 caseで確認した。
+
+### Observed results
+
+| case | runtime | topology overhead | magic rejection rate | magic mean path | CNOT rejection rate | CNOT mean path |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| H5 8x8 | 2,122,291 | 26 | 52.634% | 2.281 | 68.681% | 5.117 |
+| H7 8x8 | 9,858,370 | 987,508 | 66.860% | 5.258 | 70.001% | 5.674 |
+| H7 8x10 | 8,871,631 | 769 | 52.488% | 2.052 | 70.241% | 5.255 |
+| H7 10x10 | 8,871,700 | 838 | 52.482% | 2.265 | 70.283% | 5.086 |
+
+H7のtopology-free runtimeは全条件で8,870,862 beatだった。8x8と10x10の総runtime差
+986,670 beatは、topology overhead差986,670 beatと完全に一致する。
+
+H7 8x8では10x10に対してmagic path平均が132.1%増え、rejected magic attempt数が82.7%
+増えた。magic rejection rateも52.48%から66.86%へ14.38 percentage point増加した。
+一方、CNOT rejection rateは70.28%から70.00%で増えておらず、CNOT path平均の増加は11.6%
+だった。8x10ではmagic pathとrejection rateが通常域へ戻り、runtime penaltyも消えた。
+
+全caseで最大連続no-run streakは12 beatだった。したがって8x8 penaltyは単一の長い停止では
+なく、routing/scheduling rejectionが広い実行期間で反復した結果と整合する。
+
+### Interpretation
+
+前回のgenericなrouting-capacity / congestion inferenceを、より限定した形で更新する。
+H7 8x8のruntime penaltyは、長いmagic-delivery pathと大幅に増えた
+`LATTICE_SURGERY_MAGIC` rejectionに対応している。CNOT側のrejection増加は観測されないため、
+少なくともoperation別aggregate counterではmagic deliveryが主要な差分である。
+
+ただし`failed_attempts`は、runnable queue candidateに対して`ScLsSimulator::Run`がfalseを
+返した回数である。route search failure、occupied cell、factory access、timing reservationなどの
+内部理由は分解していない。同時cell occupancyも未取得であるため、「特定cellの競合まで直接
+観測した」とは主張しない。
+
+### State classification
+
+| item | classification |
+| --- | --- |
+| diagnostic有効時のresource semantics一致 | observed |
+| H7 runtime差とtopology-overhead差の一致 | observed |
+| H7 8x8でmagic path平均+132.1% | observed |
+| H7 8x8でmagic rejected attempts+82.7% | observed |
+| H7 8x8でCNOT rejection rateが増えない | observed |
+| runtime penaltyがmagic-delivery routing負荷と結び付く | observed結果に基づくinference |
+| simulator内部failure reasonの分解 | unresolved |
+| simultaneous cell occupancy / congestion map | unresolved |
+
+### Execution resources
+
+- 4 caseをtmux内で逐次実行
+- qret peak RSS: 3,381,192 KiB（約3.22 GiB）
+- GNU timeのswap count: 0
+- cgroup guard: `MemoryHigh=44G`, `MemoryMax=48G`
+
+### References
+
+- `artifacts/qret_runtime_routing_diagnostic_h5_h7_4th/summary.md`
+- `artifacts/qret_runtime_routing_diagnostic_h5_h7_4th/results.csv`
+- `artifacts/qret_runtime_routing_diagnostic_h5_h7_4th/results.jsonl`
