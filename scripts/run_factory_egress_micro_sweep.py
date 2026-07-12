@@ -244,8 +244,10 @@ def _run_case(
         result[f"magic_factory_{factory_id}_use_count"] = int(
             factory_use.get(str(factory_id), 0)
         )
-        coord = coord_by_symbol[factory_id]
-        result[f"magic_factory_{factory_id}_coord"] = f"{coord[0]},{coord[1]}"
+        coord = coord_by_symbol.get(factory_id)
+        result[f"magic_factory_{factory_id}_coord"] = (
+            f"{coord[0]},{coord[1]}" if coord is not None else ""
+        )
 
     published_diagnostic = output_root / "diagnostics" / f"{case_name}.json"
     routing._write_json(published_diagnostic, diagnostic)

@@ -1579,3 +1579,89 @@ fixed-circuit runtimeであり、QVをminimum-one-egress効果の主要根拠に
 - `artifacts/surface_code_factory_egress_generalization_h5_h6_4th/summary.md`
 - `artifacts/surface_code_factory_egress_generalization_h5_h6_4th/results.csv`
 - `artifacts/surface_code_factory_egress_generalization_h5_h6_4th/results.jsonl`
+
+## 2026-07-12: accessible factory-count sweep at conventional precision
+
+### Question and design
+
+fixed logical circuitでfactory供給数がruntimeをどこまで支配し、何個で供給律速から外れるかを
+H4-H7、`4th(new_2)`、`rotation_precision=1e-5`で調べた。10x10 logical mappingと中央4セルの
+factory budgetを固定し、factory数を1、2、3、4へ変えた。inactive factory座標は`ban`へ置換し、
+active factoryとbanの合計を常に4、usable non-factory cellを96に固定した。全active factoryは
+初期free egressを2個持つ。
+
+全caseでQASM/optimized IR、logical gate/depth、CNOT、magic demand/depthは一致した。差分は
+architecture上必要な`ALLOCATE_MAGIC_FACTORY`数と、factory供給能力を含むqretの
+`runtime_without_topology`だけである。
+
+### Observed runtime
+
+| molecule | 1 factory | 2 factories | 3 factories | 4 factories |
+| --- | ---: | ---: | ---: | ---: |
+| H4 | 2,769,017 | 1,384,520 | 923,027 | 814,084 |
+| H5 | 7,138,609 | 3,569,317 | 2,379,559 | 2,122,291 |
+| H6 | 15,382,217 | 7,691,122 | 5,127,427 | 4,576,290 |
+| H7 | 29,575,609 | 14,787,817 | 9,858,559 | 8,871,700 |
+
+factory追加によるmarginal runtime reductionは全分子でほぼ共通だった。
+
+- 1から2: 約50%
+- 2から3: 約33.33%
+- 3から4: 約10.01-11.80%
+
+factory数1-3では、全分子について
+
+```text
+runtime_without_topology = ceil(magic_count * 15 / factory_count) + 16..28 beats
+```
+
+となった。したがって1-3 factoryは、ほぼ純粋なmagic-state生成速度律速である。4 factoryでは
+pure supply floorを121,833-1,476,964 beat上回り、残存する回路依存関係または別scheduleが
+critical pathへ入った。4 factoryは、tested countで初めて単純なfactory数逆数則から外れる条件で
+ある。ただし3から4でも10-12%改善するため、4から5で完全に飽和するかは未評価である。
+
+`no_magic_stock`はfactory数とともに大幅に減少した一方、`factory_egress_blocked`はno-stockに
+比べて十分小さかった。今回のruntime scalingはzero-egress pathologyの再発ではなく、供給capacity
+そのものによる。
+
+### QEC and resource caveat
+
+logical cell budgetは固定したが、長いruntimeによるQEC threshold crossingが発生した。H4では
+1-2 factoryがd=15、3-4 factoryがd=13、H6では1-2 factoryがd=17、3-4 factoryがd=15だった。
+H5はd=15、H7はd=17で全count共通だった。このためQV/physical-qubit差にはfactory供給効果に
+加えてcode-distanceの離散変化が含まれる。主結論は固定回路のbeat runtimeから導く。
+
+### Updated precision policy
+
+この結果により、`1e-5`で非magic architectureを探索するとfactory供給律速が他のruntime差を
+隠す可能性が直接確認された。今後は`1e-5`をconventional referenceとmagic-side bottleneckの
+同定に使い、`1e-2` cheap-RZ diagnostic内でfactory飽和数を再決定する。その後、cheap-RZ側で
+magic供給を非律速にしたfactory数を固定して、reaction time、routing、grid/plane条件を調べる。
+precision間の絶対runtime差はarchitecture effectとして扱わず、各precision内のspreadを比較する。
+
+### State classification
+
+| item | classification |
+| --- | --- |
+| H4-H7 x factory 1-4の16 case成功 | observed |
+| factory 1-3でinverse-count supply lawが28 beat以内 | observed |
+| 1-3 factoryがmagic supply limited | strongly supported |
+| 4 factoryでpure supply lawから離脱 | observed |
+| 4 factoryが完全な飽和点 | unresolved |
+| logical mapping、cell budget、initial egressの固定 | observed |
+| QV差にcode-distance crossingが混在 | observed |
+
+### Execution resources
+
+- 16 caseをtmux内で逐次実行
+- qret peak RSS: 4,096,328 KiB（約3.91 GiB）
+- GNU timeのswap count: 0
+- cgroup guard: `MemoryHigh=44G`, `MemoryMax=48G`
+
+### References
+
+- `configs/surface_code_accessible_factory_count_sweep_h4_h7_4th.yaml`
+- `configs/topologies/accessible_factory_count_h4_h7_4th/accessible_factory_count_manifest.json`
+- `artifacts/surface_code_accessible_factory_count_sweep_h4_h7_4th/summary.md`
+- `artifacts/surface_code_accessible_factory_count_sweep_h4_h7_4th/results.csv`
+- `artifacts/surface_code_accessible_factory_count_sweep_h4_h7_4th/results.jsonl`
