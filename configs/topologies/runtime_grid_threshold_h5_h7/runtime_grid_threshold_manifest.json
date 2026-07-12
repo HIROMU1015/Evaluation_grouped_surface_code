@@ -1,0 +1,1812 @@
+{
+  "grid_sizes": [
+    [
+      8,
+      8
+    ],
+    [
+      8,
+      10
+    ],
+    [
+      9,
+      9
+    ],
+    [
+      10,
+      8
+    ],
+    [
+      10,
+      10
+    ],
+    [
+      10,
+      12
+    ],
+    [
+      12,
+      10
+    ]
+  ],
+  "grids": {
+    "10x10": {
+      "grid_size": [
+        10,
+        10
+      ],
+      "magic_factories": [
+        {
+          "coord": [
+            4,
+            4
+          ],
+          "symbol": 0
+        },
+        {
+          "coord": [
+            4,
+            5
+          ],
+          "symbol": 1
+        },
+        {
+          "coord": [
+            5,
+            4
+          ],
+          "symbol": 2
+        },
+        {
+          "coord": [
+            5,
+            5
+          ],
+          "symbol": 3
+        }
+      ],
+      "molecules": {
+        "H5": {
+          "bbox": {
+            "x_max": 8,
+            "x_min": 2,
+            "y_max": 8,
+            "y_min": 2
+          },
+          "mapping": [
+            {
+              "coord": [
+                4,
+                2
+              ],
+              "logical_qubit": 0
+            },
+            {
+              "coord": [
+                2,
+                4
+              ],
+              "logical_qubit": 1
+            },
+            {
+              "coord": [
+                6,
+                2
+              ],
+              "logical_qubit": 2
+            },
+            {
+              "coord": [
+                7,
+                4
+              ],
+              "logical_qubit": 3
+            },
+            {
+              "coord": [
+                8,
+                2
+              ],
+              "logical_qubit": 4
+            },
+            {
+              "coord": [
+                2,
+                8
+              ],
+              "logical_qubit": 5
+            },
+            {
+              "coord": [
+                4,
+                7
+              ],
+              "logical_qubit": 6
+            },
+            {
+              "coord": [
+                2,
+                6
+              ],
+              "logical_qubit": 7
+            },
+            {
+              "coord": [
+                6,
+                7
+              ],
+              "logical_qubit": 8
+            },
+            {
+              "coord": [
+                8,
+                6
+              ],
+              "logical_qubit": 9
+            },
+            {
+              "coord": [
+                2,
+                2
+              ],
+              "logical_qubit": 10
+            }
+          ],
+          "num_logical_qubits": 11,
+          "qasm_path": "artifacts/surface_code_cache/gr/prepared_step/H5_sto-3g_triplet_1__distance_100_charge_1_grouping__4th_new_2_/5bd1ca76add60d60/step.qasm",
+          "qasm_sha256": "e6248f75189a660f83bf043f3d95b4f557339da84775960bbbb8f0d14115e3e6",
+          "supplemental_non_soft_cells": 0,
+          "topology_path": "configs/topologies/runtime_grid_threshold_h5_h7/h5_10x10_compact_interaction_aware.yaml",
+          "weighted_cnot_distance": 210628
+        },
+        "H7": {
+          "bbox": {
+            "x_max": 9,
+            "x_min": 0,
+            "y_max": 9,
+            "y_min": 0
+          },
+          "mapping": [
+            {
+              "coord": [
+                2,
+                4
+              ],
+              "logical_qubit": 0
+            },
+            {
+              "coord": [
+                4,
+                7
+              ],
+              "logical_qubit": 1
+            },
+            {
+              "coord": [
+                4,
+                2
+              ],
+              "logical_qubit": 2
+            },
+            {
+              "coord": [
+                2,
+                2
+              ],
+              "logical_qubit": 3
+            },
+            {
+              "coord": [
+                2,
+                8
+              ],
+              "logical_qubit": 4
+            },
+            {
+              "coord": [
+                0,
+                4
+              ],
+              "logical_qubit": 5
+            },
+            {
+              "coord": [
+                4,
+                0
+              ],
+              "logical_qubit": 6
+            },
+            {
+              "coord": [
+                8,
+                6
+              ],
+              "logical_qubit": 7
+            },
+            {
+              "coord": [
+                7,
+                4
+              ],
+              "logical_qubit": 8
+            },
+            {
+              "coord": [
+                6,
+                7
+              ],
+              "logical_qubit": 9
+            },
+            {
+              "coord": [
+                6,
+                2
+              ],
+              "logical_qubit": 10
+            },
+            {
+              "coord": [
+                4,
+                9
+              ],
+              "logical_qubit": 11
+            },
+            {
+              "coord": [
+                8,
+                2
+              ],
+              "logical_qubit": 12
+            },
+            {
+              "coord": [
+                9,
+                4
+              ],
+              "logical_qubit": 13
+            },
+            {
+              "coord": [
+                2,
+                6
+              ],
+              "logical_qubit": 14
+            }
+          ],
+          "num_logical_qubits": 15,
+          "qasm_path": "artifacts/surface_code_cache/gr/prepared_step/H7_sto-3g_triplet_1__distance_100_charge_1_grouping__4th_new_2_/94a3628e1683d4d0/step.qasm",
+          "qasm_sha256": "4406dbfd1fb59a7affb9165a4d61736887111abad5a640859ebc38f0585c6fac",
+          "supplemental_non_soft_cells": 0,
+          "topology_path": "configs/topologies/runtime_grid_threshold_h5_h7/h7_10x10_compact_interaction_aware.yaml",
+          "weighted_cnot_distance": 1182008
+        }
+      },
+      "soft_candidate_count": 24
+    },
+    "10x12": {
+      "grid_size": [
+        10,
+        12
+      ],
+      "magic_factories": [
+        {
+          "coord": [
+            4,
+            5
+          ],
+          "symbol": 0
+        },
+        {
+          "coord": [
+            4,
+            6
+          ],
+          "symbol": 1
+        },
+        {
+          "coord": [
+            5,
+            5
+          ],
+          "symbol": 2
+        },
+        {
+          "coord": [
+            5,
+            6
+          ],
+          "symbol": 3
+        }
+      ],
+      "molecules": {
+        "H5": {
+          "bbox": {
+            "x_max": 8,
+            "x_min": 2,
+            "y_max": 8,
+            "y_min": 2
+          },
+          "mapping": [
+            {
+              "coord": [
+                2,
+                6
+              ],
+              "logical_qubit": 0
+            },
+            {
+              "coord": [
+                4,
+                8
+              ],
+              "logical_qubit": 1
+            },
+            {
+              "coord": [
+                6,
+                8
+              ],
+              "logical_qubit": 2
+            },
+            {
+              "coord": [
+                7,
+                6
+              ],
+              "logical_qubit": 3
+            },
+            {
+              "coord": [
+                8,
+                8
+              ],
+              "logical_qubit": 4
+            },
+            {
+              "coord": [
+                2,
+                2
+              ],
+              "logical_qubit": 5
+            },
+            {
+              "coord": [
+                4,
+                2
+              ],
+              "logical_qubit": 6
+            },
+            {
+              "coord": [
+                2,
+                4
+              ],
+              "logical_qubit": 7
+            },
+            {
+              "coord": [
+                7,
+                4
+              ],
+              "logical_qubit": 8
+            },
+            {
+              "coord": [
+                6,
+                2
+              ],
+              "logical_qubit": 9
+            },
+            {
+              "coord": [
+                2,
+                8
+              ],
+              "logical_qubit": 10
+            }
+          ],
+          "num_logical_qubits": 11,
+          "qasm_path": "artifacts/surface_code_cache/gr/prepared_step/H5_sto-3g_triplet_1__distance_100_charge_1_grouping__4th_new_2_/5bd1ca76add60d60/step.qasm",
+          "qasm_sha256": "e6248f75189a660f83bf043f3d95b4f557339da84775960bbbb8f0d14115e3e6",
+          "supplemental_non_soft_cells": 0,
+          "topology_path": "configs/topologies/runtime_grid_threshold_h5_h7/h5_10x12_compact_interaction_aware.yaml",
+          "weighted_cnot_distance": 213956
+        },
+        "H7": {
+          "bbox": {
+            "x_max": 9,
+            "x_min": 0,
+            "y_max": 10,
+            "y_min": 2
+          },
+          "mapping": [
+            {
+              "coord": [
+                2,
+                6
+              ],
+              "logical_qubit": 0
+            },
+            {
+              "coord": [
+                2,
+                4
+              ],
+              "logical_qubit": 1
+            },
+            {
+              "coord": [
+                0,
+                6
+              ],
+              "logical_qubit": 2
+            },
+            {
+              "coord": [
+                2,
+                8
+              ],
+              "logical_qubit": 3
+            },
+            {
+              "coord": [
+                4,
+                8
+              ],
+              "logical_qubit": 4
+            },
+            {
+              "coord": [
+                6,
+                8
+              ],
+              "logical_qubit": 5
+            },
+            {
+              "coord": [
+                4,
+                10
+              ],
+              "logical_qubit": 6
+            },
+            {
+              "coord": [
+                6,
+                2
+              ],
+              "logical_qubit": 7
+            },
+            {
+              "coord": [
+                7,
+                4
+              ],
+              "logical_qubit": 8
+            },
+            {
+              "coord": [
+                7,
+                6
+              ],
+              "logical_qubit": 9
+            },
+            {
+              "coord": [
+                2,
+                2
+              ],
+              "logical_qubit": 10
+            },
+            {
+              "coord": [
+                4,
+                2
+              ],
+              "logical_qubit": 11
+            },
+            {
+              "coord": [
+                9,
+                6
+              ],
+              "logical_qubit": 12
+            },
+            {
+              "coord": [
+                8,
+                8
+              ],
+              "logical_qubit": 13
+            },
+            {
+              "coord": [
+                0,
+                4
+              ],
+              "logical_qubit": 14
+            }
+          ],
+          "num_logical_qubits": 15,
+          "qasm_path": "artifacts/surface_code_cache/gr/prepared_step/H7_sto-3g_triplet_1__distance_100_charge_1_grouping__4th_new_2_/94a3628e1683d4d0/step.qasm",
+          "qasm_sha256": "4406dbfd1fb59a7affb9165a4d61736887111abad5a640859ebc38f0585c6fac",
+          "supplemental_non_soft_cells": 0,
+          "topology_path": "configs/topologies/runtime_grid_threshold_h5_h7/h7_10x12_compact_interaction_aware.yaml",
+          "weighted_cnot_distance": 1186728
+        }
+      },
+      "soft_candidate_count": 28
+    },
+    "10x8": {
+      "grid_size": [
+        10,
+        8
+      ],
+      "magic_factories": [
+        {
+          "coord": [
+            4,
+            3
+          ],
+          "symbol": 0
+        },
+        {
+          "coord": [
+            4,
+            4
+          ],
+          "symbol": 1
+        },
+        {
+          "coord": [
+            5,
+            3
+          ],
+          "symbol": 2
+        },
+        {
+          "coord": [
+            5,
+            4
+          ],
+          "symbol": 3
+        }
+      ],
+      "molecules": {
+        "H5": {
+          "bbox": {
+            "x_max": 8,
+            "x_min": 2,
+            "y_max": 6,
+            "y_min": 0
+          },
+          "mapping": [
+            {
+              "coord": [
+                2,
+                4
+              ],
+              "logical_qubit": 0
+            },
+            {
+              "coord": [
+                4,
+                6
+              ],
+              "logical_qubit": 1
+            },
+            {
+              "coord": [
+                6,
+                6
+              ],
+              "logical_qubit": 2
+            },
+            {
+              "coord": [
+                7,
+                4
+              ],
+              "logical_qubit": 3
+            },
+            {
+              "coord": [
+                8,
+                6
+              ],
+              "logical_qubit": 4
+            },
+            {
+              "coord": [
+                2,
+                0
+              ],
+              "logical_qubit": 5
+            },
+            {
+              "coord": [
+                4,
+                0
+              ],
+              "logical_qubit": 6
+            },
+            {
+              "coord": [
+                2,
+                2
+              ],
+              "logical_qubit": 7
+            },
+            {
+              "coord": [
+                7,
+                2
+              ],
+              "logical_qubit": 8
+            },
+            {
+              "coord": [
+                6,
+                0
+              ],
+              "logical_qubit": 9
+            },
+            {
+              "coord": [
+                2,
+                6
+              ],
+              "logical_qubit": 10
+            }
+          ],
+          "num_logical_qubits": 11,
+          "qasm_path": "artifacts/surface_code_cache/gr/prepared_step/H5_sto-3g_triplet_1__distance_100_charge_1_grouping__4th_new_2_/5bd1ca76add60d60/step.qasm",
+          "qasm_sha256": "e6248f75189a660f83bf043f3d95b4f557339da84775960bbbb8f0d14115e3e6",
+          "supplemental_non_soft_cells": 0,
+          "topology_path": "configs/topologies/runtime_grid_threshold_h5_h7/h5_10x8_compact_interaction_aware.yaml",
+          "weighted_cnot_distance": 213956
+        },
+        "H7": {
+          "bbox": {
+            "x_max": 9,
+            "x_min": 0,
+            "y_max": 6,
+            "y_min": 0
+          },
+          "mapping": [
+            {
+              "coord": [
+                2,
+                4
+              ],
+              "logical_qubit": 0
+            },
+            {
+              "coord": [
+                4,
+                6
+              ],
+              "logical_qubit": 1
+            },
+            {
+              "coord": [
+                6,
+                6
+              ],
+              "logical_qubit": 2
+            },
+            {
+              "coord": [
+                7,
+                4
+              ],
+              "logical_qubit": 3
+            },
+            {
+              "coord": [
+                2,
+                2
+              ],
+              "logical_qubit": 4
+            },
+            {
+              "coord": [
+                0,
+                4
+              ],
+              "logical_qubit": 5
+            },
+            {
+              "coord": [
+                0,
+                2
+              ],
+              "logical_qubit": 6
+            },
+            {
+              "coord": [
+                6,
+                0
+              ],
+              "logical_qubit": 7
+            },
+            {
+              "coord": [
+                7,
+                2
+              ],
+              "logical_qubit": 8
+            },
+            {
+              "coord": [
+                4,
+                0
+              ],
+              "logical_qubit": 9
+            },
+            {
+              "coord": [
+                8,
+                6
+              ],
+              "logical_qubit": 10
+            },
+            {
+              "coord": [
+                9,
+                4
+              ],
+              "logical_qubit": 11
+            },
+            {
+              "coord": [
+                2,
+                0
+              ],
+              "logical_qubit": 12
+            },
+            {
+              "coord": [
+                9,
+                2
+              ],
+              "logical_qubit": 13
+            },
+            {
+              "coord": [
+                2,
+                6
+              ],
+              "logical_qubit": 14
+            }
+          ],
+          "num_logical_qubits": 15,
+          "qasm_path": "artifacts/surface_code_cache/gr/prepared_step/H7_sto-3g_triplet_1__distance_100_charge_1_grouping__4th_new_2_/94a3628e1683d4d0/step.qasm",
+          "qasm_sha256": "4406dbfd1fb59a7affb9165a4d61736887111abad5a640859ebc38f0585c6fac",
+          "supplemental_non_soft_cells": 0,
+          "topology_path": "configs/topologies/runtime_grid_threshold_h5_h7/h7_10x8_compact_interaction_aware.yaml",
+          "weighted_cnot_distance": 1219188
+        }
+      },
+      "soft_candidate_count": 18
+    },
+    "12x10": {
+      "grid_size": [
+        12,
+        10
+      ],
+      "magic_factories": [
+        {
+          "coord": [
+            5,
+            4
+          ],
+          "symbol": 0
+        },
+        {
+          "coord": [
+            5,
+            5
+          ],
+          "symbol": 1
+        },
+        {
+          "coord": [
+            6,
+            4
+          ],
+          "symbol": 2
+        },
+        {
+          "coord": [
+            6,
+            5
+          ],
+          "symbol": 3
+        }
+      ],
+      "molecules": {
+        "H5": {
+          "bbox": {
+            "x_max": 8,
+            "x_min": 2,
+            "y_max": 8,
+            "y_min": 2
+          },
+          "mapping": [
+            {
+              "coord": [
+                8,
+                4
+              ],
+              "logical_qubit": 0
+            },
+            {
+              "coord": [
+                6,
+                2
+              ],
+              "logical_qubit": 1
+            },
+            {
+              "coord": [
+                8,
+                6
+              ],
+              "logical_qubit": 2
+            },
+            {
+              "coord": [
+                6,
+                7
+              ],
+              "logical_qubit": 3
+            },
+            {
+              "coord": [
+                8,
+                8
+              ],
+              "logical_qubit": 4
+            },
+            {
+              "coord": [
+                2,
+                2
+              ],
+              "logical_qubit": 5
+            },
+            {
+              "coord": [
+                4,
+                2
+              ],
+              "logical_qubit": 6
+            },
+            {
+              "coord": [
+                4,
+                7
+              ],
+              "logical_qubit": 7
+            },
+            {
+              "coord": [
+                2,
+                4
+              ],
+              "logical_qubit": 8
+            },
+            {
+              "coord": [
+                2,
+                6
+              ],
+              "logical_qubit": 9
+            },
+            {
+              "coord": [
+                8,
+                2
+              ],
+              "logical_qubit": 10
+            }
+          ],
+          "num_logical_qubits": 11,
+          "qasm_path": "artifacts/surface_code_cache/gr/prepared_step/H5_sto-3g_triplet_1__distance_100_charge_1_grouping__4th_new_2_/5bd1ca76add60d60/step.qasm",
+          "qasm_sha256": "e6248f75189a660f83bf043f3d95b4f557339da84775960bbbb8f0d14115e3e6",
+          "supplemental_non_soft_cells": 0,
+          "topology_path": "configs/topologies/runtime_grid_threshold_h5_h7/h5_12x10_compact_interaction_aware.yaml",
+          "weighted_cnot_distance": 213880
+        },
+        "H7": {
+          "bbox": {
+            "x_max": 10,
+            "x_min": 2,
+            "y_max": 9,
+            "y_min": 0
+          },
+          "mapping": [
+            {
+              "coord": [
+                6,
+                2
+              ],
+              "logical_qubit": 0
+            },
+            {
+              "coord": [
+                4,
+                2
+              ],
+              "logical_qubit": 1
+            },
+            {
+              "coord": [
+                6,
+                0
+              ],
+              "logical_qubit": 2
+            },
+            {
+              "coord": [
+                8,
+                2
+              ],
+              "logical_qubit": 3
+            },
+            {
+              "coord": [
+                8,
+                4
+              ],
+              "logical_qubit": 4
+            },
+            {
+              "coord": [
+                8,
+                6
+              ],
+              "logical_qubit": 5
+            },
+            {
+              "coord": [
+                10,
+                4
+              ],
+              "logical_qubit": 6
+            },
+            {
+              "coord": [
+                2,
+                6
+              ],
+              "logical_qubit": 7
+            },
+            {
+              "coord": [
+                4,
+                7
+              ],
+              "logical_qubit": 8
+            },
+            {
+              "coord": [
+                6,
+                7
+              ],
+              "logical_qubit": 9
+            },
+            {
+              "coord": [
+                2,
+                2
+              ],
+              "logical_qubit": 10
+            },
+            {
+              "coord": [
+                2,
+                4
+              ],
+              "logical_qubit": 11
+            },
+            {
+              "coord": [
+                6,
+                9
+              ],
+              "logical_qubit": 12
+            },
+            {
+              "coord": [
+                8,
+                8
+              ],
+              "logical_qubit": 13
+            },
+            {
+              "coord": [
+                4,
+                0
+              ],
+              "logical_qubit": 14
+            }
+          ],
+          "num_logical_qubits": 15,
+          "qasm_path": "artifacts/surface_code_cache/gr/prepared_step/H7_sto-3g_triplet_1__distance_100_charge_1_grouping__4th_new_2_/94a3628e1683d4d0/step.qasm",
+          "qasm_sha256": "4406dbfd1fb59a7affb9165a4d61736887111abad5a640859ebc38f0585c6fac",
+          "supplemental_non_soft_cells": 0,
+          "topology_path": "configs/topologies/runtime_grid_threshold_h5_h7/h7_12x10_compact_interaction_aware.yaml",
+          "weighted_cnot_distance": 1186728
+        }
+      },
+      "soft_candidate_count": 28
+    },
+    "8x10": {
+      "grid_size": [
+        8,
+        10
+      ],
+      "magic_factories": [
+        {
+          "coord": [
+            3,
+            4
+          ],
+          "symbol": 0
+        },
+        {
+          "coord": [
+            3,
+            5
+          ],
+          "symbol": 1
+        },
+        {
+          "coord": [
+            4,
+            4
+          ],
+          "symbol": 2
+        },
+        {
+          "coord": [
+            4,
+            5
+          ],
+          "symbol": 3
+        }
+      ],
+      "molecules": {
+        "H5": {
+          "bbox": {
+            "x_max": 6,
+            "x_min": 0,
+            "y_max": 8,
+            "y_min": 2
+          },
+          "mapping": [
+            {
+              "coord": [
+                6,
+                4
+              ],
+              "logical_qubit": 0
+            },
+            {
+              "coord": [
+                4,
+                2
+              ],
+              "logical_qubit": 1
+            },
+            {
+              "coord": [
+                6,
+                6
+              ],
+              "logical_qubit": 2
+            },
+            {
+              "coord": [
+                4,
+                7
+              ],
+              "logical_qubit": 3
+            },
+            {
+              "coord": [
+                6,
+                8
+              ],
+              "logical_qubit": 4
+            },
+            {
+              "coord": [
+                0,
+                2
+              ],
+              "logical_qubit": 5
+            },
+            {
+              "coord": [
+                2,
+                2
+              ],
+              "logical_qubit": 6
+            },
+            {
+              "coord": [
+                2,
+                7
+              ],
+              "logical_qubit": 7
+            },
+            {
+              "coord": [
+                0,
+                4
+              ],
+              "logical_qubit": 8
+            },
+            {
+              "coord": [
+                0,
+                6
+              ],
+              "logical_qubit": 9
+            },
+            {
+              "coord": [
+                6,
+                2
+              ],
+              "logical_qubit": 10
+            }
+          ],
+          "num_logical_qubits": 11,
+          "qasm_path": "artifacts/surface_code_cache/gr/prepared_step/H5_sto-3g_triplet_1__distance_100_charge_1_grouping__4th_new_2_/5bd1ca76add60d60/step.qasm",
+          "qasm_sha256": "e6248f75189a660f83bf043f3d95b4f557339da84775960bbbb8f0d14115e3e6",
+          "supplemental_non_soft_cells": 0,
+          "topology_path": "configs/topologies/runtime_grid_threshold_h5_h7/h5_8x10_compact_interaction_aware.yaml",
+          "weighted_cnot_distance": 213880
+        },
+        "H7": {
+          "bbox": {
+            "x_max": 6,
+            "x_min": 0,
+            "y_max": 9,
+            "y_min": 0
+          },
+          "mapping": [
+            {
+              "coord": [
+                4,
+                2
+              ],
+              "logical_qubit": 0
+            },
+            {
+              "coord": [
+                6,
+                4
+              ],
+              "logical_qubit": 1
+            },
+            {
+              "coord": [
+                6,
+                6
+              ],
+              "logical_qubit": 2
+            },
+            {
+              "coord": [
+                4,
+                7
+              ],
+              "logical_qubit": 3
+            },
+            {
+              "coord": [
+                2,
+                2
+              ],
+              "logical_qubit": 4
+            },
+            {
+              "coord": [
+                4,
+                0
+              ],
+              "logical_qubit": 5
+            },
+            {
+              "coord": [
+                2,
+                0
+              ],
+              "logical_qubit": 6
+            },
+            {
+              "coord": [
+                0,
+                6
+              ],
+              "logical_qubit": 7
+            },
+            {
+              "coord": [
+                2,
+                7
+              ],
+              "logical_qubit": 8
+            },
+            {
+              "coord": [
+                0,
+                4
+              ],
+              "logical_qubit": 9
+            },
+            {
+              "coord": [
+                6,
+                8
+              ],
+              "logical_qubit": 10
+            },
+            {
+              "coord": [
+                4,
+                9
+              ],
+              "logical_qubit": 11
+            },
+            {
+              "coord": [
+                0,
+                2
+              ],
+              "logical_qubit": 12
+            },
+            {
+              "coord": [
+                2,
+                9
+              ],
+              "logical_qubit": 13
+            },
+            {
+              "coord": [
+                6,
+                2
+              ],
+              "logical_qubit": 14
+            }
+          ],
+          "num_logical_qubits": 15,
+          "qasm_path": "artifacts/surface_code_cache/gr/prepared_step/H7_sto-3g_triplet_1__distance_100_charge_1_grouping__4th_new_2_/94a3628e1683d4d0/step.qasm",
+          "qasm_sha256": "4406dbfd1fb59a7affb9165a4d61736887111abad5a640859ebc38f0585c6fac",
+          "supplemental_non_soft_cells": 0,
+          "topology_path": "configs/topologies/runtime_grid_threshold_h5_h7/h7_8x10_compact_interaction_aware.yaml",
+          "weighted_cnot_distance": 1219188
+        }
+      },
+      "soft_candidate_count": 18
+    },
+    "8x8": {
+      "grid_size": [
+        8,
+        8
+      ],
+      "magic_factories": [
+        {
+          "coord": [
+            3,
+            3
+          ],
+          "symbol": 0
+        },
+        {
+          "coord": [
+            3,
+            4
+          ],
+          "symbol": 1
+        },
+        {
+          "coord": [
+            4,
+            3
+          ],
+          "symbol": 2
+        },
+        {
+          "coord": [
+            4,
+            4
+          ],
+          "symbol": 3
+        }
+      ],
+      "molecules": {
+        "H5": {
+          "bbox": {
+            "x_max": 6,
+            "x_min": 0,
+            "y_max": 6,
+            "y_min": 0
+          },
+          "mapping": [
+            {
+              "coord": [
+                4,
+                6
+              ],
+              "logical_qubit": 0
+            },
+            {
+              "coord": [
+                6,
+                4
+              ],
+              "logical_qubit": 1
+            },
+            {
+              "coord": [
+                2,
+                6
+              ],
+              "logical_qubit": 2
+            },
+            {
+              "coord": [
+                0,
+                4
+              ],
+              "logical_qubit": 3
+            },
+            {
+              "coord": [
+                0,
+                6
+              ],
+              "logical_qubit": 4
+            },
+            {
+              "coord": [
+                6,
+                0
+              ],
+              "logical_qubit": 5
+            },
+            {
+              "coord": [
+                4,
+                0
+              ],
+              "logical_qubit": 6
+            },
+            {
+              "coord": [
+                6,
+                2
+              ],
+              "logical_qubit": 7
+            },
+            {
+              "coord": [
+                2,
+                0
+              ],
+              "logical_qubit": 8
+            },
+            {
+              "coord": [
+                0,
+                2
+              ],
+              "logical_qubit": 9
+            },
+            {
+              "coord": [
+                6,
+                6
+              ],
+              "logical_qubit": 10
+            }
+          ],
+          "num_logical_qubits": 11,
+          "qasm_path": "artifacts/surface_code_cache/gr/prepared_step/H5_sto-3g_triplet_1__distance_100_charge_1_grouping__4th_new_2_/5bd1ca76add60d60/step.qasm",
+          "qasm_sha256": "e6248f75189a660f83bf043f3d95b4f557339da84775960bbbb8f0d14115e3e6",
+          "supplemental_non_soft_cells": 0,
+          "topology_path": "configs/topologies/runtime_grid_threshold_h5_h7/h5_8x8_compact_interaction_aware.yaml",
+          "weighted_cnot_distance": 223808
+        },
+        "H7": {
+          "bbox": {
+            "x_max": 6,
+            "x_min": 0,
+            "y_max": 6,
+            "y_min": 0
+          },
+          "mapping": [
+            {
+              "coord": [
+                3,
+                5
+              ],
+              "logical_qubit": 0
+            },
+            {
+              "coord": [
+                2,
+                3
+              ],
+              "logical_qubit": 1
+            },
+            {
+              "coord": [
+                3,
+                2
+              ],
+              "logical_qubit": 2
+            },
+            {
+              "coord": [
+                4,
+                6
+              ],
+              "logical_qubit": 3
+            },
+            {
+              "coord": [
+                6,
+                4
+              ],
+              "logical_qubit": 4
+            },
+            {
+              "coord": [
+                6,
+                2
+              ],
+              "logical_qubit": 5
+            },
+            {
+              "coord": [
+                6,
+                6
+              ],
+              "logical_qubit": 6
+            },
+            {
+              "coord": [
+                0,
+                0
+              ],
+              "logical_qubit": 7
+            },
+            {
+              "coord": [
+                0,
+                2
+              ],
+              "logical_qubit": 8
+            },
+            {
+              "coord": [
+                2,
+                0
+              ],
+              "logical_qubit": 9
+            },
+            {
+              "coord": [
+                0,
+                4
+              ],
+              "logical_qubit": 10
+            },
+            {
+              "coord": [
+                4,
+                0
+              ],
+              "logical_qubit": 11
+            },
+            {
+              "coord": [
+                0,
+                6
+              ],
+              "logical_qubit": 12
+            },
+            {
+              "coord": [
+                6,
+                0
+              ],
+              "logical_qubit": 13
+            },
+            {
+              "coord": [
+                2,
+                6
+              ],
+              "logical_qubit": 14
+            }
+          ],
+          "num_logical_qubits": 15,
+          "qasm_path": "artifacts/surface_code_cache/gr/prepared_step/H7_sto-3g_triplet_1__distance_100_charge_1_grouping__4th_new_2_/94a3628e1683d4d0/step.qasm",
+          "qasm_sha256": "4406dbfd1fb59a7affb9165a4d61736887111abad5a640859ebc38f0585c6fac",
+          "supplemental_non_soft_cells": 3,
+          "topology_path": "configs/topologies/runtime_grid_threshold_h5_h7/h7_8x8_compact_interaction_aware.yaml",
+          "weighted_cnot_distance": 1032100
+        }
+      },
+      "soft_candidate_count": 12
+    },
+    "9x9": {
+      "grid_size": [
+        9,
+        9
+      ],
+      "magic_factories": [
+        {
+          "coord": [
+            3,
+            3
+          ],
+          "symbol": 0
+        },
+        {
+          "coord": [
+            3,
+            4
+          ],
+          "symbol": 1
+        },
+        {
+          "coord": [
+            4,
+            3
+          ],
+          "symbol": 2
+        },
+        {
+          "coord": [
+            4,
+            4
+          ],
+          "symbol": 3
+        }
+      ],
+      "molecules": {
+        "H5": {
+          "bbox": {
+            "x_max": 8,
+            "x_min": 0,
+            "y_max": 8,
+            "y_min": 0
+          },
+          "mapping": [
+            {
+              "coord": [
+                4,
+                6
+              ],
+              "logical_qubit": 0
+            },
+            {
+              "coord": [
+                6,
+                4
+              ],
+              "logical_qubit": 1
+            },
+            {
+              "coord": [
+                2,
+                6
+              ],
+              "logical_qubit": 2
+            },
+            {
+              "coord": [
+                0,
+                6
+              ],
+              "logical_qubit": 3
+            },
+            {
+              "coord": [
+                0,
+                2
+              ],
+              "logical_qubit": 4
+            },
+            {
+              "coord": [
+                6,
+                2
+              ],
+              "logical_qubit": 5
+            },
+            {
+              "coord": [
+                8,
+                4
+              ],
+              "logical_qubit": 6
+            },
+            {
+              "coord": [
+                4,
+                8
+              ],
+              "logical_qubit": 7
+            },
+            {
+              "coord": [
+                0,
+                4
+              ],
+              "logical_qubit": 8
+            },
+            {
+              "coord": [
+                4,
+                0
+              ],
+              "logical_qubit": 9
+            },
+            {
+              "coord": [
+                6,
+                6
+              ],
+              "logical_qubit": 10
+            }
+          ],
+          "num_logical_qubits": 11,
+          "qasm_path": "artifacts/surface_code_cache/gr/prepared_step/H5_sto-3g_triplet_1__distance_100_charge_1_grouping__4th_new_2_/5bd1ca76add60d60/step.qasm",
+          "qasm_sha256": "e6248f75189a660f83bf043f3d95b4f557339da84775960bbbb8f0d14115e3e6",
+          "supplemental_non_soft_cells": 0,
+          "topology_path": "configs/topologies/runtime_grid_threshold_h5_h7/h5_9x9_compact_interaction_aware.yaml",
+          "weighted_cnot_distance": 215120
+        },
+        "H7": {
+          "bbox": {
+            "x_max": 8,
+            "x_min": 0,
+            "y_max": 8,
+            "y_min": 0
+          },
+          "mapping": [
+            {
+              "coord": [
+                4,
+                6
+              ],
+              "logical_qubit": 0
+            },
+            {
+              "coord": [
+                6,
+                6
+              ],
+              "logical_qubit": 1
+            },
+            {
+              "coord": [
+                6,
+                4
+              ],
+              "logical_qubit": 2
+            },
+            {
+              "coord": [
+                4,
+                8
+              ],
+              "logical_qubit": 3
+            },
+            {
+              "coord": [
+                6,
+                8
+              ],
+              "logical_qubit": 4
+            },
+            {
+              "coord": [
+                6,
+                2
+              ],
+              "logical_qubit": 5
+            },
+            {
+              "coord": [
+                6,
+                0
+              ],
+              "logical_qubit": 6
+            },
+            {
+              "coord": [
+                0,
+                4
+              ],
+              "logical_qubit": 7
+            },
+            {
+              "coord": [
+                0,
+                6
+              ],
+              "logical_qubit": 8
+            },
+            {
+              "coord": [
+                2,
+                8
+              ],
+              "logical_qubit": 9
+            },
+            {
+              "coord": [
+                4,
+                0
+              ],
+              "logical_qubit": 10
+            },
+            {
+              "coord": [
+                8,
+                4
+              ],
+              "logical_qubit": 11
+            },
+            {
+              "coord": [
+                0,
+                2
+              ],
+              "logical_qubit": 12
+            },
+            {
+              "coord": [
+                2,
+                0
+              ],
+              "logical_qubit": 13
+            },
+            {
+              "coord": [
+                2,
+                6
+              ],
+              "logical_qubit": 14
+            }
+          ],
+          "num_logical_qubits": 15,
+          "qasm_path": "artifacts/surface_code_cache/gr/prepared_step/H7_sto-3g_triplet_1__distance_100_charge_1_grouping__4th_new_2_/94a3628e1683d4d0/step.qasm",
+          "qasm_sha256": "4406dbfd1fb59a7affb9165a4d61736887111abad5a640859ebc38f0585c6fac",
+          "supplemental_non_soft_cells": 0,
+          "topology_path": "configs/topologies/runtime_grid_threshold_h5_h7/h7_9x9_compact_interaction_aware.yaml",
+          "weighted_cnot_distance": 1181296
+        }
+      },
+      "soft_candidate_count": 21
+    }
+  },
+  "include_auto": false,
+  "interaction_source": "pre-synthesis efficient-controlled PF-step QASM CNOT counts",
+  "molecules": [
+    "H5",
+    "H7"
+  ],
+  "schema_version": "logical_grid_capacity_topology_v1"
+}

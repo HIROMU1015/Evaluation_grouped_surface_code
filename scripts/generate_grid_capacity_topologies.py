@@ -7,7 +7,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
 
 import yaml
 
@@ -136,39 +136,52 @@ def generate(
     results_path: Path,
     cache_root: Path,
     output_root: Path,
+    *,
+    grid_sizes: Sequence[tuple[int, int]] = GRID_SIZES,
+    molecules: Sequence[str] = placement.MOLECULES,
+    include_auto: bool = True,
+    manifest_name: str = "grid_capacity_manifest.json",
 ) -> dict[str, Any]:
     qasm_paths = placement._discover_qasm_paths(results_path, cache_root)
     output_root.mkdir(parents=True, exist_ok=True)
+    molecule_names = tuple(molecules)
+    unknown_molecules = sorted(set(molecule_names) - set(placement.MOLECULES))
+    if unknown_molecules:
+        raise ValueError(f"Unsupported molecules: {unknown_molecules}")
     manifest: dict[str, Any] = {
         "schema_version": "logical_grid_capacity_topology_v1",
         "interaction_source": "pre-synthesis efficient-controlled PF-step QASM CNOT counts",
+        "grid_sizes": [list(grid_size) for grid_size in grid_sizes],
+        "molecules": list(molecule_names),
+        "include_auto": include_auto,
         "grids": {},
     }
 
     parsed: dict[str, tuple[int, placement.EdgeWeights]] = {}
-    for molecule in placement.MOLECULES:
+    for molecule in molecule_names:
         parsed[molecule] = placement._parse_qasm_interactions(qasm_paths[molecule])
 
-    for grid_size in GRID_SIZES:
+    for grid_size in grid_sizes:
         grid_name = f"{grid_size[0]}x{grid_size[1]}"
         factories = _center_factories(grid_size)
-        auto_path = output_root / f"auto_center_{grid_name}.yaml"
-        auto_path.write_text(
-            yaml.safe_dump(_topology_payload(grid_size, factories), sort_keys=False),
-            encoding="utf-8",
-        )
         grid_record: dict[str, Any] = {
             "grid_size": list(grid_size),
             "magic_factories": [
                 {"symbol": symbol, "coord": list(coord)}
                 for symbol, coord in factories
             ],
-            "auto_topology_path": placement._relative(auto_path),
             "soft_candidate_count": len(_soft_candidates(grid_size, factories)),
             "molecules": {},
         }
+        if include_auto:
+            auto_path = output_root / f"auto_center_{grid_name}.yaml"
+            auto_path.write_text(
+                yaml.safe_dump(_topology_payload(grid_size, factories), sort_keys=False),
+                encoding="utf-8",
+            )
+            grid_record["auto_topology_path"] = placement._relative(auto_path)
 
-        for molecule in placement.MOLECULES:
+        for molecule in molecule_names:
             num_qubits, edges = parsed[molecule]
             coordinates, supplemental_count = _capacity_coordinates(
                 num_qubits,
@@ -199,7 +212,7 @@ def generate(
             }
         manifest["grids"][grid_name] = grid_record
 
-    manifest_path = output_root / "grid_capacity_manifest.json"
+    manifest_path = output_root / manifest_name
     manifest_path.write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -207,11 +220,33 @@ def generate(
     return manifest
 
 
+def _grid_size(value: str) -> tuple[int, int]:
+    parts = value.lower().split("x")
+    if len(parts) != 2:
+        raise argparse.ArgumentTypeError("grid size must use WIDTHxHEIGHT")
+    try:
+        width, height = (int(part) for part in parts)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("grid dimensions must be integers") from exc
+    if width < 2 or height < 2:
+        raise argparse.ArgumentTypeError("grid dimensions must be at least 2")
+    return width, height
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results", type=Path, default=DEFAULT_RESULTS)
     parser.add_argument("--cache-root", type=Path, default=DEFAULT_CACHE_ROOT)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
+    parser.add_argument("--grid-size", action="append", type=_grid_size, dest="grid_sizes")
+    parser.add_argument(
+        "--molecule",
+        action="append",
+        choices=placement.MOLECULES,
+        dest="molecules",
+    )
+    parser.add_argument("--explicit-only", action="store_true")
+    parser.add_argument("--manifest-name", default="grid_capacity_manifest.json")
     return parser.parse_args()
 
 
@@ -221,6 +256,10 @@ def main() -> int:
         args.results.expanduser().resolve(),
         args.cache_root.expanduser().resolve(),
         args.output_root.expanduser().resolve(),
+        grid_sizes=tuple(args.grid_sizes or GRID_SIZES),
+        molecules=tuple(args.molecules or placement.MOLECULES),
+        include_auto=not args.explicit_only,
+        manifest_name=args.manifest_name,
     )
     for grid_name, grid in manifest["grids"].items():
         supplements = {

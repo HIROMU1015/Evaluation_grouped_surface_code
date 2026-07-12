@@ -1,6 +1,8 @@
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 
 SCRIPT_PATH = (
     Path(__file__).resolve().parents[1]
@@ -59,3 +61,30 @@ def test_auto_payload_omits_explicit_qubits() -> None:
     plane = payload["grids"][0]
     assert plane["coord"] == [8, 8, 0]
     assert "qubit" not in plane
+
+
+def test_rectangular_grid_capacity_coordinates_are_valid() -> None:
+    module = _load_module()
+    for grid_size in ((8, 10), (9, 9), (10, 8), (10, 12), (12, 10)):
+        factories = module._center_factories(grid_size)
+        coordinates, supplemental = module._capacity_coordinates(
+            15,
+            grid_size,
+            factories,
+        )
+        factory_coords = {coord for _, coord in factories}
+        assert len(coordinates) == len(set(coordinates)) == 15
+        assert not set(coordinates) & factory_coords
+        assert all(
+            0 <= x < grid_size[0] and 0 <= y < grid_size[1]
+            for x, y in coordinates
+        )
+        assert supplemental == 0
+
+
+def test_grid_size_parser() -> None:
+    module = _load_module()
+    assert module._grid_size("8x10") == (8, 10)
+    assert module._grid_size("12X9") == (12, 9)
+    with pytest.raises(Exception, match="WIDTHxHEIGHT"):
+        module._grid_size("10")

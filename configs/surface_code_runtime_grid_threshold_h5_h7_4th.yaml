@@ -1,0 +1,105 @@
+targets:
+  molecules:
+    - H5
+    - H7
+  pf_labels:
+    - 4th(new_2)
+
+target_error: 0.00015936001019904
+rotation_precision:
+qret_path:
+
+defaults:
+  circuit_scope: efficient_controlled_pf_one_step
+  compile_mode: ftqc_compile_topology_qec
+  topology: aware_10x10
+  machine_type: Dim2
+  mapping_algorithm: 0
+  mapping_partition_algorithm: 0
+  mapping_partition_seed: 314
+  mapping_find_place_algorithm: 0
+  magic_generation_period: 15
+  maximum_magic_state_stock:
+    policy: fixed
+    value: 10000
+  entanglement_generation_period: 100
+  maximum_entangled_state_stock: 10
+  reaction_time: 1
+  skip_compile_output: true
+  compile_info_output_mode: summary
+  save_mapping_result: false
+
+qec:
+  physical_error_rate: 0.001
+  drop_rate: 0.1
+  code_cycle_time_sec: 0.000001
+  allowed_failure_prob: 0.01
+
+topologies:
+  aware_8x8:
+    enabled: true
+    paths:
+      H5: configs/topologies/runtime_grid_threshold_h5_h7/h5_8x8_compact_interaction_aware.yaml
+      H7: configs/topologies/runtime_grid_threshold_h5_h7/h7_8x8_compact_interaction_aware.yaml
+  aware_8x10:
+    enabled: true
+    paths:
+      H5: configs/topologies/runtime_grid_threshold_h5_h7/h5_8x10_compact_interaction_aware.yaml
+      H7: configs/topologies/runtime_grid_threshold_h5_h7/h7_8x10_compact_interaction_aware.yaml
+  aware_9x9:
+    enabled: true
+    paths:
+      H5: configs/topologies/runtime_grid_threshold_h5_h7/h5_9x9_compact_interaction_aware.yaml
+      H7: configs/topologies/runtime_grid_threshold_h5_h7/h7_9x9_compact_interaction_aware.yaml
+  aware_10x8:
+    enabled: true
+    paths:
+      H5: configs/topologies/runtime_grid_threshold_h5_h7/h5_10x8_compact_interaction_aware.yaml
+      H7: configs/topologies/runtime_grid_threshold_h5_h7/h7_10x8_compact_interaction_aware.yaml
+  aware_10x10:
+    enabled: true
+    paths:
+      H5: configs/topologies/runtime_grid_threshold_h5_h7/h5_10x10_compact_interaction_aware.yaml
+      H7: configs/topologies/runtime_grid_threshold_h5_h7/h7_10x10_compact_interaction_aware.yaml
+  aware_10x12:
+    enabled: true
+    paths:
+      H5: configs/topologies/runtime_grid_threshold_h5_h7/h5_10x12_compact_interaction_aware.yaml
+      H7: configs/topologies/runtime_grid_threshold_h5_h7/h7_10x12_compact_interaction_aware.yaml
+  aware_12x10:
+    enabled: true
+    paths:
+      H5: configs/topologies/runtime_grid_threshold_h5_h7/h5_12x10_compact_interaction_aware.yaml
+      H7: configs/topologies/runtime_grid_threshold_h5_h7/h7_12x10_compact_interaction_aware.yaml
+
+architecture_cases:
+  - name: fixed_circuit_aware_8x8
+    topology: aware_8x8
+    rotation_precision: 1.0e-5
+  - name: fixed_circuit_aware_8x10
+    topology: aware_8x10
+    rotation_precision: 1.0e-5
+  - name: fixed_circuit_aware_9x9
+    topology: aware_9x9
+    rotation_precision: 1.0e-5
+  - name: fixed_circuit_aware_10x8
+    topology: aware_10x8
+    rotation_precision: 1.0e-5
+  - name: fixed_circuit_aware_10x10
+    topology: aware_10x10
+    rotation_precision: 1.0e-5
+  - name: fixed_circuit_aware_10x12
+    topology: aware_10x12
+    rotation_precision: 1.0e-5
+  - name: fixed_circuit_aware_12x10
+    topology: aware_12x10
+    rotation_precision: 1.0e-5
+
+output:
+  directory: artifacts/surface_code_runtime_grid_threshold_h5_h7_4th
+  jsonl: results.jsonl
+  csv: results.csv
+  markdown: results.md
+
+cache:
+  reuse_compile_results: true

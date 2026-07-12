@@ -1115,3 +1115,80 @@ workloadとの相互作用で決まる。
 - `artifacts/surface_code_grid_capacity_sweep_h4_h7_4th/summary.md`
 - `artifacts/surface_code_grid_capacity_sweep_h4_h7_4th/results.csv`
 - `artifacts/surface_code_grid_capacity_sweep_h4_h7_4th/results.jsonl`
+
+## 2026-07-12: fixed-circuit runtime grid threshold
+
+### Question
+
+回路合成条件を変えず、architecture条件だけでruntimeが大きく変化するcaseがあるかを調べた。
+H5をcontrol、H7をtargetとし、`4th(new_2)`、`rotation_precision=1e-5`、explicit
+interaction-aware placementを固定して、8x8、8x10、9x9、10x8、10x10、10x12、12x10を
+比較した。
+
+各molecule内でQASM hash、optimized IR hash、RZ count/depth、magic count/depth、
+topology-free runtime、code distanceが全gridで一致することを確認した。したがって以下の
+runtime差はrotation precisionやT gate数変更によるものではない。
+
+### Observed runtime
+
+14 caseはすべて成功した。H5の最大runtime差は10x10比0.016%で、実質的に不変だった。
+
+H7では8x8だけが明確な外れ値となった。
+
+| grid | runtime | vs 10x10 | topology overhead |
+| --- | ---: | ---: | ---: |
+| 8x8 | 9,858,370 | +11.121544% | 987,508 |
+| 8x10 | 8,871,631 | -0.000778% | 769 |
+| 9x9 | 8,871,647 | -0.000597% | 785 |
+| 10x8 | 8,871,614 | -0.000969% | 752 |
+| 10x10 | 8,871,700 | reference | 838 |
+| 10x12 | 8,871,167 | -0.006008% | 305 |
+| 12x10 | 8,871,184 | -0.005816% | 322 |
+
+8x8を除くH7のruntime spreadは約0.006%である。grid面積やaspect ratioに対してruntimeが
+連続的に変化したのではなく、8x8でのみcritical-path penaltyが現れた。
+
+### Interpretation
+
+8x8のsoft placement candidateは12 cellで、15 logical qubitsを持つH7 explicit placementは
+3個のnon-soft cell補完を必要とする。8x10、9x9、10x8では補完が不要になり、runtimeは直ちに
+通常値へ戻った。
+
+H7 8x8のpre-synthesis weighted CNOT distanceは1,032,100で、10x10の1,182,008より小さい。
+したがって11.12%のruntime penaltyは静的なpair distance増加では説明できない。center factory
+周辺へlogical qubitを詰めたことでrouting slackが不足し、occupied-cell congestionがcritical
+pathへ入ったという説明と整合する。ただしdirect routing-wait / congestion counterは未取得の
+ため、機構はinferredとする。
+
+H7 8x8のQVは10x10比14.057%増加した。runtime +11.122%とaverage active area +2.642%が
+同時に寄与している。他のH7 gridではruntimeが不変で、QV差は-0.255%から+1.220%だったため、
+主にactive-area差である。
+
+### Updated direction
+
+固定回路に対する大きなarchitecture runtime effectは存在する。ただし、通常配置で広く現れる
+効果ではなく、routing容量が閾値を下回ったときに急にcritical pathへ現れるthreshold effectで
+ある。
+
+次はgrid sweepを広げるより、H7 8x8と8x10または10x10について、routing wait、route retry、
+operation別path length、同時cell occupancyを直接取得し、congestion inferenceをobservedへ
+変えることを優先する。
+
+### State classification
+
+| item | classification |
+| --- | --- |
+| H5/H7 fixed-circuit grid sweep | observed |
+| H7 8x8 runtime +11.12% | observed |
+| 8x10 / 9x9 / 10x8でpenalty解消 | observed |
+| H5がruntime-insensitive control | observed |
+| H7 8x8 penaltyがrouting congestionに由来する | inferred |
+| direct routing-wait / congestion breakdown | unresolved |
+
+### References
+
+- `configs/surface_code_runtime_grid_threshold_h5_h7_4th.yaml`
+- `configs/topologies/runtime_grid_threshold_h5_h7/runtime_grid_threshold_manifest.json`
+- `artifacts/surface_code_runtime_grid_threshold_h5_h7_4th/summary.md`
+- `artifacts/surface_code_runtime_grid_threshold_h5_h7_4th/results.csv`
+- `artifacts/surface_code_runtime_grid_threshold_h5_h7_4th/results.jsonl`
