@@ -150,6 +150,10 @@ def _write_outputs(
     output_root: Path, rows: Sequence[Mapping[str, Any]]
 ) -> list[dict[str, Any]]:
     enriched = _enrich(rows)
+    precisions = {str(row["rotation_precision"]) for row in enriched}
+    if len(precisions) != 1:
+        raise RuntimeError(f"expected one rotation precision, found {sorted(precisions)}")
+    rotation_precision = next(iter(precisions))
     with (output_root / "results.jsonl").open("w", encoding="utf-8") as handle:
         for row in enriched:
             handle.write(json.dumps(row, sort_keys=True) + "\n")
@@ -165,7 +169,7 @@ def _write_outputs(
         writer.writerows(enriched)
 
     lines = [
-        "# H4-H7 Accessible Factory-Count Sweep",
+        f"# H4-H7 Accessible Factory-Count Sweep (`rotation_precision={rotation_precision}`)",
         "",
         "The compiled circuit, 10x10 logical mapping, four-cell central factory budget, magic period/stock, and QEC inputs are fixed. Inactive factory coordinates are banned so active factories plus banned cells always occupy four cells. Every active factory has two initial free egress cells.",
     ]
@@ -210,6 +214,11 @@ def _write_outputs(
         == 1
         for molecule in ("H4", "H5", "H6", "H7")
     )
+    physical_note = (
+        "- Physical-qubit count is constant within each molecule."
+        if physical_constant
+        else "- Physical-qubit count changes within at least one molecule because runtime crosses a code-distance threshold; the logical-cell budget remains fixed."
+    )
     lines.extend(
         [
             "",
@@ -218,7 +227,7 @@ def _write_outputs(
             "- Fixed logical workload match: all cases. QASM/optimized IR, logical gates/depth, and magic demand/depth are unchanged.",
             "- Expected architecture differences are `ALLOCATE_MAGIC_FACTORY` count and `runtime_without_topology`, because qret includes factory supply in that runtime estimate.",
             "- Active factories plus banned cells remain four and usable non-factory cells remain 96 in every case.",
-            f"- Physical-qubit count constant within each molecule: {'yes' if physical_constant else 'no'}; changes are caused by code-distance threshold crossings, not cell-budget changes.",
+            physical_note,
             "- Factory egress rejection should remain negligible; a large value indicates that factory count is confounded by access geometry.",
             f"- peak qret RSS: {peak_rss:,} KiB ({peak_rss / 1024**2:.2f} GiB)",
             f"- maximum GNU-time swaps: {max(int(row['gnu_time_swaps']) for row in enriched)}",
@@ -228,24 +237,37 @@ def _write_outputs(
             "",
         ]
     )
-    low_count_residual = max(
-        abs(int(row["runtime_without_topology_minus_ideal_supply"]))
+    supply_limited = [
+        row
         for row in enriched
-        if int(row["factory_count"]) <= 3
-    )
-    four_residuals = [
-        int(row["runtime_without_topology_minus_ideal_supply"])
-        for row in enriched
-        if int(row["factory_count"]) == 4
+        if abs(int(row["runtime_without_topology_minus_ideal_supply"]))
+        <= max(100, int(row["ideal_magic_supply_runtime"]) // 1000)
     ]
+    supply_labels = ", ".join(
+        f"{row['molecule']}:N={int(row['factory_count'])}" for row in supply_limited
+    )
+    saturation_counts: dict[str, int] = {}
+    for molecule in ("H4", "H5", "H6", "H7"):
+        molecule_rows = sorted(
+            (row for row in enriched if row["molecule"] == molecule),
+            key=lambda row: int(row["factory_count"]),
+        )
+        saturation_counts[molecule] = min(
+            int(row["factory_count"])
+            for row in molecule_rows
+            if abs(float(row["runtime_change_pct_vs_four_factories"])) < 1.0
+        )
+    saturation_text = ", ".join(
+        f"{molecule}:N={count}" for molecule, count in saturation_counts.items()
+    )
     lines.extend(
         [
             "## Interpretation",
             "",
-            f"- With one to three factories, `runtime_without_topology` agrees with `ceil(magic_count * {MAGIC_GENERATION_PERIOD} / factory_count)` within {low_count_residual} beats across all molecules. These cases are directly magic-supply limited.",
-            f"- With four factories, runtime exceeds that pure supply floor by {min(four_residuals):,}-{max(four_residuals):,} beats. The critical path has crossed to the remaining circuit/dependency schedule.",
-            "- The fourth factory still reduces runtime by about 10-12%, but four factories are the first tested count no longer governed by the pure inverse factory-count law.",
-            "- Egress-blocked counts stay negligible relative to no-stock counts, so the observed scaling is a supply-capacity effect rather than a recurrence of the zero-egress pathology.",
+            f"- Rows matching the pure supply floor `ceil(magic_count * {MAGIC_GENERATION_PERIOD} / factory_count)` within 0.1% (minimum tolerance 100 beats): {supply_labels or 'none'}.",
+            f"- Minimum tested factory count within 1% of the four-factory runtime: {saturation_text}.",
+            "- A large positive supply-floor residual means the remaining circuit/dependency schedule, rather than factory generation throughput, sets runtime.",
+            "- Egress-blocked and no-stock counts are reported separately so supply capacity is not confused with the zero-egress pathology.",
             "",
         ]
     )

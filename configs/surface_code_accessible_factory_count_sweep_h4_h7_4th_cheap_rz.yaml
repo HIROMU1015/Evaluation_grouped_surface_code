@@ -1,0 +1,61 @@
+experiment: fixed_circuit_accessible_factory_count_sweep_cheap_rz
+schema_version: 1
+
+source:
+  results_csv: artifacts/surface_code_grid_capacity_sweep_h4_h7_4th/results.csv
+  topology_name: aware_10x10
+  pf_label: 4th(new_2)
+  rotation_precision: 1.0e-2
+
+topology_manifest: configs/topologies/accessible_factory_count_h4_h7_4th/accessible_factory_count_manifest.json
+
+molecules:
+  - H4
+  - H5
+  - H6
+  - H7
+
+factory_counts:
+  - 1
+  - 2
+  - 3
+  - 4
+
+fixed_conditions:
+  grid_size: [10, 10]
+  machine_type: Dim2
+  factory_budget_coordinates:
+    - [4, 4]
+    - [4, 5]
+    - [5, 4]
+    - [5, 5]
+  inactive_factory_policy: replace_with_ban
+  required_minimum_free_egress_per_active_factory: 1
+  magic_generation_period: 15
+  maximum_magic_state_stock: 10000
+  entanglement_generation_period: 100
+  maximum_entangled_state_stock: 10
+  reaction_time: 1
+  physical_error_rate: 0.001
+  drop_rate: 0.1
+  code_cycle_time_sec: 0.000001
+  allowed_failure_prob: 0.01
+
+comparison_reference:
+  conventional_precision: 1.0e-5
+  conventional_results: artifacts/surface_code_accessible_factory_count_sweep_h4_h7_4th/results.csv
+  comparison_policy: compare factory-count sensitivity within each precision, not absolute runtime across precision
+
+primary_metrics:
+  - runtime
+  - runtime_topology_overhead
+  - runtime_change_vs_four_factories
+
+diagnostic_metrics:
+  - no_magic_stock
+  - factory_egress_blocked
+  - factory_use_count
+  - magic_path_length
+  - available_factory_count
+
+output_directory: artifacts/surface_code_accessible_factory_count_sweep_h4_h7_4th_cheap_rz

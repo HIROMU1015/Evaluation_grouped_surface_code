@@ -1665,3 +1665,106 @@ precision間の絶対runtime差はarchitecture effectとして扱わず、各pre
 - `artifacts/surface_code_accessible_factory_count_sweep_h4_h7_4th/summary.md`
 - `artifacts/surface_code_accessible_factory_count_sweep_h4_h7_4th/results.csv`
 - `artifacts/surface_code_accessible_factory_count_sweep_h4_h7_4th/results.jsonl`
+
+## 2026-07-13: accessible factory-count sweep at cheap-RZ precision
+
+### Question and scope
+
+conventional `rotation_precision=1e-5`ではfactory数1-3がほぼ純粋なmagic supply律速だった。
+non-magic architectureを調べる基準条件を決めるため、同じH4-H7、`4th(new_2)`、10x10 logical
+mapping、中央4-cell factory budget、period=15、stock=10000を保ち、`rotation_precision=1e-2`
+でfactory数1-4を再評価した。
+
+この`1e-2`条件はSTAR implementationではなく、arbitrary-rotation synthesis costを下げた
+cheap-RZ diagnostic workloadである。precision間の絶対runtime差はarchitecture effectとして
+扱わず、それぞれのprecision内でfactory-count sensitivityを比較する。
+
+inactive factory座標を`ban`へ置換し、active factory + banを4、usable non-factory cellを96に
+固定した。全active factoryの初期free egressは2である。各molecule内のfactory-count caseで
+QASM/optimized IR、logical gate/depth、magic demand/depthは一致した。
+
+### Observed runtime
+
+| molecule | 1 factory | 2 factories | 3 factories | 4 factories |
+| --- | ---: | ---: | ---: | ---: |
+| H4 | 182,013 | 151,372 | 148,057 | 146,410 |
+| H5 | 384,263 | 369,614 | 364,739 | 362,312 |
+| H6 | 746,141 | 723,822 | 716,387 | 712,896 |
+| H7 | 1,430,306 | 1,400,281 | 1,390,279 | 1,385,877 |
+
+4 factoryを基準にしたruntime penaltyは次のとおりだった。
+
+| molecule | 1 factory | 2 factories | 3 factories |
+| --- | ---: | ---: | ---: |
+| H4 | +24.3173% | +3.3891% | +1.1249% |
+| H5 | +6.0586% | +2.0154% | +0.6699% |
+| H6 | +4.6634% | +1.5326% | +0.4897% |
+| H7 | +3.2058% | +1.0393% | +0.3176% |
+
+1%未満を実用上の飽和判定とすると、minimum tested countはH4で4、H5-H7で3だった。H4の
+3 factoryは4 factory比+1.1249%で閾値に近い。H4-H7を共通設定で比較する場合は、保守的に
+4 factoryを固定する。
+
+### Precision-regime comparison
+
+factory-count sensitivityはcheap-RZで大幅に縮小した。
+
+| molecule | N=1 penalty at 1e-5 | N=1 penalty at 1e-2 | N=3 penalty at 1e-5 | N=3 penalty at 1e-2 |
+| --- | ---: | ---: | ---: | ---: |
+| H4 | +240.1390% | +24.3173% | +13.3823% | +1.1249% |
+| H5 | +236.3633% | +6.0586% | +12.1222% | +0.6699% |
+| H6 | +236.1285% | +4.6634% | +12.0433% | +0.4897% |
+| H7 | +233.3703% | +3.2058% | +11.1237% | +0.3176% |
+
+`1e-5`のN=1-3では`ceil(magic_count * 15 / N)`と最大28 beat差だったが、`1e-2`では
+このpure supply floorへ0.1%以内で一致するcaseはなかった。cheap-RZでは残存する回路依存関係・
+scheduleがruntimeの主要部分を決めており、factory供給だけの逆数則から外れている。
+
+ただしmagic側の影響が完全に消えたわけではない。N=1ではH4が+24.3%、H5-H7も+3.2-6.1%
+悪化し、`no_magic_stock`も観測された。cheap-RZでnon-magic architectureを評価する際も、少なすぎる
+factory数を使うとmagic待ちが再び混ざる。このため共通baselineは4 factoryとする。
+
+### Routing and QEC checks
+
+N=2以上では`factory_egress_blocked`は0-6回、N=1でも73-511回で、no-stock rejectionに比べて
+小さい。factory-count差はzero-egress pathologyではない。code distanceとphysical qubitsは各
+moleculeの全countで共通だった。
+
+H6 N=4だけ`runtime_with_topology - runtime_without_topology = -176` beatとなった。差は約-0.025%
+でfactory-count結論を変えないが、topology overheadは常に非負とは限らないというqret集約値上の
+注意として残す。topology-aware schedulingがわずかに短い理由の内部分解は未実施である。
+
+### Updated experiment policy
+
+- `1e-5`: conventional reference、magic-side bottleneckとmaskingの確認に使う。
+- `1e-2`: 4 accessible factoryを共通baselineとし、non-magic architectureのruntime探索に使う。
+- 同じarchitecture extremeを両precisionで実行し、各precision内spreadの増減を比較する。
+- 次の優先軸はreaction time / feed-forward wait、その後routing capacityやplane間通信とする。
+
+### State classification
+
+| item | classification |
+| --- | --- |
+| H4-H7 x factory 1-4 cheap-RZ 16 case成功 | observed |
+| fixed logical workload / cell budget / initial egressの一致 | observed |
+| cheap-RZでfactory-count sensitivityが大幅縮小 | observed |
+| pure inverse factory-count supply lawから離脱 | observed |
+| 1%基準のminimum countがH4=4、H5-H7=3 | observed under stated threshold |
+| 4 factoryがnon-magic探索用の共通baselineとして十分 | supported for tested H4-H7 conditions |
+| H6 N=4のnegative topology overheadの内部理由 | unresolved |
+| cheap-RZ結果のSTAR hardwareへの直接外挿 | unsupported |
+
+### Execution resources
+
+- 16 caseをtmux内で逐次実行
+- qret peak RSS: 962,052 KiB（約0.92 GiB）
+- GNU timeのswap count: 0
+- cgroup guard: `MemoryHigh=44G`, `MemoryMax=48G`
+
+### References
+
+- `configs/surface_code_accessible_factory_count_sweep_h4_h7_4th_cheap_rz.yaml`
+- `configs/topologies/accessible_factory_count_h4_h7_4th/accessible_factory_count_manifest.json`
+- `artifacts/surface_code_accessible_factory_count_sweep_h4_h7_4th_cheap_rz/summary.md`
+- `artifacts/surface_code_accessible_factory_count_sweep_h4_h7_4th_cheap_rz/results.csv`
+- `artifacts/surface_code_accessible_factory_count_sweep_h4_h7_4th_cheap_rz/results.jsonl`
