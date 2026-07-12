@@ -85,6 +85,10 @@ class SurfaceCodeArchitecture:
     entanglement_generation_period: int = SURFACE_CODE_ENTANGLEMENT_GENERATION_PERIOD
     maximum_entangled_state_stock: int = SURFACE_CODE_MAX_ENTANGLED_STATE_STOCK
     reaction_time: int = SURFACE_CODE_REACTION_TIME
+    mapping_algorithm: int = 1
+    mapping_partition_algorithm: int = 0
+    mapping_partition_seed: int = 314
+    mapping_find_place_algorithm: int = 0
     physical_error_rate: float = SURFACE_CODE_QEC_PHYSICAL_ERROR_RATE
     drop_rate: float = SURFACE_CODE_QEC_DROP_RATE
     code_cycle_time_sec: float = SURFACE_CODE_QEC_CODE_CYCLE_TIME_SECONDS
@@ -99,6 +103,20 @@ class SurfaceCodeArchitecture:
             "compile_info_output_mode",
             _normalize_compile_info_output_mode(self.compile_info_output_mode),
         )
+        if self.mapping_algorithm not in {0, 1}:
+            raise ValueError("mapping_algorithm must be 0 (explicit) or 1 (auto)")
+        if self.mapping_partition_algorithm not in {0, 1}:
+            raise ValueError(
+                "mapping_partition_algorithm must be 0 (Greedy) or 1 (Random); "
+                "qret advertises METIS=2 but does not implement it"
+            )
+        if self.mapping_partition_seed < 0:
+            raise ValueError("mapping_partition_seed must be non-negative")
+        if self.mapping_find_place_algorithm not in {0, 1}:
+            raise ValueError(
+                "mapping_find_place_algorithm must be 0 (EnoughSpaceSoft) "
+                "or 1 (EnoughSpaceHard)"
+            )
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -112,6 +130,10 @@ class SurfaceCodeArchitecture:
             "entanglement_generation_period": int(self.entanglement_generation_period),
             "maximum_entangled_state_stock": int(self.maximum_entangled_state_stock),
             "reaction_time": int(self.reaction_time),
+            "mapping_algorithm": int(self.mapping_algorithm),
+            "mapping_partition_algorithm": int(self.mapping_partition_algorithm),
+            "mapping_partition_seed": int(self.mapping_partition_seed),
+            "mapping_find_place_algorithm": int(self.mapping_find_place_algorithm),
             "physical_error_rate": float(self.physical_error_rate),
             "drop_rate": float(self.drop_rate),
             "code_cycle_time_sec": float(self.code_cycle_time_sec),
@@ -122,7 +144,17 @@ class SurfaceCodeArchitecture:
         }
 
     def cache_tag(self) -> str:
-        payload = json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"))
+        cache_values = self.to_dict()
+        legacy_defaults = {
+            "mapping_algorithm": 1,
+            "mapping_partition_algorithm": 0,
+            "mapping_partition_seed": 314,
+            "mapping_find_place_algorithm": 0,
+        }
+        for key, default in legacy_defaults.items():
+            if cache_values.get(key) == default:
+                cache_values.pop(key)
+        payload = json.dumps(cache_values, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
 
 
@@ -5102,6 +5134,19 @@ def compile_pipeline_yaml(
         f"sc_ls_fixed_v0_entanglement_generation_period: {int(architecture.entanglement_generation_period)}",
         f"sc_ls_fixed_v0_maximum_entangled_state_stock: {int(architecture.maximum_entangled_state_stock)}",
         f"sc_ls_fixed_v0_reaction_time: {int(architecture.reaction_time)}",
+        f"sc_ls_fixed_v0-mapping-algorithm: {int(architecture.mapping_algorithm)}",
+        (
+            "sc_ls_fixed_v0-partition-algorithm: "
+            f"{int(architecture.mapping_partition_algorithm)}"
+        ),
+        (
+            "sc_ls_fixed_v0-partition-seed: "
+            f"{int(architecture.mapping_partition_seed)}"
+        ),
+        (
+            "sc_ls_fixed_v0-find-place-algorithm: "
+            f"{int(architecture.mapping_find_place_algorithm)}"
+        ),
         f"sc_ls_fixed_v0_compile_info_output_mode: {architecture.compile_info_output_mode}",
     ]
     if _compile_uses_qec(architecture.compile_mode):
@@ -5147,6 +5192,19 @@ def mapping_pipeline_yaml(
         f"sc_ls_fixed_v0_entanglement_generation_period: {int(architecture.entanglement_generation_period)}",
         f"sc_ls_fixed_v0_maximum_entangled_state_stock: {int(architecture.maximum_entangled_state_stock)}",
         f"sc_ls_fixed_v0_reaction_time: {int(architecture.reaction_time)}",
+        f"sc_ls_fixed_v0-mapping-algorithm: {int(architecture.mapping_algorithm)}",
+        (
+            "sc_ls_fixed_v0-partition-algorithm: "
+            f"{int(architecture.mapping_partition_algorithm)}"
+        ),
+        (
+            "sc_ls_fixed_v0-partition-seed: "
+            f"{int(architecture.mapping_partition_seed)}"
+        ),
+        (
+            "sc_ls_fixed_v0-find-place-algorithm: "
+            f"{int(architecture.mapping_find_place_algorithm)}"
+        ),
         f"sc_ls_fixed_v0_dump_compile_info_to_json: {mapping_compile_info_path}",
         "sc_ls_fixed_v0_pass:",
         "  - sc_ls_fixed_v0::init_compile_info",

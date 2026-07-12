@@ -1,0 +1,84 @@
+grids:
+- type: plane
+  coord:
+  - 10
+  - 10
+  - 0
+  magic_factory:
+  - symbol: 0
+    coord:
+    - 4
+    - 4
+  - symbol: 1
+    coord:
+    - 4
+    - 5
+  - symbol: 2
+    coord:
+    - 5
+    - 4
+  - symbol: 3
+    coord:
+    - 5
+    - 5
+  qubit:
+  - symbol: 0
+    coord:
+    - 0
+    - 0
+  - symbol: 1
+    coord:
+    - 0
+    - 2
+  - symbol: 2
+    coord:
+    - 0
+    - 4
+  - symbol: 3
+    coord:
+    - 0
+    - 6
+  - symbol: 4
+    coord:
+    - 0
+    - 8
+  - symbol: 5
+    coord:
+    - 2
+    - 0
+  - symbol: 6
+    coord:
+    - 2
+    - 9
+  - symbol: 7
+    coord:
+    - 4
+    - 0
+  - symbol: 8
+    coord:
+    - 4
+    - 9
+  - symbol: 9
+    coord:
+    - 6
+    - 0
+  - symbol: 10
+    coord:
+    - 8
+    - 0
+  - symbol: 11
+    coord:
+    - 9
+    - 2
+  - symbol: 12
+    coord:
+    - 9
+    - 4
+  - symbol: 13
+    coord:
+    - 9
+    - 6
+  - symbol: 14
+    coord:
+    - 9
+    - 8

@@ -560,3 +560,558 @@ PF=`4th(new_2)`、`efficient_controlled_pf_one_step` では、four-factory resou
 - `artifacts/post_routing_magic_factory_usage_h4_h5/summary.md`
 - `artifacts/post_routing_magic_factory_usage_h4_h5/logs/run.log`
 - raw_tmp は compact extraction 後に削除済み。
+
+---
+
+## 2026-07-11: cheap RZ synthesis surrogate の研究上の位置付け
+
+### 背景と目的
+
+現在の surface-code resource evaluation では、任意角 RZ を Clifford+T 命令列へ
+近似分解する。この合成に由来する T / T-dagger、magic-state 消費と depth、
+magic-state の供給・配送・待機、および合成後の命令列が、runtime や qubit volume を
+大きく支配する可能性がある。
+
+この共通コストが支配的な場合、topology、factory placement、logical-qubit placement、
+mapping、routing、communication などの architecture 条件を変えても、その差が total
+resource に表れにくい可能性がある。そのため、RZ synthesis cost を意図的に小さくした
+条件を設け、non-Clifford cost の背後にある architecture-side bottleneck を観測しやすく
+する。
+
+RZ を安くすること自体が最終目的ではない。non-Clifford synthesis cost が支配的で
+なくなった場合に、何が runtime、qubit volume、空間資源を決めるかを調べるための
+diagnostic condition である。
+
+模式的には次のように捉える。
+
+```text
+C_total ~= C_RZ_synthesis + C_architecture + C_interaction
+```
+
+ただし、これは厳密な加算分解ではない。runtime は critical path、qubit volume は
+時間・配置・routing・QEC の相互作用を含むため、`C_interaction` を無視できない。
+
+### rotation_precision の扱い
+
+qret の `rotation_precision` は、実装上は任意角回転の近似合成精度を指定する
+パラメータである。本 diagnostic では、その近似誤差を目標エネルギー誤差へ伝播させず、
+RZ synthesis の実効コストを変える形式的な surrogate parameter として用いる。
+
+precision を粗くしたことによる回転合成誤差は、現在の理想化した architecture
+sensitivity 評価では目標エネルギー誤差へ寄与しないと仮定する。これは誤差が物理的に
+ゼロであることを検証した結果ではない。また、product-formula approximation error、
+QPE error、QEC failure model など、既存の誤差要因までゼロとする仮定ではない。
+
+precision regime 間で固定する高水準の回路条件は次である。
+
+- Hamiltonian
+- grouping
+- PF order / coefficient
+- step time
+- circuit scope
+- 任意角 RZ を含む pre-synthesis logical circuit
+
+一方、`rotation_precision` を変えると、合成後の Clifford+T 命令列、magic count / depth、
+optimized IR hash は変わる。したがって、precision regime 間で「合成後も同一 logical
+circuit」とは表現しない。
+
+architecture sensitivity を比較するときは、各 precision regime 内で molecule、
+Hamiltonian、grouping、PF、step time、circuit scope、`rotation_precision` を固定し、
+architecture 条件だけを変える。
+
+### cheap RZ で安くする範囲
+
+cheap RZ synthesis condition では、従来の Clifford+T による RZ 近似合成に由来する
+次の要素がまとめて小さくなり得るものとして扱う。
+
+- T / T-dagger 数
+- magic-state count
+- magic-state depth
+- magic-state の供給・配送要求
+- RZ 近似合成内部の Clifford 命令
+- 合成後の総命令数
+- それらに起因する runtime、routing traffic、qubit volume
+
+これは「T gate 1個の単価だけを下げるモデル」ではなく、「従来の Clifford+T による
+RZ 近似合成全体を安くするモデル」である。RZ 合成内部の Clifford も減少し得ることを
+current working assumption として許容する。ただし、既存の rotation precision sweep
+では総 Clifford 命令数を独立 metric として集計していないため、その減少自体を
+observed result とは扱わない。
+
+### 維持する Clifford skeleton と architecture 処理
+
+次の要素は RZ 近似合成の外側にあり、cheap RZ condition でも維持する。
+
+- Pauli basis change
+- parity compute / uncompute
+- grouped evolution の基底変換
+- system qubit 間の Clifford interaction
+- control qubit と system qubit の interaction
+- mapping と routing
+- logical-cell occupation と routing congestion
+- architecture 上必要な communication
+
+したがって、回路全体を無料化または削除するモデルではない。RZ synthesis という
+大きな共通コストを弱めた後も、外側の Clifford skeleton と architecture-dependent
+processing は残す。
+
+### magic supply diagnostic との区別
+
+これまでの `magic_generation_period` sweep と cheap RZ synthesis surrogate は異なる
+介入である。
+
+```text
+magic_generation_period change:
+  magic-state の供給速度を変える
+  合成後の magic demand / count / depth は基本的に変えない
+
+rotation_precision change:
+  RZ synthesis の需要と命令列を変える
+  magic count / depth と合成内部 Clifford が変わり得る
+```
+
+period を 15 から 1 まで短くしても大規模 H-chain の runtime 改善が小さかった結果は、
+現行条件で magic-state supply wait が主律速ではない可能性を示す。一方、それだけでは
+RZ synthesis demand や合成命令列そのものが支配的でないとは結論できない。
+
+### STAR との関係
+
+STAR のように、将来の partially fault-tolerant architecture で non-Clifford operation
+や任意角回転のコストが低下する可能性を研究動機としている。ただし、現在のモデルは
+STAR architecture の実装でも STAR resource estimate でもない。
+
+現在の quration / qret evaluation では、STAR 固有の次の要素をモデル化しない。
+
+- analog rotation resource-state generation
+- state injection と joint measurement
+- repeat-until-success と feed-forward / correction
+- angle-dependent success probability / fidelity
+- STAR 固有の factory layout と rotation-state delivery
+- STAR 固有 primitive の residual space-time cost
+
+したがって、表現には `cheap RZ synthesis surrogate`、`low-non-Clifford-cost regime`、
+または「任意角回転合成が安価になった理想化条件」を用いる。「STAR を実装した」または
+「STAR の resource を測定した」とは書かない。
+
+### 最低コストと limitations
+
+各 RZ または RZ layer に対する非ゼロの residual execution time / qubit volume を加える
+補正は、現段階では導入しない。STAR 固有 primitive に対応する最低 space-time cost も
+追加しない。
+
+この判断は unresolved implementation task ではなく、現在の diagnostic scope で意図的に
+採用しないモデル範囲である。cheap RZ condition は特定の現実 architecture を定量再現する
+ものではなく、RZ synthesis cost を段階的に弱める理想化された感度分析条件として扱う。
+既存 sweep の最も粗い `rotation_precision=1e-3` でも RZ cost がゼロになったわけではない。
+
+状態は次のように分類する。
+
+- rotation precision sweep: implemented / observed one-step compile-profile result
+- cheap RZ interpretation: current working assumption / diagnostic evaluation policy
+- STAR-specific primitive model: unimplemented / out of current scope
+- nonzero minimum RZ cost: not adopted at this stage
+- STAR resource estimate: not performed
+
+### 実装済み検証と未検証の問い
+
+H2-H7、PF=`4th(new_2)`、scope=`efficient_controlled_pf_one_step`、
+topology=`factory_center_block`、`magic_generation_period=15` の固定条件で、
+`rotation_precision=1e-5, 3e-5, 1e-4, 3e-4, 1e-3` の sweep は実装・実行済みである。
+30 case はすべて成功した。
+
+この sweep で observed なのは、precision を粗くすると magic count / depth、runtime、
+qubit volume が低下したことである。H7 の `1e-3` では code distance と physical qubits の
+離散的変化も混ざる。結果は observed one-step compile/profile result と、その線形外挿で
+ある QPE-scale estimate を区別する。full QPE compile result ではない。
+
+一方、この既存 sweep は topology を `factory_center_block` に固定しているため、cheap RZ
+condition で architecture case 間の spread がどう変化するかは未測定である。今後の主な
+研究上の問いは次である。
+
+> RZ synthesis と magic-state 関連コストが支配的でなくなったとき、topology、factory
+> placement、logical-qubit placement、mapping、routing、communication が runtime と
+> qubit volume にどの程度影響するか。
+
+conventional RZ synthesis condition と cheap RZ synthesis condition を分け、各 regime
+内では同じ合成条件と pre-synthesis logical circuit を使って architecture 条件だけを
+変更する。主に確認する metric は次である。
+
+- runtime と qubit volume
+- magic-state count / depth
+- chip cells、physical qubits、code distance
+- routing-related metrics
+- logical-cell usage / active area
+- architecture case 間の spread と case ordering
+
+cheap RZ condition で architecture spread が拡大した場合は、従来条件で RZ/T synthesis
+cost に隠れていた architecture bottleneck が顕在化した可能性を検討する。spread が
+小さいままなら、現在変更している architecture 条件は、その回路と規模では主要因でない
+可能性を検討する。case ordering が変わる場合は、non-Clifford cost regime によって
+有利な architecture が変わる可能性を検討する。
+
+これらは今後の仮説と解釈方針であり、まだ observed result とは扱わない。
+
+### 参照
+
+- `configs/surface_code_rotation_precision_sweep_h2_h7_4th_center.yaml`
+- `artifacts/surface_code_rotation_precision_sweep_h2_h7_4th_center/results.md`
+- `artifacts/surface_code_rotation_precision_sweep_h2_h7_4th_center/results.csv`
+- `artifacts/surface_code_rotation_precision_sweep_h2_h7_4th_center/results.jsonl`
+- `docs/research_notes/qpe_scope_and_semantics.md`
+- `docs/research_notes/surface_code_architecture_sensitivity_note.md`
+
+---
+
+## 2026-07-11: cheap RZ 条件での factory-placement sensitivity
+
+### 目的
+
+直前に定義した cheap RZ synthesis surrogate を用い、RZ synthesis cost を下げたときに
+factory placement による architecture spread が拡大するかを検証した。
+
+当初の仮説は、共通の RZ/T synthesis cost を弱めることで、その背後にある architecture
+差が観測しやすくなる可能性がある、というものだった。今回の検証では architecture 変数を
+factory placement に限定し、この仮説が成立するかを調べた。
+
+### 条件
+
+- molecules: H4-H7
+- PF: `4th(new_2)`
+- circuit scope: `efficient_controlled_pf_one_step`
+- rotation precision: `1e-5`, `1e-3`, `3e-3`, `1e-2`
+- topology: `factory_left_edge`, `factory_center_block`, `factory_right_edge`
+- grid: 10x10
+- factory count: 4
+- magic generation period: 15
+- fixed magic stock: 10000
+- compile mode: `ftqc_compile_topology_qec`
+- rows: 48
+
+全 48 case が成功し、failed / skipped は 0 だった。実行 wall time は 13分08秒、外側で
+観測した peak RSS は約 2.90 GiB で、実行中に swap 使用量は増加しなかった。
+
+この結果は observed one-step compile/profile result と、その線形外挿である QPE-scale
+estimate を含む。full QPE circuit の compile result ではない。
+
+### Resource reduction の観測
+
+`factory_center_block` で `rotation_precision=1e-5` から `1e-2` へ粗くしたときの
+single-step resource reduction は次の通りだった。
+
+| molecule | magic count | magic depth | runtime | qubit volume |
+| --- | ---: | ---: | ---: | ---: |
+| H4 | -93.65% | -94.14% | -82.02% | -80.09% |
+| H5 | -96.02% | -96.17% | -82.93% | -80.60% |
+| H6 | -98.31% | -98.42% | -84.42% | -82.16% |
+| H7 | -98.83% | -98.88% | -84.39% | -82.08% |
+
+したがって、`1e-2` は magic demand を約94-99%減らす極端な low-non-Clifford-cost
+diagnostic として機能した。ただし、これは実際の回転近似誤差を目標エネルギー誤差へ
+伝播させた結果ではなく、現実の回転精度または STAR 固有 primitive cost を表さない。
+
+### Topology spread の観測
+
+各 molecule / precision 内で、次の定義を用いた。
+
+```text
+spread = (maximum - minimum) / minimum
+```
+
+qubit-volume topology spread は、sampled precision を粗くするにつれて全分子で単調に
+縮小した。
+
+| molecule | `1e-5` | `1e-3` | `3e-3` | `1e-2` |
+| --- | ---: | ---: | ---: | ---: |
+| H4 | 12.821% | 11.344% | 10.421% | 4.152% |
+| H5 | 9.072% | 7.100% | 5.332% | 1.808% |
+| H6 | 7.847% | 6.264% | 4.436% | 0.189% |
+| H7 | 6.740% | 4.930% | 2.443% | 1.038% |
+
+runtime spread は全条件で 0.033% 未満であり、引き続き非常に小さかった。したがって、
+factory placement は baseline でも主に runtime critical path ではなく、qubit volume / active
+area / delivery geometry 側へ影響する architecture 変数だったと考えられる。
+
+### 解釈と仮説更新
+
+今回の factory-placement sweep では、cheap RZ によって architecture spread が拡大する
+という当初仮説は支持されなかった。反対に、RZ synthesis demand を減らすほど factory
+placement sensitivity は弱くなった。
+
+この結果は、既存の factory-placement差のかなりの部分が magic-state delivery geometry
+に由来する、という解釈と整合する。
+
+```text
+RZ synthesis demand decreases
+  -> magic-state demand and delivery traffic decrease
+  -> factory access and magic-routing occupancy decrease
+  -> factory-placement sensitivity decreases
+```
+
+ただし、今回直接観測したのは magic count / depth、runtime、qubit volume と topology
+spread である。factory access frequency、route length、routing cell occupancy は今回の
+sweep では直接集計していない。そのため、magic delivery が主因であることは、今回の
+spread 縮小と過去の mapping / post-routing diagnostic を合わせた inferred explanation と
+して扱う。
+
+更新後の仮説は次である。
+
+> cheap RZ によってすべての architecture 差が一律に顕在化するわけではない。
+> architecture sensitivity の変化は、その architecture 変数が削減対象の non-Clifford
+> demand に依存するか、cheap RZ 後も残る Clifford skeleton に作用するかで異なる。
+
+factory placement のように magic delivery へ直接結び付く要因は、magic demand の減少と
+ともに影響も縮小する。一方、logical-qubit placement、parity network、data-qubit routing、
+mapping policy、grid geometry など、残存する Clifford skeleton に直接作用する要因の感度は
+今回の結果からは分からない。
+
+### Code-distance threshold の注意
+
+precision 間の qubit-volume reduction には QEC の離散変化が混ざる。
+
+- H4 `1e-5`: left のみ distance 15、center / right は 13。`1e-3` 以降はすべて 13。
+- H5: `1e-5` から `3e-3` は distance 15、`1e-2` はすべて 13。
+- H6: 全条件で distance 15。
+- H7: `1e-5` は distance 17、`1e-3` 以降は distance 15。
+
+したがって、`1e-5 -> 1e-2` の絶対的な qubit-volume reduction を、RZ synthesis短縮または
+magic削減だけへ帰属してはならない。synthesis、routing / occupancy、code distance とその
+相互作用が含まれる。
+
+一方、各 precision 内の topology spread は、H4 `1e-5` を除けば code distance / physical
+qubits が3 topologyで共通である。このため、factory-placement sensitivity を見る比較として
+precision間の絶対値比較より解釈しやすい。
+
+### Topology ordering
+
+`rotation_precision=1e-2` では qubit-volume minimum topology が次のように変化した。
+
+- H4: right
+- H5: left
+- H6: center
+- H7: left
+
+ただし、`1e-2` での spread は H4を除き約2%以下まで縮小している。したがって、cheap RZ
+によって別topologyが本質的に優位になったとはまだ言えない。現時点では weak rank change /
+unresolved とし、残った Clifford routing / occupancy差を直接計測するまで強い順位主張を
+行わない。
+
+### 状態分類
+
+| 内容 | 分類 |
+| --- | --- |
+| H4-H7 precision x topology sweep | observed |
+| cheap RZでmagic count / depthが大幅減少 | observed |
+| cheap RZでruntime / qubit volumeが大幅減少 | observed |
+| sampled precisionでQV topology spreadが単調縮小 | observed |
+| factory placement感度がmagic delivery需要に由来する | inferred |
+| cheap RZでfactory-placement差が拡大する仮説 | evaluated and rejected |
+| topology順位の本質的逆転 | unresolved |
+| QV低下におけるcode-distance寄与の分離 | unresolved |
+| data / logical-qubit placement sensitivity | unevaluated |
+| mapping / routing algorithm sensitivity | qret feature exists; Evaluation sweep unevaluated |
+
+### 次の作業
+
+cheap RZ 後に残る architecture bottleneck を調べるため、主眼を factory-side architecture
+から data-side / Clifford-side architecture へ移す。
+
+優先候補は次である。
+
+1. logical-qubit initial placement / mapping policy
+2. system-control qubit distance と parity-network communication
+3. logical-cell grid size / aspect ratio
+4. Clifford routing congestion と active-area metric
+5. factory count と data-cell budget の trade-off
+
+最初の matched sweep では、conventional `rotation_precision=1e-5` と extreme diagnostic
+`1e-2` を分け、各 precision 内で同じ pre-synthesis logical circuit と synthesis condition を
+固定した上で mapping / logical-qubit placement だけを変更する。
+
+### 参照
+
+- `configs/surface_code_rotation_precision_topology_sweep_h4_h7_4th.yaml`
+- `artifacts/surface_code_rotation_precision_topology_sweep_h4_h7_4th/summary.md`
+- `artifacts/surface_code_rotation_precision_topology_sweep_h4_h7_4th/results.md`
+- `artifacts/surface_code_rotation_precision_topology_sweep_h4_h7_4th/results.csv`
+- `artifacts/surface_code_rotation_precision_topology_sweep_h4_h7_4th/results.jsonl`
+
+## 2026-07-11: auto baseline + explicit logical-placement sweep
+
+### Question
+
+cheap RZ 条件で factory-placement sensitivity が弱くなった後も、logical-qubit initial
+placement と data-side / Clifford-side routing は qubit volume へ影響するかを調べた。
+
+H4-H7、`4th(new_2)`、`rotation_precision=1e-5, 1e-2` について、center-block factory と
+10 x 10 grid を固定し、次の4条件を比較した。
+
+- qret `auto_greedy_soft` baseline
+- compact cellsへのnumeric-order explicit assignment
+- 同じcompact cellsへのinteraction-aware explicit assignment
+- perimeterへのnumeric-order explicit assignment stress case
+
+これは4種類のmapping algorithm比較ではない。qretのMETIS partitionは現実装で
+`Partition by METIS is not implemented.` を送出するため対象外とし、auto mapping baselineと
+explicit logical-placement diagnosticを比較した。
+
+### Observed results
+
+32 caseはすべて成功した。各 molecule / precision 内で、code distance、physical qubits、
+chip cells は4配置で共通だった。
+
+| molecule | precision | runtime spread | QV spread | QV minimum | QV maximum |
+| --- | ---: | ---: | ---: | --- | --- |
+| H4 | `1e-5` | 0.00160% | 10.938% | interaction-aware | perimeter |
+| H4 | `1e-2` | 0.03278% | 8.983% | interaction-aware | perimeter |
+| H5 | `1e-5` | 0.00165% | 8.233% | interaction-aware | perimeter |
+| H5 | `1e-2` | 0.00883% | 7.793% | interaction-aware | perimeter |
+| H6 | `1e-5` | 0.00223% | 6.431% | interaction-aware | perimeter |
+| H6 | `1e-2` | 0.01375% | 7.087% | interaction-aware | perimeter |
+| H7 | `1e-5` | 0.00735% | 5.357% | interaction-aware | perimeter |
+| H7 | `1e-2` | 0.06101% | 5.901% | interaction-aware | perimeter |
+
+同一cell集合を使うcompact numericとinteraction-awareの比較では、pre-synthesis QASMから
+計算したweighted CNOT Manhattan objectiveが約16.8-18.4%減少し、compiled qubit volumeは
+全8 groupで1.2-2.2%減少した。runtimeはほぼ不変だった。
+
+auto baselineはinteraction-aware explicit placementより全8 groupでqubit volumeが高く、差は
+3.5-6.6%だった。perimeter stress caseは全8 groupで最大qubit volumeとなった。
+
+### Interpretation
+
+logical-qubit placement sensitivityはcheap RZ後にも残り、`1e-2`で5.90-8.98%のQV spreadが
+観測された。一方、factory-placement sweepの`1e-2` spreadは0.19-4.15%まで縮小していた。
+この差は、magic需要の削減後もdata-side / Clifford-side placementとroutingがspace-time
+resourceへ作用する、という解釈を支持する。
+
+ただし、cheap RZによってplacement sensitivityが一律に拡大したわけではない。H4/H5では
+spreadが縮小し、H6/H7では小幅に拡大した。したがって、残存architecture sensitivityは
+molecule interaction graph、routing余裕、congestionの相互作用に依存すると考える。
+
+runtime spreadが最大0.061%なのに対しQV spreadは数%残り、QVの順位とaverage active areaの
+順位は一致した。このため、今回のplacement差はcritical-path beat数ではなく、主として
+occupied cell-time / active-area側へ現れたと判断する。
+
+compact numeric対interaction-awareは同じcell集合なのでlogical-ID assignmentの比較として
+解釈しやすい。一方、perimeter caseは配置形状とfactory距離を同時に変えるため、Clifford
+routingとmagic deliveryの寄与を分離した比較ではない。
+
+### State classification
+
+| item | classification |
+| --- | --- |
+| H4-H7 placement x precision sweep | observed |
+| cheap RZ後も5.90-8.98%のQV placement spreadが残る | observed |
+| interaction-aware assignmentが全groupでQV最小 | observed |
+| placement差が主にactive-area / occupied cell-timeへ現れる | observed結果に基づくinference |
+| auto mappingが最適でない | evaluated for this fixed grid/circuit set |
+| cheap RZでplacement感度が一律に拡大する | evaluated and rejected |
+| perimeter差におけるClifford routingとmagic deliveryの寄与分離 | unresolved |
+| grid capacity / aspect ratioとplacement感度の関係 | unevaluated |
+
+### References
+
+- `configs/surface_code_logical_placement_sweep_h4_h7_4th.yaml`
+- `configs/topologies/logical_placement_h4_h7/placement_manifest.json`
+- `artifacts/surface_code_logical_placement_sweep_h4_h7_4th/summary.md`
+- `artifacts/surface_code_logical_placement_sweep_h4_h7_4th/results.csv`
+- `artifacts/surface_code_logical_placement_sweep_h4_h7_4th/results.jsonl`
+
+## 2026-07-12: logical-cell grid capacity sweep
+
+### Question
+
+logical-placement sweepで残ったQV差が、routing容量不足、通信距離、またはmapping policyの
+どれに由来するかを調べるため、H4-H7、`4th(new_2)`、`rotation_precision=1e-5, 1e-2`で
+8x8、10x10、12x12 gridを比較した。各gridでcenter-block factoryを4個に固定し、qret
+`auto_greedy_soft`とexplicit interaction-aware placementを使った。48 case中44 caseが成功し、
+4 caseがmapping failureとなった。
+
+### Auto-mapping capacity boundary
+
+8x8 center-factory topologyではsoft candidateが12 cellである。H4は9 logical qubits、H5は11
+なのでauto mappingに成功したが、H6の13とH7の15はconventional/cheap RZの両方で
+`Failed to find partition` / `Failed to find place to map qubits`となった。
+
+同じ8x8でexplicit H6/H7は成功した。したがって、この失敗は単純なcell総数不足ではなく、
+auto-soft candidate generation / mapping policyの容量限界である。explicit側はsoft候補外の
+non-factory cellをH6で1個、H7で3個補完し、この介入をmanifestへ記録した。
+
+### Explicit placement results
+
+interaction-aware 10x10を基準にしたgrid変更は次のとおりだった。
+
+| molecule | precision | 8x8 runtime | 8x8 QV | 12x12 runtime | 12x12 QV |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| H4 | `1e-5` | +0.000% | +0.645% | +0.000% | +0.646% |
+| H4 | `1e-2` | +0.000% | +0.794% | +0.000% | +0.796% |
+| H5 | `1e-5` | +0.000% | +0.342% | +0.000% | +0.342% |
+| H5 | `1e-2` | +0.000% | +0.754% | +0.000% | +0.745% |
+| H6 | `1e-5` | +0.000% | +1.593% | -0.000% | +0.350% |
+| H6 | `1e-2` | +0.005% | -0.024% | +0.000% | +0.602% |
+| H7 | `1e-5` | +11.122% | +14.057% | -0.008% | +0.929% |
+| H7 | `1e-2` | +0.197% | +1.648% | -0.061% | +0.304% |
+
+H4-H6はexplicit policyではgrid capacity感度が弱く、runtimeはほぼ不変、QV差は約1.6%以内
+だった。一方、H7 conventionalの8x8は明確なcapacity/congestion boundaryを示した。
+topology-free runtimeからの増分は10x10の838 beatに対し8x8で987,508 beatとなり、QVは
+14.06%増加した。
+
+H7 cheap RZでは同じ8x8 penaltyがruntime +0.20%、QV +1.65%まで縮小した。8x8 explicitの
+pre-synthesis weighted CNOT distanceは10x10より小さいため、静的なpair distanceだけでは
+conventional条件の悪化を説明できない。大きなRZ synthesis / magic workloadと狭いgridの
+routing congestion / cell occupancyが相互作用したという説明と整合するが、direct congestion
+counterは未取得なのでinferenceとして扱う。
+
+### Automatic placement on a larger grid
+
+auto mappingでは12x12のQVが10x10より全成功groupで1.34-5.87%増加した。mapping_resultから、
+12x12ではCNOT平均距離、nearest-factory平均距離、magic-operation平均距離がすべて10x10より
+増えていることを確認した。追加cellをrouting slackとして使うのではなく、初期配置自体が
+広がったためである。
+
+このため、autoとinteraction-awareのQV差は概ねgridとともに拡大し、12x12ではconventional
+で4.43-9.20%、cheap RZで6.59-8.86%となった。大きいgridはmapping objectiveが通信距離を
+抑えない限り、自動的にresourceを改善しない。
+
+### Static footprint distinction
+
+non-factory chip cellsは8x8で60、10x10で96、12x12で140である。code distanceが同じなら
+physical qubitsもこの比率で増える。10x10から12x12への変更はstatic physical-qubit footprintを
+45.8%増やすが、explicit runtime/QVの改善は観測されなかった。active-area ratio低下は主に
+grid denominator増加によるため、absolute active areaと区別する。
+
+各molecule/precision内では成功grid間のcode distanceは共通だった。したがってgrid差にQEC
+threshold crossingは混ざっていない。
+
+### Updated conclusion
+
+今回の範囲では10x10が最もrobustなgridだった。8x8はH4/H5には十分だが、auto mapperは
+H6/H7で候補上限に達し、explicit H7 conventionalでもrouting-capacity penaltyが現れた。
+12x12はstatic footprintを増やし、auto mappingでは距離とQVも増やした。
+
+cheap RZはgrid sensitivityを一律に顕在化せず、H7 8x8 congestion penaltyを大幅に弱めた。
+architecture sensitivityはcell数だけでなく、そのcell上を通るRZ synthesis / magic routing
+workloadとの相互作用で決まる。
+
+### State classification
+
+| item | classification |
+| --- | --- |
+| H4-H7 grid x precision x placement sweep | observed |
+| 8x8 autoがH6/H7でmapping failure | observed |
+| explicit H6/H7が8x8でmapping success | observed |
+| H7 conventional 8x8でruntime/QV penalty | observed |
+| cheap RZでH7 8x8 penaltyが縮小 | observed |
+| H7 penaltyの主因がrouting congestion / occupancy | inferred |
+| 12x12 autoで距離とQVが増加 | observed |
+| 10x10が今回のtested setで最もrobust | evaluated for tested policies |
+| fixed-area aspect-ratio sensitivity | unevaluated |
+
+### References
+
+- `configs/surface_code_grid_capacity_sweep_h4_h7_4th.yaml`
+- `configs/topologies/logical_grid_capacity_h4_h7/grid_capacity_manifest.json`
+- `artifacts/surface_code_grid_capacity_sweep_h4_h7_4th/summary.md`
+- `artifacts/surface_code_grid_capacity_sweep_h4_h7_4th/results.csv`
+- `artifacts/surface_code_grid_capacity_sweep_h4_h7_4th/results.jsonl`

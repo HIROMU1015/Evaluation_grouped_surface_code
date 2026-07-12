@@ -78,6 +78,10 @@ RESULT_FIELDS = [
     "mapping_result_hash",
     "mapping_result_unavailable_reason",
     "machine_type",
+    "mapping_algorithm",
+    "mapping_partition_algorithm",
+    "mapping_partition_seed",
+    "mapping_find_place_algorithm",
     "magic_generation_period",
     "resolved_maximum_magic_state_stock",
     "stock_policy",
@@ -97,6 +101,14 @@ RESULT_FIELDS = [
     "runtime_difference_vs_topology_free_unavailable_reason",
     "chip_cells",
     "chip_cells_unavailable_reason",
+    "active_qubit_area_ave",
+    "active_qubit_area_ave_unavailable_reason",
+    "active_qubit_area_peak",
+    "active_qubit_area_peak_unavailable_reason",
+    "active_qubit_area_ratio_ave",
+    "active_qubit_area_ratio_ave_unavailable_reason",
+    "active_qubit_area_ratio_peak",
+    "active_qubit_area_ratio_peak_unavailable_reason",
     "qubit_volume",
     "qubit_volume_unavailable_reason",
     "physical_qubits",
@@ -203,6 +215,21 @@ def _topology_config(config: Mapping[str, Any], topology_name: str) -> dict[str,
     return dict(raw)
 
 
+def _topology_path_for_molecule(
+    topology: Mapping[str, Any],
+    molecule: str,
+) -> Path:
+    paths = topology.get("paths")
+    if paths is not None:
+        if not isinstance(paths, Mapping):
+            raise ValueError("topology paths must be a mapping")
+        raw_path = paths.get(molecule)
+        if raw_path in (None, ""):
+            raise ValueError(f"Missing topology path for molecule: {molecule}")
+        return _path_or_default(raw_path, SURFACE_CODE_TOPOLOGY_PATH)
+    return _path_or_default(topology.get("path"), SURFACE_CODE_TOPOLOGY_PATH)
+
+
 def _default_case_values(config: Mapping[str, Any]) -> dict[str, Any]:
     defaults = config.get("defaults", {})
     if defaults is None:
@@ -247,7 +274,7 @@ def build_architecture_for_case(
     qec = _qec_values(config)
     topology_name = str(case.get("topology", defaults.get("topology", "tutorial")))
     topology = _topology_config(config, topology_name)
-    topology_path = _path_or_default(topology.get("path"), SURFACE_CODE_TOPOLOGY_PATH)
+    topology_path = _topology_path_for_molecule(topology, artifact.molecule)
     qret_path = _path_or_default(config.get("qret_path"), SURFACE_CODE_QCSF_PATH)
 
     compile_mode = str(case.get("compile_mode", defaults.get("compile_mode", "ftqc_compile_topology")))
@@ -281,6 +308,27 @@ def build_architecture_for_case(
             )
         ),
         reaction_time=int(case.get("reaction_time", defaults.get("reaction_time", 1))),
+        mapping_algorithm=int(
+            case.get("mapping_algorithm", defaults.get("mapping_algorithm", 1))
+        ),
+        mapping_partition_algorithm=int(
+            case.get(
+                "mapping_partition_algorithm",
+                defaults.get("mapping_partition_algorithm", 0),
+            )
+        ),
+        mapping_partition_seed=int(
+            case.get(
+                "mapping_partition_seed",
+                defaults.get("mapping_partition_seed", 314),
+            )
+        ),
+        mapping_find_place_algorithm=int(
+            case.get(
+                "mapping_find_place_algorithm",
+                defaults.get("mapping_find_place_algorithm", 0),
+            )
+        ),
         physical_error_rate=float(qec.get("physical_error_rate", 1.0e-3)),
         drop_rate=float(qec.get("drop_rate", 0.1)),
         code_cycle_time_sec=float(qec.get("code_cycle_time_sec", 1.0e-6)),
@@ -483,6 +531,18 @@ def _compile_info_row(
         "runtime_without_topology": ("runtime_without_topology", False, False),
         "runtime_with_topology": ("runtime", True, False),
         "chip_cells": ("chip_cell_count", True, False),
+        "active_qubit_area_ave": ("chip_cell_active_qubit_area_ave", True, False),
+        "active_qubit_area_peak": ("chip_cell_active_qubit_area_peak", True, False),
+        "active_qubit_area_ratio_ave": (
+            "chip_cell_active_qubit_area_ratio_ave",
+            True,
+            False,
+        ),
+        "active_qubit_area_ratio_peak": (
+            "chip_cell_active_qubit_area_ratio_peak",
+            True,
+            False,
+        ),
         "qubit_volume": ("qubit_volume", True, False),
         "physical_qubits": ("num_physical_qubits", True, True),
         "code_distance": ("code_distance", True, True),
@@ -564,6 +624,10 @@ def _architecture_row(
         "topology_path": str(topology_path),
         "topology_hash": topology_hash,
         "machine_type": architecture.machine_type,
+        "mapping_algorithm": architecture.mapping_algorithm,
+        "mapping_partition_algorithm": architecture.mapping_partition_algorithm,
+        "mapping_partition_seed": architecture.mapping_partition_seed,
+        "mapping_find_place_algorithm": architecture.mapping_find_place_algorithm,
         "magic_generation_period": architecture.magic_generation_period,
         "resolved_maximum_magic_state_stock": resolved_stock,
         "stock_policy": stock_policy,

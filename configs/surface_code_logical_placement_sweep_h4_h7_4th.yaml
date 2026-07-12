@@ -1,0 +1,123 @@
+targets:
+  molecules:
+    - H4
+    - H5
+    - H6
+    - H7
+  pf_labels:
+    - 4th(new_2)
+
+target_error: 0.00015936001019904
+rotation_precision:
+qret_path:
+
+defaults:
+  circuit_scope: efficient_controlled_pf_one_step
+  compile_mode: ftqc_compile_topology_qec
+  topology: auto_center
+  machine_type: Dim2
+  mapping_algorithm: 1
+  mapping_partition_algorithm: 0
+  mapping_partition_seed: 314
+  mapping_find_place_algorithm: 0
+  magic_generation_period: 15
+  maximum_magic_state_stock:
+    policy: fixed
+    value: 10000
+  entanglement_generation_period: 100
+  maximum_entangled_state_stock: 10
+  reaction_time: 1
+  skip_compile_output: true
+  compile_info_output_mode: summary
+  save_mapping_result: false
+
+qec:
+  physical_error_rate: 0.001
+  drop_rate: 0.1
+  code_cycle_time_sec: 0.000001
+  allowed_failure_prob: 0.01
+
+topologies:
+  auto_center:
+    enabled: true
+    path: configs/topologies/tutorial_factory_center_block.yaml
+
+  explicit_compact_numeric:
+    enabled: true
+    paths:
+      H4: configs/topologies/logical_placement_h4_h7/h4_compact_numeric.yaml
+      H5: configs/topologies/logical_placement_h4_h7/h5_compact_numeric.yaml
+      H6: configs/topologies/logical_placement_h4_h7/h6_compact_numeric.yaml
+      H7: configs/topologies/logical_placement_h4_h7/h7_compact_numeric.yaml
+
+  explicit_compact_interaction_aware:
+    enabled: true
+    paths:
+      H4: configs/topologies/logical_placement_h4_h7/h4_compact_interaction_aware.yaml
+      H5: configs/topologies/logical_placement_h4_h7/h5_compact_interaction_aware.yaml
+      H6: configs/topologies/logical_placement_h4_h7/h6_compact_interaction_aware.yaml
+      H7: configs/topologies/logical_placement_h4_h7/h7_compact_interaction_aware.yaml
+
+  explicit_perimeter_numeric:
+    enabled: true
+    paths:
+      H4: configs/topologies/logical_placement_h4_h7/h4_perimeter_numeric.yaml
+      H5: configs/topologies/logical_placement_h4_h7/h5_perimeter_numeric.yaml
+      H6: configs/topologies/logical_placement_h4_h7/h6_perimeter_numeric.yaml
+      H7: configs/topologies/logical_placement_h4_h7/h7_perimeter_numeric.yaml
+
+architecture_cases:
+  - name: p1e-5_auto_greedy_soft
+    topology: auto_center
+    rotation_precision: 1.0e-5
+    mapping_algorithm: 1
+    mapping_partition_algorithm: 0
+    mapping_find_place_algorithm: 0
+    save_mapping_result: true
+
+  - name: p1e-5_explicit_compact_numeric
+    topology: explicit_compact_numeric
+    rotation_precision: 1.0e-5
+    mapping_algorithm: 0
+
+  - name: p1e-5_explicit_compact_interaction_aware
+    topology: explicit_compact_interaction_aware
+    rotation_precision: 1.0e-5
+    mapping_algorithm: 0
+
+  - name: p1e-5_explicit_perimeter_numeric
+    topology: explicit_perimeter_numeric
+    rotation_precision: 1.0e-5
+    mapping_algorithm: 0
+
+  - name: p1e-2_auto_greedy_soft
+    topology: auto_center
+    rotation_precision: 1.0e-2
+    mapping_algorithm: 1
+    mapping_partition_algorithm: 0
+    mapping_find_place_algorithm: 0
+    save_mapping_result: true
+
+  - name: p1e-2_explicit_compact_numeric
+    topology: explicit_compact_numeric
+    rotation_precision: 1.0e-2
+    mapping_algorithm: 0
+
+  - name: p1e-2_explicit_compact_interaction_aware
+    topology: explicit_compact_interaction_aware
+    rotation_precision: 1.0e-2
+    mapping_algorithm: 0
+
+  - name: p1e-2_explicit_perimeter_numeric
+    topology: explicit_perimeter_numeric
+    rotation_precision: 1.0e-2
+    mapping_algorithm: 0
+
+output:
+  directory: artifacts/surface_code_logical_placement_sweep_h4_h7_4th
+  jsonl: results.jsonl
+  csv: results.csv
+  markdown: results.md
+
+cache:
+  reuse_compile_results: true

@@ -1,0 +1,2610 @@
+{
+  "grid_size": [
+    10,
+    10
+  ],
+  "interaction_source": "pre-synthesis efficient-controlled PF-step QASM CNOT counts",
+  "magic_factories": [
+    {
+      "coord": [
+        4,
+        4
+      ],
+      "symbol": 0
+    },
+    {
+      "coord": [
+        4,
+        5
+      ],
+      "symbol": 1
+    },
+    {
+      "coord": [
+        5,
+        4
+      ],
+      "symbol": 2
+    },
+    {
+      "coord": [
+        5,
+        5
+      ],
+      "symbol": 3
+    }
+  ],
+  "molecules": {
+    "H4": {
+      "cnot_count": 15128,
+      "control_qubit": 8,
+      "interaction_edges": [
+        {
+          "q0": 0,
+          "q1": 1,
+          "weight": 1352
+        },
+        {
+          "q0": 0,
+          "q1": 2,
+          "weight": 1072
+        },
+        {
+          "q0": 0,
+          "q1": 3,
+          "weight": 632
+        },
+        {
+          "q0": 0,
+          "q1": 4,
+          "weight": 492
+        },
+        {
+          "q0": 0,
+          "q1": 5,
+          "weight": 772
+        },
+        {
+          "q0": 0,
+          "q1": 6,
+          "weight": 772
+        },
+        {
+          "q0": 0,
+          "q1": 7,
+          "weight": 492
+        },
+        {
+          "q0": 0,
+          "q1": 8,
+          "weight": 1556
+        },
+        {
+          "q0": 1,
+          "q1": 2,
+          "weight": 712
+        },
+        {
+          "q0": 1,
+          "q1": 3,
+          "weight": 412
+        },
+        {
+          "q0": 1,
+          "q1": 4,
+          "weight": 332
+        },
+        {
+          "q0": 1,
+          "q1": 5,
+          "weight": 532
+        },
+        {
+          "q0": 1,
+          "q1": 6,
+          "weight": 532
+        },
+        {
+          "q0": 1,
+          "q1": 7,
+          "weight": 332
+        },
+        {
+          "q0": 1,
+          "q1": 8,
+          "weight": 884
+        },
+        {
+          "q0": 2,
+          "q1": 3,
+          "weight": 332
+        },
+        {
+          "q0": 2,
+          "q1": 4,
+          "weight": 212
+        },
+        {
+          "q0": 2,
+          "q1": 5,
+          "weight": 332
+        },
+        {
+          "q0": 2,
+          "q1": 6,
+          "weight": 332
+        },
+        {
+          "q0": 2,
+          "q1": 7,
+          "weight": 212
+        },
+        {
+          "q0": 2,
+          "q1": 8,
+          "weight": 472
+        },
+        {
+          "q0": 3,
+          "q1": 4,
+          "weight": 52
+        },
+        {
+          "q0": 3,
+          "q1": 5,
+          "weight": 92
+        },
+        {
+          "q0": 3,
+          "q1": 6,
+          "weight": 92
+        },
+        {
+          "q0": 3,
+          "q1": 7,
+          "weight": 52
+        },
+        {
+          "q0": 3,
+          "q1": 8,
+          "weight": 140
+        },
+        {
+          "q0": 4,
+          "q1": 5,
+          "weight": 392
+        },
+        {
+          "q0": 4,
+          "q1": 6,
+          "weight": 432
+        },
+        {
+          "q0": 4,
+          "q1": 7,
+          "weight": 312
+        },
+        {
+          "q0": 4,
+          "q1": 8,
+          "weight": 468
+        },
+        {
+          "q0": 5,
+          "q1": 6,
+          "weight": 72
+        },
+        {
+          "q0": 5,
+          "q1": 7,
+          "weight": 92
+        },
+        {
+          "q0": 5,
+          "q1": 8,
+          "weight": 116
+        },
+        {
+          "q0": 6,
+          "q1": 7,
+          "weight": 12
+        },
+        {
+          "q0": 6,
+          "q1": 8,
+          "weight": 24
+        },
+        {
+          "q0": 7,
+          "q1": 8,
+          "weight": 12
+        }
+      ],
+      "num_logical_qubits": 9,
+      "num_system_qubits": 8,
+      "placements": {
+        "compact_interaction_aware": {
+          "bbox": {
+            "x_max": 8,
+            "x_min": 2,
+            "y_max": 7,
+            "y_min": 2
+          },
+          "mapping": [
+            {
+              "coord": [
+                2,
+                4
+              ],
+              "logical_qubit": 0
+            },
+            {
+              "coord": [
+                4,
+                2
+              ],
+              "logical_qubit": 1
+            },
+            {
+              "coord": [
+                2,
+                6
+              ],
+              "logical_qubit": 2
+            },
+            {
+              "coord": [
+                4,
+                7
+              ],
+              "logical_qubit": 3
+            },
+            {
+              "coord": [
+                7,
+                4
+              ],
+              "logical_qubit": 4
+            },
+            {
+              "coord": [
+                6,
+                2
+              ],
+              "logical_qubit": 5
+            },
+            {
+              "coord": [
+                6,
+                7
+              ],
+              "logical_qubit": 6
+            },
+            {
+              "coord": [
+                8,
+                6
+              ],
+              "logical_qubit": 7
+            },
+            {
+              "coord": [
+                2,
+                2
+              ],
+              "logical_qubit": 8
+            }
+          ],
+          "topology_path": "configs/topologies/logical_placement_h4_h7/h4_compact_interaction_aware.yaml",
+          "weighted_cnot_distance": 68660
+        },
+        "compact_numeric": {
+          "bbox": {
+            "x_max": 8,
+            "x_min": 2,
+            "y_max": 7,
+            "y_min": 2
+          },
+          "mapping": [
+            {
+              "coord": [
+                2,
+                2
+              ],
+              "logical_qubit": 0
+            },
+            {
+              "coord": [
+                2,
+                4
+              ],
+              "logical_qubit": 1
+            },
+            {
+              "coord": [
+                2,
+                6
+              ],
+              "logical_qubit": 2
+            },
+            {
+              "coord": [
+                4,
+                2
+              ],
+              "logical_qubit": 3
+            },
+            {
+              "coord": [
+                4,
+                7
+              ],
+              "logical_qubit": 4
+            },
+            {
+              "coord": [
+                6,
+                2
+              ],
+              "logical_qubit": 5
+            },
+            {
+              "coord": [
+                6,
+                7
+              ],
+              "logical_qubit": 6
+            },
+            {
+              "coord": [
+                7,
+                4
+              ],
+              "logical_qubit": 7
+            },
+            {
+              "coord": [
+                8,
+                6
+              ],
+              "logical_qubit": 8
+            }
+          ],
+          "topology_path": "configs/topologies/logical_placement_h4_h7/h4_compact_numeric.yaml",
+          "weighted_cnot_distance": 84156
+        },
+        "perimeter_numeric": {
+          "bbox": {
+            "x_max": 9,
+            "x_min": 0,
+            "y_max": 9,
+            "y_min": 0
+          },
+          "mapping": [
+            {
+              "coord": [
+                0,
+                0
+              ],
+              "logical_qubit": 0
+            },
+            {
+              "coord": [
+                0,
+                2
+              ],
+              "logical_qubit": 1
+            },
+            {
+              "coord": [
+                0,
+                6
+              ],
+              "logical_qubit": 2
+            },
+            {
+              "coord": [
+                2,
+                0
+              ],
+              "logical_qubit": 3
+            },
+            {
+              "coord": [
+                2,
+                9
+              ],
+              "logical_qubit": 4
+            },
+            {
+              "coord": [
+                4,
+                0
+              ],
+              "logical_qubit": 5
+            },
+            {
+              "coord": [
+                8,
+                0
+              ],
+              "logical_qubit": 6
+            },
+            {
+              "coord": [
+                9,
+                4
+              ],
+              "logical_qubit": 7
+            },
+            {
+              "coord": [
+                9,
+                6
+              ],
+              "logical_qubit": 8
+            }
+          ],
+          "topology_path": "configs/topologies/logical_placement_h4_h7/h4_perimeter_numeric.yaml",
+          "weighted_cnot_distance": 129672
+        }
+      },
+      "qasm_path": "artifacts/surface_code_cache/gr/prepared_step/H4_sto-3g_singlet_distance_100_charge_0_grouping__4th_new_2_/e864207184fb9d8d/step.qasm",
+      "qasm_sha256": "8690906cc9b138208b404e19cbe63537f4939ef24d3a0bfd4144174f03d90e82"
+    },
+    "H5": {
+      "cnot_count": 44320,
+      "control_qubit": 10,
+      "interaction_edges": [
+        {
+          "q0": 0,
+          "q1": 1,
+          "weight": 2852
+        },
+        {
+          "q0": 0,
+          "q1": 2,
+          "weight": 2272
+        },
+        {
+          "q0": 0,
+          "q1": 3,
+          "weight": 1732
+        },
+        {
+          "q0": 0,
+          "q1": 4,
+          "weight": 1012
+        },
+        {
+          "q0": 0,
+          "q1": 5,
+          "weight": 812
+        },
+        {
+          "q0": 0,
+          "q1": 6,
+          "weight": 1332
+        },
+        {
+          "q0": 0,
+          "q1": 7,
+          "weight": 1532
+        },
+        {
+          "q0": 0,
+          "q1": 8,
+          "weight": 1332
+        },
+        {
+          "q0": 0,
+          "q1": 9,
+          "weight": 812
+        },
+        {
+          "q0": 0,
+          "q1": 10,
+          "weight": 3240
+        },
+        {
+          "q0": 1,
+          "q1": 2,
+          "weight": 1912
+        },
+        {
+          "q0": 1,
+          "q1": 3,
+          "weight": 1452
+        },
+        {
+          "q0": 1,
+          "q1": 4,
+          "weight": 812
+        },
+        {
+          "q0": 1,
+          "q1": 5,
+          "weight": 612
+        },
+        {
+          "q0": 1,
+          "q1": 6,
+          "weight": 1052
+        },
+        {
+          "q0": 1,
+          "q1": 7,
+          "weight": 1172
+        },
+        {
+          "q0": 1,
+          "q1": 8,
+          "weight": 1052
+        },
+        {
+          "q0": 1,
+          "q1": 9,
+          "weight": 612
+        },
+        {
+          "q0": 1,
+          "q1": 10,
+          "weight": 2188
+        },
+        {
+          "q0": 2,
+          "q1": 3,
+          "weight": 1132
+        },
+        {
+          "q0": 2,
+          "q1": 4,
+          "weight": 692
+        },
+        {
+          "q0": 2,
+          "q1": 5,
+          "weight": 452
+        },
+        {
+          "q0": 2,
+          "q1": 6,
+          "weight": 732
+        },
+        {
+          "q0": 2,
+          "q1": 7,
+          "weight": 852
+        },
+        {
+          "q0": 2,
+          "q1": 8,
+          "weight": 732
+        },
+        {
+          "q0": 2,
+          "q1": 9,
+          "weight": 452
+        },
+        {
+          "q0": 2,
+          "q1": 10,
+          "weight": 1416
+        },
+        {
+          "q0": 3,
+          "q1": 4,
+          "weight": 492
+        },
+        {
+          "q0": 3,
+          "q1": 5,
+          "weight": 252
+        },
+        {
+          "q0": 3,
+          "q1": 6,
+          "weight": 452
+        },
+        {
+          "q0": 3,
+          "q1": 7,
+          "weight": 492
+        },
+        {
+          "q0": 3,
+          "q1": 8,
+          "weight": 452
+        },
+        {
+          "q0": 3,
+          "q1": 9,
+          "weight": 252
+        },
+        {
+          "q0": 3,
+          "q1": 10,
+          "weight": 724
+        },
+        {
+          "q0": 4,
+          "q1": 5,
+          "weight": 92
+        },
+        {
+          "q0": 4,
+          "q1": 6,
+          "weight": 132
+        },
+        {
+          "q0": 4,
+          "q1": 7,
+          "weight": 172
+        },
+        {
+          "q0": 4,
+          "q1": 8,
+          "weight": 132
+        },
+        {
+          "q0": 4,
+          "q1": 9,
+          "weight": 92
+        },
+        {
+          "q0": 4,
+          "q1": 10,
+          "weight": 232
+        },
+        {
+          "q0": 5,
+          "q1": 6,
+          "weight": 852
+        },
+        {
+          "q0": 5,
+          "q1": 7,
+          "weight": 752
+        },
+        {
+          "q0": 5,
+          "q1": 8,
+          "weight": 732
+        },
+        {
+          "q0": 5,
+          "q1": 9,
+          "weight": 492
+        },
+        {
+          "q0": 5,
+          "q1": 10,
+          "weight": 1020
+        },
+        {
+          "q0": 6,
+          "q1": 7,
+          "weight": 432
+        },
+        {
+          "q0": 6,
+          "q1": 8,
+          "weight": 452
+        },
+        {
+          "q0": 6,
+          "q1": 9,
+          "weight": 332
+        },
+        {
+          "q0": 6,
+          "q1": 10,
+          "weight": 488
+        },
+        {
+          "q0": 7,
+          "q1": 8,
+          "weight": 132
+        },
+        {
+          "q0": 7,
+          "q1": 9,
+          "weight": 172
+        },
+        {
+          "q0": 7,
+          "q1": 10,
+          "weight": 196
+        },
+        {
+          "q0": 8,
+          "q1": 9,
+          "weight": 12
+        },
+        {
+          "q0": 8,
+          "q1": 10,
+          "weight": 24
+        },
+        {
+          "q0": 9,
+          "q1": 10,
+          "weight": 12
+        }
+      ],
+      "num_logical_qubits": 11,
+      "num_system_qubits": 10,
+      "placements": {
+        "compact_interaction_aware": {
+          "bbox": {
+            "x_max": 8,
+            "x_min": 2,
+            "y_max": 8,
+            "y_min": 2
+          },
+          "mapping": [
+            {
+              "coord": [
+                4,
+                2
+              ],
+              "logical_qubit": 0
+            },
+            {
+              "coord": [
+                2,
+                4
+              ],
+              "logical_qubit": 1
+            },
+            {
+              "coord": [
+                6,
+                2
+              ],
+              "logical_qubit": 2
+            },
+            {
+              "coord": [
+                7,
+                4
+              ],
+              "logical_qubit": 3
+            },
+            {
+              "coord": [
+                8,
+                2
+              ],
+              "logical_qubit": 4
+            },
+            {
+              "coord": [
+                2,
+                8
+              ],
+              "logical_qubit": 5
+            },
+            {
+              "coord": [
+                4,
+                7
+              ],
+              "logical_qubit": 6
+            },
+            {
+              "coord": [
+                2,
+                6
+              ],
+              "logical_qubit": 7
+            },
+            {
+              "coord": [
+                6,
+                7
+              ],
+              "logical_qubit": 8
+            },
+            {
+              "coord": [
+                8,
+                6
+              ],
+              "logical_qubit": 9
+            },
+            {
+              "coord": [
+                2,
+                2
+              ],
+              "logical_qubit": 10
+            }
+          ],
+          "topology_path": "configs/topologies/logical_placement_h4_h7/h5_compact_interaction_aware.yaml",
+          "weighted_cnot_distance": 210628
+        },
+        "compact_numeric": {
+          "bbox": {
+            "x_max": 8,
+            "x_min": 2,
+            "y_max": 8,
+            "y_min": 2
+          },
+          "mapping": [
+            {
+              "coord": [
+                2,
+                2
+              ],
+              "logical_qubit": 0
+            },
+            {
+              "coord": [
+                2,
+                4
+              ],
+              "logical_qubit": 1
+            },
+            {
+              "coord": [
+                2,
+                6
+              ],
+              "logical_qubit": 2
+            },
+            {
+              "coord": [
+                2,
+                8
+              ],
+              "logical_qubit": 3
+            },
+            {
+              "coord": [
+                4,
+                2
+              ],
+              "logical_qubit": 4
+            },
+            {
+              "coord": [
+                4,
+                7
+              ],
+              "logical_qubit": 5
+            },
+            {
+              "coord": [
+                6,
+                2
+              ],
+              "logical_qubit": 6
+            },
+            {
+              "coord": [
+                6,
+                7
+              ],
+              "logical_qubit": 7
+            },
+            {
+              "coord": [
+                7,
+                4
+              ],
+              "logical_qubit": 8
+            },
+            {
+              "coord": [
+                8,
+                2
+              ],
+              "logical_qubit": 9
+            },
+            {
+              "coord": [
+                8,
+                6
+              ],
+              "logical_qubit": 10
+            }
+          ],
+          "topology_path": "configs/topologies/logical_placement_h4_h7/h5_compact_numeric.yaml",
+          "weighted_cnot_distance": 253088
+        },
+        "perimeter_numeric": {
+          "bbox": {
+            "x_max": 9,
+            "x_min": 0,
+            "y_max": 9,
+            "y_min": 0
+          },
+          "mapping": [
+            {
+              "coord": [
+                0,
+                0
+              ],
+              "logical_qubit": 0
+            },
+            {
+              "coord": [
+                0,
+                2
+              ],
+              "logical_qubit": 1
+            },
+            {
+              "coord": [
+                0,
+                4
+              ],
+              "logical_qubit": 2
+            },
+            {
+              "coord": [
+                0,
+                8
+              ],
+              "logical_qubit": 3
+            },
+            {
+              "coord": [
+                2,
+                0
+              ],
+              "logical_qubit": 4
+            },
+            {
+              "coord": [
+                2,
+                9
+              ],
+              "logical_qubit": 5
+            },
+            {
+              "coord": [
+                4,
+                0
+              ],
+              "logical_qubit": 6
+            },
+            {
+              "coord": [
+                8,
+                0
+              ],
+              "logical_qubit": 7
+            },
+            {
+              "coord": [
+                9,
+                2
+              ],
+              "logical_qubit": 8
+            },
+            {
+              "coord": [
+                9,
+                4
+              ],
+              "logical_qubit": 9
+            },
+            {
+              "coord": [
+                9,
+                8
+              ],
+              "logical_qubit": 10
+            }
+          ],
+          "topology_path": "configs/topologies/logical_placement_h4_h7/h5_perimeter_numeric.yaml",
+          "weighted_cnot_distance": 390044
+        }
+      },
+      "qasm_path": "artifacts/surface_code_cache/gr/prepared_step/H5_sto-3g_triplet_1__distance_100_charge_1_grouping__4th_new_2_/5bd1ca76add60d60/step.qasm",
+      "qasm_sha256": "e6248f75189a660f83bf043f3d95b4f557339da84775960bbbb8f0d14115e3e6"
+    },
+    "H6": {
+      "cnot_count": 108128,
+      "control_qubit": 12,
+      "interaction_edges": [
+        {
+          "q0": 0,
+          "q1": 1,
+          "weight": 5592
+        },
+        {
+          "q0": 0,
+          "q1": 2,
+          "weight": 4452
+        },
+        {
+          "q0": 0,
+          "q1": 3,
+          "weight": 3772
+        },
+        {
+          "q0": 0,
+          "q1": 4,
+          "weight": 3052
+        },
+        {
+          "q0": 0,
+          "q1": 5,
+          "weight": 1832
+        },
+        {
+          "q0": 0,
+          "q1": 6,
+          "weight": 1212
+        },
+        {
+          "q0": 0,
+          "q1": 7,
+          "weight": 2092
+        },
+        {
+          "q0": 0,
+          "q1": 8,
+          "weight": 2532
+        },
+        {
+          "q0": 0,
+          "q1": 9,
+          "weight": 2532
+        },
+        {
+          "q0": 0,
+          "q1": 10,
+          "weight": 2092
+        },
+        {
+          "q0": 0,
+          "q1": 11,
+          "weight": 1212
+        },
+        {
+          "q0": 0,
+          "q1": 12,
+          "weight": 6104
+        },
+        {
+          "q0": 1,
+          "q1": 2,
+          "weight": 3732
+        },
+        {
+          "q0": 1,
+          "q1": 3,
+          "weight": 2912
+        },
+        {
+          "q0": 1,
+          "q1": 4,
+          "weight": 2172
+        },
+        {
+          "q0": 1,
+          "q1": 5,
+          "weight": 1212
+        },
+        {
+          "q0": 1,
+          "q1": 6,
+          "weight": 972
+        },
+        {
+          "q0": 1,
+          "q1": 7,
+          "weight": 1692
+        },
+        {
+          "q0": 1,
+          "q1": 8,
+          "weight": 2052
+        },
+        {
+          "q0": 1,
+          "q1": 9,
+          "weight": 2052
+        },
+        {
+          "q0": 1,
+          "q1": 10,
+          "weight": 1692
+        },
+        {
+          "q0": 1,
+          "q1": 11,
+          "weight": 972
+        },
+        {
+          "q0": 1,
+          "q1": 12,
+          "weight": 4212
+        },
+        {
+          "q0": 2,
+          "q1": 3,
+          "weight": 2592
+        },
+        {
+          "q0": 2,
+          "q1": 4,
+          "weight": 1892
+        },
+        {
+          "q0": 2,
+          "q1": 5,
+          "weight": 1052
+        },
+        {
+          "q0": 2,
+          "q1": 6,
+          "weight": 772
+        },
+        {
+          "q0": 2,
+          "q1": 7,
+          "weight": 1332
+        },
+        {
+          "q0": 2,
+          "q1": 8,
+          "weight": 1612
+        },
+        {
+          "q0": 2,
+          "q1": 9,
+          "weight": 1612
+        },
+        {
+          "q0": 2,
+          "q1": 10,
+          "weight": 1332
+        },
+        {
+          "q0": 2,
+          "q1": 11,
+          "weight": 772
+        },
+        {
+          "q0": 2,
+          "q1": 12,
+          "weight": 2960
+        },
+        {
+          "q0": 3,
+          "q1": 4,
+          "weight": 1572
+        },
+        {
+          "q0": 3,
+          "q1": 5,
+          "weight": 892
+        },
+        {
+          "q0": 3,
+          "q1": 6,
+          "weight": 532
+        },
+        {
+          "q0": 3,
+          "q1": 7,
+          "weight": 932
+        },
+        {
+          "q0": 3,
+          "q1": 8,
+          "weight": 1132
+        },
+        {
+          "q0": 3,
+          "q1": 9,
+          "weight": 1132
+        },
+        {
+          "q0": 3,
+          "q1": 10,
+          "weight": 932
+        },
+        {
+          "q0": 3,
+          "q1": 11,
+          "weight": 532
+        },
+        {
+          "q0": 3,
+          "q1": 12,
+          "weight": 1948
+        },
+        {
+          "q0": 4,
+          "q1": 5,
+          "weight": 732
+        },
+        {
+          "q0": 4,
+          "q1": 6,
+          "weight": 332
+        },
+        {
+          "q0": 4,
+          "q1": 7,
+          "weight": 572
+        },
+        {
+          "q0": 4,
+          "q1": 8,
+          "weight": 692
+        },
+        {
+          "q0": 4,
+          "q1": 9,
+          "weight": 692
+        },
+        {
+          "q0": 4,
+          "q1": 10,
+          "weight": 572
+        },
+        {
+          "q0": 4,
+          "q1": 11,
+          "weight": 332
+        },
+        {
+          "q0": 4,
+          "q1": 12,
+          "weight": 1056
+        },
+        {
+          "q0": 5,
+          "q1": 6,
+          "weight": 92
+        },
+        {
+          "q0": 5,
+          "q1": 7,
+          "weight": 172
+        },
+        {
+          "q0": 5,
+          "q1": 8,
+          "weight": 212
+        },
+        {
+          "q0": 5,
+          "q1": 9,
+          "weight": 212
+        },
+        {
+          "q0": 5,
+          "q1": 10,
+          "weight": 172
+        },
+        {
+          "q0": 5,
+          "q1": 11,
+          "weight": 92
+        },
+        {
+          "q0": 5,
+          "q1": 12,
+          "weight": 324
+        },
+        {
+          "q0": 6,
+          "q1": 7,
+          "weight": 1992
+        },
+        {
+          "q0": 6,
+          "q1": 8,
+          "weight": 1572
+        },
+        {
+          "q0": 6,
+          "q1": 9,
+          "weight": 1612
+        },
+        {
+          "q0": 6,
+          "q1": 10,
+          "weight": 1612
+        },
+        {
+          "q0": 6,
+          "q1": 11,
+          "weight": 1112
+        },
+        {
+          "q0": 6,
+          "q1": 12,
+          "weight": 2192
+        },
+        {
+          "q0": 7,
+          "q1": 8,
+          "weight": 852
+        },
+        {
+          "q0": 7,
+          "q1": 9,
+          "weight": 752
+        },
+        {
+          "q0": 7,
+          "q1": 10,
+          "weight": 732
+        },
+        {
+          "q0": 7,
+          "q1": 11,
+          "weight": 492
+        },
+        {
+          "q0": 7,
+          "q1": 12,
+          "weight": 1020
+        },
+        {
+          "q0": 8,
+          "q1": 9,
+          "weight": 432
+        },
+        {
+          "q0": 8,
+          "q1": 10,
+          "weight": 452
+        },
+        {
+          "q0": 8,
+          "q1": 11,
+          "weight": 332
+        },
+        {
+          "q0": 8,
+          "q1": 12,
+          "weight": 488
+        },
+        {
+          "q0": 9,
+          "q1": 10,
+          "weight": 132
+        },
+        {
+          "q0": 9,
+          "q1": 11,
+          "weight": 172
+        },
+        {
+          "q0": 9,
+          "q1": 12,
+          "weight": 196
+        },
+        {
+          "q0": 10,
+          "q1": 11,
+          "weight": 12
+        },
+        {
+          "q0": 10,
+          "q1": 12,
+          "weight": 24
+        },
+        {
+          "q0": 11,
+          "q1": 12,
+          "weight": 12
+        }
+      ],
+      "num_logical_qubits": 13,
+      "num_system_qubits": 12,
+      "placements": {
+        "compact_interaction_aware": {
+          "bbox": {
+            "x_max": 8,
+            "x_min": 0,
+            "y_max": 8,
+            "y_min": 0
+          },
+          "mapping": [
+            {
+              "coord": [
+                2,
+                4
+              ],
+              "logical_qubit": 0
+            },
+            {
+              "coord": [
+                2,
+                2
+              ],
+              "logical_qubit": 1
+            },
+            {
+              "coord": [
+                4,
+                2
+              ],
+              "logical_qubit": 2
+            },
+            {
+              "coord": [
+                6,
+                2
+              ],
+              "logical_qubit": 3
+            },
+            {
+              "coord": [
+                7,
+                4
+              ],
+              "logical_qubit": 4
+            },
+            {
+              "coord": [
+                8,
+                2
+              ],
+              "logical_qubit": 5
+            },
+            {
+              "coord": [
+                4,
+                7
+              ],
+              "logical_qubit": 6
+            },
+            {
+              "coord": [
+                2,
+                8
+              ],
+              "logical_qubit": 7
+            },
+            {
+              "coord": [
+                0,
+                4
+              ],
+              "logical_qubit": 8
+            },
+            {
+              "coord": [
+                4,
+                0
+              ],
+              "logical_qubit": 9
+            },
+            {
+              "coord": [
+                6,
+                7
+              ],
+              "logical_qubit": 10
+            },
+            {
+              "coord": [
+                8,
+                6
+              ],
+              "logical_qubit": 11
+            },
+            {
+              "coord": [
+                2,
+                6
+              ],
+              "logical_qubit": 12
+            }
+          ],
+          "topology_path": "configs/topologies/logical_placement_h4_h7/h6_compact_interaction_aware.yaml",
+          "weighted_cnot_distance": 529804
+        },
+        "compact_numeric": {
+          "bbox": {
+            "x_max": 8,
+            "x_min": 0,
+            "y_max": 8,
+            "y_min": 0
+          },
+          "mapping": [
+            {
+              "coord": [
+                0,
+                4
+              ],
+              "logical_qubit": 0
+            },
+            {
+              "coord": [
+                2,
+                2
+              ],
+              "logical_qubit": 1
+            },
+            {
+              "coord": [
+                2,
+                4
+              ],
+              "logical_qubit": 2
+            },
+            {
+              "coord": [
+                2,
+                6
+              ],
+              "logical_qubit": 3
+            },
+            {
+              "coord": [
+                2,
+                8
+              ],
+              "logical_qubit": 4
+            },
+            {
+              "coord": [
+                4,
+                0
+              ],
+              "logical_qubit": 5
+            },
+            {
+              "coord": [
+                4,
+                2
+              ],
+              "logical_qubit": 6
+            },
+            {
+              "coord": [
+                4,
+                7
+              ],
+              "logical_qubit": 7
+            },
+            {
+              "coord": [
+                6,
+                2
+              ],
+              "logical_qubit": 8
+            },
+            {
+              "coord": [
+                6,
+                7
+              ],
+              "logical_qubit": 9
+            },
+            {
+              "coord": [
+                7,
+                4
+              ],
+              "logical_qubit": 10
+            },
+            {
+              "coord": [
+                8,
+                2
+              ],
+              "logical_qubit": 11
+            },
+            {
+              "coord": [
+                8,
+                6
+              ],
+              "logical_qubit": 12
+            }
+          ],
+          "topology_path": "configs/topologies/logical_placement_h4_h7/h6_compact_numeric.yaml",
+          "weighted_cnot_distance": 644340
+        },
+        "perimeter_numeric": {
+          "bbox": {
+            "x_max": 9,
+            "x_min": 0,
+            "y_max": 9,
+            "y_min": 0
+          },
+          "mapping": [
+            {
+              "coord": [
+                0,
+                0
+              ],
+              "logical_qubit": 0
+            },
+            {
+              "coord": [
+                0,
+                2
+              ],
+              "logical_qubit": 1
+            },
+            {
+              "coord": [
+                0,
+                4
+              ],
+              "logical_qubit": 2
+            },
+            {
+              "coord": [
+                0,
+                6
+              ],
+              "logical_qubit": 3
+            },
+            {
+              "coord": [
+                0,
+                8
+              ],
+              "logical_qubit": 4
+            },
+            {
+              "coord": [
+                2,
+                0
+              ],
+              "logical_qubit": 5
+            },
+            {
+              "coord": [
+                2,
+                9
+              ],
+              "logical_qubit": 6
+            },
+            {
+              "coord": [
+                4,
+                0
+              ],
+              "logical_qubit": 7
+            },
+            {
+              "coord": [
+                8,
+                0
+              ],
+              "logical_qubit": 8
+            },
+            {
+              "coord": [
+                9,
+                2
+              ],
+              "logical_qubit": 9
+            },
+            {
+              "coord": [
+                9,
+                4
+              ],
+              "logical_qubit": 10
+            },
+            {
+              "coord": [
+                9,
+                6
+              ],
+              "logical_qubit": 11
+            },
+            {
+              "coord": [
+                9,
+                8
+              ],
+              "logical_qubit": 12
+            }
+          ],
+          "topology_path": "configs/topologies/logical_placement_h4_h7/h6_perimeter_numeric.yaml",
+          "weighted_cnot_distance": 940476
+        }
+      },
+      "qasm_path": "artifacts/surface_code_cache/gr/prepared_step/H6_sto-3g_singlet_distance_100_charge_0_grouping__4th_new_2_/e875a0e1d02f24fd/step.qasm",
+      "qasm_sha256": "4f6d34061c9b4702a6a1d6a0107e7b52a7d246e50442fbf35a4d38f33f32ab76"
+    },
+    "H7": {
+      "cnot_count": 228312,
+      "control_qubit": 14,
+      "interaction_edges": [
+        {
+          "q0": 0,
+          "q1": 1,
+          "weight": 9212
+        },
+        {
+          "q0": 0,
+          "q1": 2,
+          "weight": 7452
+        },
+        {
+          "q0": 0,
+          "q1": 3,
+          "weight": 6472
+        },
+        {
+          "q0": 0,
+          "q1": 4,
+          "weight": 5492
+        },
+        {
+          "q0": 0,
+          "q1": 5,
+          "weight": 4332
+        },
+        {
+          "q0": 0,
+          "q1": 6,
+          "weight": 2372
+        },
+        {
+          "q0": 0,
+          "q1": 7,
+          "weight": 1692
+        },
+        {
+          "q0": 0,
+          "q1": 8,
+          "weight": 2972
+        },
+        {
+          "q0": 0,
+          "q1": 9,
+          "weight": 3772
+        },
+        {
+          "q0": 0,
+          "q1": 10,
+          "weight": 4012
+        },
+        {
+          "q0": 0,
+          "q1": 11,
+          "weight": 3772
+        },
+        {
+          "q0": 0,
+          "q1": 12,
+          "weight": 2972
+        },
+        {
+          "q0": 0,
+          "q1": 13,
+          "weight": 1692
+        },
+        {
+          "q0": 0,
+          "q1": 14,
+          "weight": 10008
+        },
+        {
+          "q0": 1,
+          "q1": 2,
+          "weight": 6892
+        },
+        {
+          "q0": 1,
+          "q1": 3,
+          "weight": 5592
+        },
+        {
+          "q0": 1,
+          "q1": 4,
+          "weight": 4532
+        },
+        {
+          "q0": 1,
+          "q1": 5,
+          "weight": 3572
+        },
+        {
+          "q0": 1,
+          "q1": 6,
+          "weight": 2092
+        },
+        {
+          "q0": 1,
+          "q1": 7,
+          "weight": 1412
+        },
+        {
+          "q0": 1,
+          "q1": 8,
+          "weight": 2532
+        },
+        {
+          "q0": 1,
+          "q1": 9,
+          "weight": 3172
+        },
+        {
+          "q0": 1,
+          "q1": 10,
+          "weight": 3412
+        },
+        {
+          "q0": 1,
+          "q1": 11,
+          "weight": 3172
+        },
+        {
+          "q0": 1,
+          "q1": 12,
+          "weight": 2532
+        },
+        {
+          "q0": 1,
+          "q1": 13,
+          "weight": 1412
+        },
+        {
+          "q0": 1,
+          "q1": 14,
+          "weight": 7556
+        },
+        {
+          "q0": 2,
+          "q1": 3,
+          "weight": 4912
+        },
+        {
+          "q0": 2,
+          "q1": 4,
+          "weight": 3772
+        },
+        {
+          "q0": 2,
+          "q1": 5,
+          "weight": 2812
+        },
+        {
+          "q0": 2,
+          "q1": 6,
+          "weight": 1612
+        },
+        {
+          "q0": 2,
+          "q1": 7,
+          "weight": 1172
+        },
+        {
+          "q0": 2,
+          "q1": 8,
+          "weight": 2052
+        },
+        {
+          "q0": 2,
+          "q1": 9,
+          "weight": 2612
+        },
+        {
+          "q0": 2,
+          "q1": 10,
+          "weight": 2772
+        },
+        {
+          "q0": 2,
+          "q1": 11,
+          "weight": 2612
+        },
+        {
+          "q0": 2,
+          "q1": 12,
+          "weight": 2052
+        },
+        {
+          "q0": 2,
+          "q1": 13,
+          "weight": 1172
+        },
+        {
+          "q0": 2,
+          "q1": 14,
+          "weight": 5504
+        },
+        {
+          "q0": 3,
+          "q1": 4,
+          "weight": 3412
+        },
+        {
+          "q0": 3,
+          "q1": 5,
+          "weight": 2492
+        },
+        {
+          "q0": 3,
+          "q1": 6,
+          "weight": 1292
+        },
+        {
+          "q0": 3,
+          "q1": 7,
+          "weight": 892
+        },
+        {
+          "q0": 3,
+          "q1": 8,
+          "weight": 1612
+        },
+        {
+          "q0": 3,
+          "q1": 9,
+          "weight": 2012
+        },
+        {
+          "q0": 3,
+          "q1": 10,
+          "weight": 2172
+        },
+        {
+          "q0": 3,
+          "q1": 11,
+          "weight": 2012
+        },
+        {
+          "q0": 3,
+          "q1": 12,
+          "weight": 1612
+        },
+        {
+          "q0": 3,
+          "q1": 13,
+          "weight": 892
+        },
+        {
+          "q0": 3,
+          "q1": 14,
+          "weight": 3932
+        },
+        {
+          "q0": 4,
+          "q1": 5,
+          "weight": 2132
+        },
+        {
+          "q0": 4,
+          "q1": 6,
+          "weight": 1212
+        },
+        {
+          "q0": 4,
+          "q1": 7,
+          "weight": 652
+        },
+        {
+          "q0": 4,
+          "q1": 8,
+          "weight": 1132
+        },
+        {
+          "q0": 4,
+          "q1": 9,
+          "weight": 1452
+        },
+        {
+          "q0": 4,
+          "q1": 10,
+          "weight": 1532
+        },
+        {
+          "q0": 4,
+          "q1": 11,
+          "weight": 1452
+        },
+        {
+          "q0": 4,
+          "q1": 12,
+          "weight": 1132
+        },
+        {
+          "q0": 4,
+          "q1": 13,
+          "weight": 652
+        },
+        {
+          "q0": 4,
+          "q1": 14,
+          "weight": 2640
+        },
+        {
+          "q0": 5,
+          "q1": 6,
+          "weight": 972
+        },
+        {
+          "q0": 5,
+          "q1": 7,
+          "weight": 372
+        },
+        {
+          "q0": 5,
+          "q1": 8,
+          "weight": 692
+        },
+        {
+          "q0": 5,
+          "q1": 9,
+          "weight": 852
+        },
+        {
+          "q0": 5,
+          "q1": 10,
+          "weight": 932
+        },
+        {
+          "q0": 5,
+          "q1": 11,
+          "weight": 852
+        },
+        {
+          "q0": 5,
+          "q1": 12,
+          "weight": 692
+        },
+        {
+          "q0": 5,
+          "q1": 13,
+          "weight": 372
+        },
+        {
+          "q0": 5,
+          "q1": 14,
+          "weight": 1428
+        },
+        {
+          "q0": 6,
+          "q1": 7,
+          "weight": 132
+        },
+        {
+          "q0": 6,
+          "q1": 8,
+          "weight": 212
+        },
+        {
+          "q0": 6,
+          "q1": 9,
+          "weight": 292
+        },
+        {
+          "q0": 6,
+          "q1": 10,
+          "weight": 292
+        },
+        {
+          "q0": 6,
+          "q1": 11,
+          "weight": 292
+        },
+        {
+          "q0": 6,
+          "q1": 12,
+          "weight": 212
+        },
+        {
+          "q0": 6,
+          "q1": 13,
+          "weight": 132
+        },
+        {
+          "q0": 6,
+          "q1": 14,
+          "weight": 456
+        },
+        {
+          "q0": 7,
+          "q1": 8,
+          "weight": 3332
+        },
+        {
+          "q0": 7,
+          "q1": 9,
+          "weight": 2532
+        },
+        {
+          "q0": 7,
+          "q1": 10,
+          "weight": 2552
+        },
+        {
+          "q0": 7,
+          "q1": 11,
+          "weight": 2532
+        },
+        {
+          "q0": 7,
+          "q1": 12,
+          "weight": 2372
+        },
+        {
+          "q0": 7,
+          "q1": 13,
+          "weight": 1372
+        },
+        {
+          "q0": 7,
+          "q1": 14,
+          "weight": 3684
+        },
+        {
+          "q0": 8,
+          "q1": 9,
+          "weight": 2012
+        },
+        {
+          "q0": 8,
+          "q1": 10,
+          "weight": 1672
+        },
+        {
+          "q0": 8,
+          "q1": 11,
+          "weight": 1612
+        },
+        {
+          "q0": 8,
+          "q1": 12,
+          "weight": 1612
+        },
+        {
+          "q0": 8,
+          "q1": 13,
+          "weight": 1132
+        },
+        {
+          "q0": 8,
+          "q1": 14,
+          "weight": 2232
+        },
+        {
+          "q0": 9,
+          "q1": 10,
+          "weight": 992
+        },
+        {
+          "q0": 9,
+          "q1": 11,
+          "weight": 812
+        },
+        {
+          "q0": 9,
+          "q1": 12,
+          "weight": 852
+        },
+        {
+          "q0": 9,
+          "q1": 13,
+          "weight": 612
+        },
+        {
+          "q0": 9,
+          "q1": 14,
+          "weight": 1140
+        },
+        {
+          "q0": 10,
+          "q1": 11,
+          "weight": 492
+        },
+        {
+          "q0": 10,
+          "q1": 12,
+          "weight": 532
+        },
+        {
+          "q0": 10,
+          "q1": 13,
+          "weight": 332
+        },
+        {
+          "q0": 10,
+          "q1": 14,
+          "weight": 568
+        },
+        {
+          "q0": 11,
+          "q1": 12,
+          "weight": 172
+        },
+        {
+          "q0": 11,
+          "q1": 13,
+          "weight": 212
+        },
+        {
+          "q0": 11,
+          "q1": 14,
+          "weight": 236
+        },
+        {
+          "q0": 12,
+          "q1": 13,
+          "weight": 12
+        },
+        {
+          "q0": 12,
+          "q1": 14,
+          "weight": 24
+        },
+        {
+          "q0": 13,
+          "q1": 14,
+          "weight": 12
+        }
+      ],
+      "num_logical_qubits": 15,
+      "num_system_qubits": 14,
+      "placements": {
+        "compact_interaction_aware": {
+          "bbox": {
+            "x_max": 9,
+            "x_min": 0,
+            "y_max": 9,
+            "y_min": 0
+          },
+          "mapping": [
+            {
+              "coord": [
+                2,
+                4
+              ],
+              "logical_qubit": 0
+            },
+            {
+              "coord": [
+                4,
+                7
+              ],
+              "logical_qubit": 1
+            },
+            {
+              "coord": [
+                4,
+                2
+              ],
+              "logical_qubit": 2
+            },
+            {
+              "coord": [
+                2,
+                2
+              ],
+              "logical_qubit": 3
+            },
+            {
+              "coord": [
+                2,
+                8
+              ],
+              "logical_qubit": 4
+            },
+            {
+              "coord": [
+                0,
+                4
+              ],
+              "logical_qubit": 5
+            },
+            {
+              "coord": [
+                4,
+                0
+              ],
+              "logical_qubit": 6
+            },
+            {
+              "coord": [
+                8,
+                6
+              ],
+              "logical_qubit": 7
+            },
+            {
+              "coord": [
+                7,
+                4
+              ],
+              "logical_qubit": 8
+            },
+            {
+              "coord": [
+                6,
+                7
+              ],
+              "logical_qubit": 9
+            },
+            {
+              "coord": [
+                6,
+                2
+              ],
+              "logical_qubit": 10
+            },
+            {
+              "coord": [
+                4,
+                9
+              ],
+              "logical_qubit": 11
+            },
+            {
+              "coord": [
+                8,
+                2
+              ],
+              "logical_qubit": 12
+            },
+            {
+              "coord": [
+                9,
+                4
+              ],
+              "logical_qubit": 13
+            },
+            {
+              "coord": [
+                2,
+                6
+              ],
+              "logical_qubit": 14
+            }
+          ],
+          "topology_path": "configs/topologies/logical_placement_h4_h7/h7_compact_interaction_aware.yaml",
+          "weighted_cnot_distance": 1182008
+        },
+        "compact_numeric": {
+          "bbox": {
+            "x_max": 9,
+            "x_min": 0,
+            "y_max": 9,
+            "y_min": 0
+          },
+          "mapping": [
+            {
+              "coord": [
+                0,
+                4
+              ],
+              "logical_qubit": 0
+            },
+            {
+              "coord": [
+                2,
+                2
+              ],
+              "logical_qubit": 1
+            },
+            {
+              "coord": [
+                2,
+                4
+              ],
+              "logical_qubit": 2
+            },
+            {
+              "coord": [
+                2,
+                6
+              ],
+              "logical_qubit": 3
+            },
+            {
+              "coord": [
+                2,
+                8
+              ],
+              "logical_qubit": 4
+            },
+            {
+              "coord": [
+                4,
+                0
+              ],
+              "logical_qubit": 5
+            },
+            {
+              "coord": [
+                4,
+                2
+              ],
+              "logical_qubit": 6
+            },
+            {
+              "coord": [
+                4,
+                7
+              ],
+              "logical_qubit": 7
+            },
+            {
+              "coord": [
+                4,
+                9
+              ],
+              "logical_qubit": 8
+            },
+            {
+              "coord": [
+                6,
+                2
+              ],
+              "logical_qubit": 9
+            },
+            {
+              "coord": [
+                6,
+                7
+              ],
+              "logical_qubit": 10
+            },
+            {
+              "coord": [
+                7,
+                4
+              ],
+              "logical_qubit": 11
+            },
+            {
+              "coord": [
+                8,
+                2
+              ],
+              "logical_qubit": 12
+            },
+            {
+              "coord": [
+                8,
+                6
+              ],
+              "logical_qubit": 13
+            },
+            {
+              "coord": [
+                9,
+                4
+              ],
+              "logical_qubit": 14
+            }
+          ],
+          "topology_path": "configs/topologies/logical_placement_h4_h7/h7_compact_numeric.yaml",
+          "weighted_cnot_distance": 1427360
+        },
+        "perimeter_numeric": {
+          "bbox": {
+            "x_max": 9,
+            "x_min": 0,
+            "y_max": 9,
+            "y_min": 0
+          },
+          "mapping": [
+            {
+              "coord": [
+                0,
+                0
+              ],
+              "logical_qubit": 0
+            },
+            {
+              "coord": [
+                0,
+                2
+              ],
+              "logical_qubit": 1
+            },
+            {
+              "coord": [
+                0,
+                4
+              ],
+              "logical_qubit": 2
+            },
+            {
+              "coord": [
+                0,
+                6
+              ],
+              "logical_qubit": 3
+            },
+            {
+              "coord": [
+                0,
+                8
+              ],
+              "logical_qubit": 4
+            },
+            {
+              "coord": [
+                2,
+                0
+              ],
+              "logical_qubit": 5
+            },
+            {
+              "coord": [
+                2,
+                9
+              ],
+              "logical_qubit": 6
+            },
+            {
+              "coord": [
+                4,
+                0
+              ],
+              "logical_qubit": 7
+            },
+            {
+              "coord": [
+                4,
+                9
+              ],
+              "logical_qubit": 8
+            },
+            {
+              "coord": [
+                6,
+                0
+              ],
+              "logical_qubit": 9
+            },
+            {
+              "coord": [
+                8,
+                0
+              ],
+              "logical_qubit": 10
+            },
+            {
+              "coord": [
+                9,
+                2
+              ],
+              "logical_qubit": 11
+            },
+            {
+              "coord": [
+                9,
+                4
+              ],
+              "logical_qubit": 12
+            },
+            {
+              "coord": [
+                9,
+                6
+              ],
+              "logical_qubit": 13
+            },
+            {
+              "coord": [
+                9,
+                8
+              ],
+              "logical_qubit": 14
+            }
+          ],
+          "topology_path": "configs/topologies/logical_placement_h4_h7/h7_perimeter_numeric.yaml",
+          "weighted_cnot_distance": 1930468
+        }
+      },
+      "qasm_path": "artifacts/surface_code_cache/gr/prepared_step/H7_sto-3g_triplet_1__distance_100_charge_1_grouping__4th_new_2_/94a3628e1683d4d0/step.qasm",
+      "qasm_sha256": "4406dbfd1fb59a7affb9165a4d61736887111abad5a640859ebc38f0585c6fac"
+    }
+  },
+  "schema_version": "logical_placement_topology_v1"
+}

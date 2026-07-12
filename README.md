@@ -316,6 +316,9 @@ PYTHONPATH=src python scripts/profile_surface_code_stages.py \
 
 ## Cache と Artifact
 
+成果物の区分、保持ルール、容量確認方法は
+[Artifact Directory Guide](artifacts/README.md) にまとめています。
+
 qret の中間ファイル、prepared step、integral cache、RZ helper cache、compile 結果は以下に保存されます。
 
 ```text

@@ -1,0 +1,137 @@
+targets:
+  molecules:
+    - H4
+    - H5
+    - H6
+    - H7
+  pf_labels:
+    - 4th(new_2)
+
+target_error: 0.00015936001019904
+rotation_precision:
+qret_path:
+
+defaults:
+  circuit_scope: efficient_controlled_pf_one_step
+  compile_mode: ftqc_compile_topology_qec
+  topology: auto_10x10
+  machine_type: Dim2
+  mapping_algorithm: 1
+  mapping_partition_algorithm: 0
+  mapping_partition_seed: 314
+  mapping_find_place_algorithm: 0
+  magic_generation_period: 15
+  maximum_magic_state_stock:
+    policy: fixed
+    value: 10000
+  entanglement_generation_period: 100
+  maximum_entangled_state_stock: 10
+  reaction_time: 1
+  skip_compile_output: true
+  compile_info_output_mode: summary
+  save_mapping_result: false
+
+qec:
+  physical_error_rate: 0.001
+  drop_rate: 0.1
+  code_cycle_time_sec: 0.000001
+  allowed_failure_prob: 0.01
+
+topologies:
+  auto_8x8:
+    enabled: true
+    path: configs/topologies/logical_grid_capacity_h4_h7/auto_center_8x8.yaml
+  auto_10x10:
+    enabled: true
+    path: configs/topologies/logical_grid_capacity_h4_h7/auto_center_10x10.yaml
+  auto_12x12:
+    enabled: true
+    path: configs/topologies/logical_grid_capacity_h4_h7/auto_center_12x12.yaml
+
+  aware_8x8:
+    enabled: true
+    paths:
+      H4: configs/topologies/logical_grid_capacity_h4_h7/h4_8x8_compact_interaction_aware.yaml
+      H5: configs/topologies/logical_grid_capacity_h4_h7/h5_8x8_compact_interaction_aware.yaml
+      H6: configs/topologies/logical_grid_capacity_h4_h7/h6_8x8_compact_interaction_aware.yaml
+      H7: configs/topologies/logical_grid_capacity_h4_h7/h7_8x8_compact_interaction_aware.yaml
+  aware_10x10:
+    enabled: true
+    paths:
+      H4: configs/topologies/logical_grid_capacity_h4_h7/h4_10x10_compact_interaction_aware.yaml
+      H5: configs/topologies/logical_grid_capacity_h4_h7/h5_10x10_compact_interaction_aware.yaml
+      H6: configs/topologies/logical_grid_capacity_h4_h7/h6_10x10_compact_interaction_aware.yaml
+      H7: configs/topologies/logical_grid_capacity_h4_h7/h7_10x10_compact_interaction_aware.yaml
+  aware_12x12:
+    enabled: true
+    paths:
+      H4: configs/topologies/logical_grid_capacity_h4_h7/h4_12x12_compact_interaction_aware.yaml
+      H5: configs/topologies/logical_grid_capacity_h4_h7/h5_12x12_compact_interaction_aware.yaml
+      H6: configs/topologies/logical_grid_capacity_h4_h7/h6_12x12_compact_interaction_aware.yaml
+      H7: configs/topologies/logical_grid_capacity_h4_h7/h7_12x12_compact_interaction_aware.yaml
+
+architecture_cases:
+  - name: p1e-5_auto_8x8
+    topology: auto_8x8
+    rotation_precision: 1.0e-5
+    mapping_algorithm: 1
+    save_mapping_result: true
+  - name: p1e-5_aware_8x8
+    topology: aware_8x8
+    rotation_precision: 1.0e-5
+    mapping_algorithm: 0
+  - name: p1e-5_auto_10x10
+    topology: auto_10x10
+    rotation_precision: 1.0e-5
+    mapping_algorithm: 1
+    save_mapping_result: true
+  - name: p1e-5_aware_10x10
+    topology: aware_10x10
+    rotation_precision: 1.0e-5
+    mapping_algorithm: 0
+  - name: p1e-5_auto_12x12
+    topology: auto_12x12
+    rotation_precision: 1.0e-5
+    mapping_algorithm: 1
+    save_mapping_result: true
+  - name: p1e-5_aware_12x12
+    topology: aware_12x12
+    rotation_precision: 1.0e-5
+    mapping_algorithm: 0
+
+  - name: p1e-2_auto_8x8
+    topology: auto_8x8
+    rotation_precision: 1.0e-2
+    mapping_algorithm: 1
+    save_mapping_result: true
+  - name: p1e-2_aware_8x8
+    topology: aware_8x8
+    rotation_precision: 1.0e-2
+    mapping_algorithm: 0
+  - name: p1e-2_auto_10x10
+    topology: auto_10x10
+    rotation_precision: 1.0e-2
+    mapping_algorithm: 1
+    save_mapping_result: true
+  - name: p1e-2_aware_10x10
+    topology: aware_10x10
+    rotation_precision: 1.0e-2
+    mapping_algorithm: 0
+  - name: p1e-2_auto_12x12
+    topology: auto_12x12
+    rotation_precision: 1.0e-2
+    mapping_algorithm: 1
+    save_mapping_result: true
+  - name: p1e-2_aware_12x12
+    topology: aware_12x12
+    rotation_precision: 1.0e-2
+    mapping_algorithm: 0
+
+output:
+  directory: artifacts/surface_code_grid_capacity_sweep_h4_h7_4th
+  jsonl: results.jsonl
+  csv: results.csv
+  markdown: results.md
+
+cache:
+  reuse_compile_results: true

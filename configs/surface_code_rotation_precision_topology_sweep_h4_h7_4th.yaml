@@ -1,0 +1,103 @@
+targets:
+  molecules:
+    - H4
+    - H5
+    - H6
+    - H7
+  pf_labels:
+    - 4th(new_2)
+
+target_error: 0.00015936001019904
+rotation_precision:
+qret_path:
+
+defaults:
+  circuit_scope: efficient_controlled_pf_one_step
+  compile_mode: ftqc_compile_topology_qec
+  topology: factory_center_block
+  machine_type: Dim2
+  magic_generation_period: 15
+  maximum_magic_state_stock:
+    policy: fixed
+    value: 10000
+  entanglement_generation_period: 100
+  maximum_entangled_state_stock: 10
+  reaction_time: 1
+  skip_compile_output: true
+
+qec:
+  physical_error_rate: 0.001
+  drop_rate: 0.1
+  code_cycle_time_sec: 0.000001
+  allowed_failure_prob: 0.01
+
+topologies:
+  factory_left_edge:
+    enabled: true
+    path: configs/topologies/tutorial_factory_left_edge.yaml
+
+  factory_center_block:
+    enabled: true
+    path: configs/topologies/tutorial_factory_center_block.yaml
+
+  factory_right_edge:
+    enabled: true
+    path: configs/topologies/tutorial_factory_right_edge.yaml
+
+architecture_cases:
+  - name: rot_prec_1e-5_left_edge
+    topology: factory_left_edge
+    rotation_precision: 1.0e-5
+
+  - name: rot_prec_1e-5_center_block
+    topology: factory_center_block
+    rotation_precision: 1.0e-5
+
+  - name: rot_prec_1e-5_right_edge
+    topology: factory_right_edge
+    rotation_precision: 1.0e-5
+
+  - name: rot_prec_1e-3_left_edge
+    topology: factory_left_edge
+    rotation_precision: 1.0e-3
+
+  - name: rot_prec_1e-3_center_block
+    topology: factory_center_block
+    rotation_precision: 1.0e-3
+
+  - name: rot_prec_1e-3_right_edge
+    topology: factory_right_edge
+    rotation_precision: 1.0e-3
+
+  - name: rot_prec_3e-3_left_edge
+    topology: factory_left_edge
+    rotation_precision: 3.0e-3
+
+  - name: rot_prec_3e-3_center_block
+    topology: factory_center_block
+    rotation_precision: 3.0e-3
+
+  - name: rot_prec_3e-3_right_edge
+    topology: factory_right_edge
+    rotation_precision: 3.0e-3
+
+  - name: rot_prec_1e-2_left_edge
+    topology: factory_left_edge
+    rotation_precision: 1.0e-2
+
+  - name: rot_prec_1e-2_center_block
+    topology: factory_center_block
+    rotation_precision: 1.0e-2
+
+  - name: rot_prec_1e-2_right_edge
+    topology: factory_right_edge
+    rotation_precision: 1.0e-2
+
+output:
+  directory: artifacts/surface_code_rotation_precision_topology_sweep_h4_h7_4th
+  jsonl: results.jsonl
+  csv: results.csv
+  markdown: results.md
+
+cache:
+  reuse_compile_results: true
