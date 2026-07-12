@@ -1,0 +1,1518 @@
+{
+  "grid_size": [
+    8,
+    8
+  ],
+  "interaction_source": "pre-synthesis efficient-controlled PF-step QASM CNOT counts",
+  "molecules": {
+    "H5": {
+      "baseline_case": "h5_egress_2_baseline",
+      "baseline_topology_path": "configs/topologies/logical_grid_capacity_h4_h7/h5_8x8_compact_interaction_aware.yaml",
+      "baseline_topology_sha256": "ffb410ac792ce981e379ec957766c91d6c8c04ff12cafd8265fd94da7a69e26c",
+      "num_logical_qubits": 11,
+      "qasm_path": "artifacts/surface_code_cache/gr/prepared_step/H5_sto-3g_triplet_1__distance_100_charge_1_grouping__4th_new_2_/5bd1ca76add60d60/step.qasm",
+      "qasm_sha256": "e6248f75189a660f83bf043f3d95b4f557339da84775960bbbb8f0d14115e3e6",
+      "variants": [
+        "h5_egress_2_baseline",
+        "h5_egress_1_ban_left",
+        "h5_egress_0_ban_both",
+        "h5_control_remote_ban_1",
+        "h5_control_remote_ban_2"
+      ]
+    },
+    "H6": {
+      "baseline_case": "h6_egress_1_baseline",
+      "baseline_topology_path": "configs/topologies/logical_grid_capacity_h4_h7/h6_8x8_compact_interaction_aware.yaml",
+      "baseline_topology_sha256": "9af21d2e9cb14f604b1446cbf9ca75cae50905e1ba266db81fbbfeab2b07aa88",
+      "num_logical_qubits": 13,
+      "qasm_path": "artifacts/surface_code_cache/gr/prepared_step/H6_sto-3g_singlet_distance_100_charge_0_grouping__4th_new_2_/e875a0e1d02f24fd/step.qasm",
+      "qasm_sha256": "4f6d34061c9b4702a6a1d6a0107e7b52a7d246e50442fbf35a4d38f33f32ab76",
+      "variants": [
+        "h6_egress_1_baseline",
+        "h6_egress_0_ban_down",
+        "h6_control_remote_ban_1",
+        "h6_egress_2_move_q0"
+      ]
+    }
+  },
+  "nearest_factory_distance_weighting": "one uniform weight per logical qubit",
+  "pf_label": "4th(new_2)",
+  "schema_version": "factory_egress_generalization_topology_v1",
+  "trapped_factory_coordinate": [
+    3,
+    3
+  ],
+  "variants": {
+    "h5_control_remote_ban_1": {
+      "banned_cell_count": 1,
+      "banned_cells": [
+        [
+          7,
+          7
+        ]
+      ],
+      "factory_coordinate_set": [
+        [
+          3,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          3
+        ],
+        [
+          4,
+          4
+        ]
+      ],
+      "initial_free_neighbors_by_factory_coordinate": {
+        "3,3": 2,
+        "3,4": 2,
+        "4,3": 2,
+        "4,4": 2
+      },
+      "initial_free_neighbors_by_factory_symbol": {
+        "0": 2,
+        "1": 2,
+        "2": 2,
+        "3": 2
+      },
+      "logical_mapping": [
+        {
+          "coord": [
+            4,
+            6
+          ],
+          "logical_qubit": 0
+        },
+        {
+          "coord": [
+            6,
+            4
+          ],
+          "logical_qubit": 1
+        },
+        {
+          "coord": [
+            2,
+            6
+          ],
+          "logical_qubit": 2
+        },
+        {
+          "coord": [
+            0,
+            4
+          ],
+          "logical_qubit": 3
+        },
+        {
+          "coord": [
+            0,
+            6
+          ],
+          "logical_qubit": 4
+        },
+        {
+          "coord": [
+            6,
+            0
+          ],
+          "logical_qubit": 5
+        },
+        {
+          "coord": [
+            4,
+            0
+          ],
+          "logical_qubit": 6
+        },
+        {
+          "coord": [
+            6,
+            2
+          ],
+          "logical_qubit": 7
+        },
+        {
+          "coord": [
+            2,
+            0
+          ],
+          "logical_qubit": 8
+        },
+        {
+          "coord": [
+            0,
+            2
+          ],
+          "logical_qubit": 9
+        },
+        {
+          "coord": [
+            6,
+            6
+          ],
+          "logical_qubit": 10
+        }
+      ],
+      "magic_factories": [
+        {
+          "coord": [
+            3,
+            3
+          ],
+          "symbol": 0
+        },
+        {
+          "coord": [
+            3,
+            4
+          ],
+          "symbol": 1
+        },
+        {
+          "coord": [
+            4,
+            3
+          ],
+          "symbol": 2
+        },
+        {
+          "coord": [
+            4,
+            4
+          ],
+          "symbol": 3
+        }
+      ],
+      "molecule": "H5",
+      "topology_path": "configs/topologies/factory_egress_generalization_h5_h6_4th/h5_control_remote_ban_1.yaml",
+      "topology_sha256": "61865d57fb85def73c5b27fad3ff37d4542c95cdd46bb04eac39f65c08a6bfbb",
+      "trapped_coordinate_free_neighbors": 2,
+      "usable_non_factory_cell_count": 59,
+      "weighted_cnot_distance": 223808,
+      "weighted_cnot_distance_delta_vs_baseline": 0,
+      "weighted_nearest_factory_distance": 38,
+      "weighted_nearest_factory_distance_delta_vs_baseline": 0,
+      "weighted_nearest_factory_distance_mean": 3.4545454545454546
+    },
+    "h5_control_remote_ban_2": {
+      "banned_cell_count": 2,
+      "banned_cells": [
+        [
+          7,
+          5
+        ],
+        [
+          7,
+          7
+        ]
+      ],
+      "factory_coordinate_set": [
+        [
+          3,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          3
+        ],
+        [
+          4,
+          4
+        ]
+      ],
+      "initial_free_neighbors_by_factory_coordinate": {
+        "3,3": 2,
+        "3,4": 2,
+        "4,3": 2,
+        "4,4": 2
+      },
+      "initial_free_neighbors_by_factory_symbol": {
+        "0": 2,
+        "1": 2,
+        "2": 2,
+        "3": 2
+      },
+      "logical_mapping": [
+        {
+          "coord": [
+            4,
+            6
+          ],
+          "logical_qubit": 0
+        },
+        {
+          "coord": [
+            6,
+            4
+          ],
+          "logical_qubit": 1
+        },
+        {
+          "coord": [
+            2,
+            6
+          ],
+          "logical_qubit": 2
+        },
+        {
+          "coord": [
+            0,
+            4
+          ],
+          "logical_qubit": 3
+        },
+        {
+          "coord": [
+            0,
+            6
+          ],
+          "logical_qubit": 4
+        },
+        {
+          "coord": [
+            6,
+            0
+          ],
+          "logical_qubit": 5
+        },
+        {
+          "coord": [
+            4,
+            0
+          ],
+          "logical_qubit": 6
+        },
+        {
+          "coord": [
+            6,
+            2
+          ],
+          "logical_qubit": 7
+        },
+        {
+          "coord": [
+            2,
+            0
+          ],
+          "logical_qubit": 8
+        },
+        {
+          "coord": [
+            0,
+            2
+          ],
+          "logical_qubit": 9
+        },
+        {
+          "coord": [
+            6,
+            6
+          ],
+          "logical_qubit": 10
+        }
+      ],
+      "magic_factories": [
+        {
+          "coord": [
+            3,
+            3
+          ],
+          "symbol": 0
+        },
+        {
+          "coord": [
+            3,
+            4
+          ],
+          "symbol": 1
+        },
+        {
+          "coord": [
+            4,
+            3
+          ],
+          "symbol": 2
+        },
+        {
+          "coord": [
+            4,
+            4
+          ],
+          "symbol": 3
+        }
+      ],
+      "molecule": "H5",
+      "topology_path": "configs/topologies/factory_egress_generalization_h5_h6_4th/h5_control_remote_ban_2.yaml",
+      "topology_sha256": "554fa37c08514378438391ff8191f00f0306fb3910e5e06ce817f1f2892badb2",
+      "trapped_coordinate_free_neighbors": 2,
+      "usable_non_factory_cell_count": 58,
+      "weighted_cnot_distance": 223808,
+      "weighted_cnot_distance_delta_vs_baseline": 0,
+      "weighted_nearest_factory_distance": 38,
+      "weighted_nearest_factory_distance_delta_vs_baseline": 0,
+      "weighted_nearest_factory_distance_mean": 3.4545454545454546
+    },
+    "h5_egress_0_ban_both": {
+      "banned_cell_count": 2,
+      "banned_cells": [
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          2
+        ]
+      ],
+      "factory_coordinate_set": [
+        [
+          3,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          3
+        ],
+        [
+          4,
+          4
+        ]
+      ],
+      "initial_free_neighbors_by_factory_coordinate": {
+        "3,3": 0,
+        "3,4": 2,
+        "4,3": 2,
+        "4,4": 2
+      },
+      "initial_free_neighbors_by_factory_symbol": {
+        "0": 0,
+        "1": 2,
+        "2": 2,
+        "3": 2
+      },
+      "logical_mapping": [
+        {
+          "coord": [
+            4,
+            6
+          ],
+          "logical_qubit": 0
+        },
+        {
+          "coord": [
+            6,
+            4
+          ],
+          "logical_qubit": 1
+        },
+        {
+          "coord": [
+            2,
+            6
+          ],
+          "logical_qubit": 2
+        },
+        {
+          "coord": [
+            0,
+            4
+          ],
+          "logical_qubit": 3
+        },
+        {
+          "coord": [
+            0,
+            6
+          ],
+          "logical_qubit": 4
+        },
+        {
+          "coord": [
+            6,
+            0
+          ],
+          "logical_qubit": 5
+        },
+        {
+          "coord": [
+            4,
+            0
+          ],
+          "logical_qubit": 6
+        },
+        {
+          "coord": [
+            6,
+            2
+          ],
+          "logical_qubit": 7
+        },
+        {
+          "coord": [
+            2,
+            0
+          ],
+          "logical_qubit": 8
+        },
+        {
+          "coord": [
+            0,
+            2
+          ],
+          "logical_qubit": 9
+        },
+        {
+          "coord": [
+            6,
+            6
+          ],
+          "logical_qubit": 10
+        }
+      ],
+      "magic_factories": [
+        {
+          "coord": [
+            3,
+            3
+          ],
+          "symbol": 0
+        },
+        {
+          "coord": [
+            3,
+            4
+          ],
+          "symbol": 1
+        },
+        {
+          "coord": [
+            4,
+            3
+          ],
+          "symbol": 2
+        },
+        {
+          "coord": [
+            4,
+            4
+          ],
+          "symbol": 3
+        }
+      ],
+      "molecule": "H5",
+      "topology_path": "configs/topologies/factory_egress_generalization_h5_h6_4th/h5_egress_0_ban_both.yaml",
+      "topology_sha256": "3c6f8bbc04cfc04884f6c6ac793e02c56f4bc5d6be666997df16260a8f8bf995",
+      "trapped_coordinate_free_neighbors": 0,
+      "usable_non_factory_cell_count": 58,
+      "weighted_cnot_distance": 223808,
+      "weighted_cnot_distance_delta_vs_baseline": 0,
+      "weighted_nearest_factory_distance": 38,
+      "weighted_nearest_factory_distance_delta_vs_baseline": 0,
+      "weighted_nearest_factory_distance_mean": 3.4545454545454546
+    },
+    "h5_egress_1_ban_left": {
+      "banned_cell_count": 1,
+      "banned_cells": [
+        [
+          2,
+          3
+        ]
+      ],
+      "factory_coordinate_set": [
+        [
+          3,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          3
+        ],
+        [
+          4,
+          4
+        ]
+      ],
+      "initial_free_neighbors_by_factory_coordinate": {
+        "3,3": 1,
+        "3,4": 2,
+        "4,3": 2,
+        "4,4": 2
+      },
+      "initial_free_neighbors_by_factory_symbol": {
+        "0": 1,
+        "1": 2,
+        "2": 2,
+        "3": 2
+      },
+      "logical_mapping": [
+        {
+          "coord": [
+            4,
+            6
+          ],
+          "logical_qubit": 0
+        },
+        {
+          "coord": [
+            6,
+            4
+          ],
+          "logical_qubit": 1
+        },
+        {
+          "coord": [
+            2,
+            6
+          ],
+          "logical_qubit": 2
+        },
+        {
+          "coord": [
+            0,
+            4
+          ],
+          "logical_qubit": 3
+        },
+        {
+          "coord": [
+            0,
+            6
+          ],
+          "logical_qubit": 4
+        },
+        {
+          "coord": [
+            6,
+            0
+          ],
+          "logical_qubit": 5
+        },
+        {
+          "coord": [
+            4,
+            0
+          ],
+          "logical_qubit": 6
+        },
+        {
+          "coord": [
+            6,
+            2
+          ],
+          "logical_qubit": 7
+        },
+        {
+          "coord": [
+            2,
+            0
+          ],
+          "logical_qubit": 8
+        },
+        {
+          "coord": [
+            0,
+            2
+          ],
+          "logical_qubit": 9
+        },
+        {
+          "coord": [
+            6,
+            6
+          ],
+          "logical_qubit": 10
+        }
+      ],
+      "magic_factories": [
+        {
+          "coord": [
+            3,
+            3
+          ],
+          "symbol": 0
+        },
+        {
+          "coord": [
+            3,
+            4
+          ],
+          "symbol": 1
+        },
+        {
+          "coord": [
+            4,
+            3
+          ],
+          "symbol": 2
+        },
+        {
+          "coord": [
+            4,
+            4
+          ],
+          "symbol": 3
+        }
+      ],
+      "molecule": "H5",
+      "topology_path": "configs/topologies/factory_egress_generalization_h5_h6_4th/h5_egress_1_ban_left.yaml",
+      "topology_sha256": "1b25248ed26406d7a880d03afa5af54bff1a3b0684bd72029e44e766e1376e77",
+      "trapped_coordinate_free_neighbors": 1,
+      "usable_non_factory_cell_count": 59,
+      "weighted_cnot_distance": 223808,
+      "weighted_cnot_distance_delta_vs_baseline": 0,
+      "weighted_nearest_factory_distance": 38,
+      "weighted_nearest_factory_distance_delta_vs_baseline": 0,
+      "weighted_nearest_factory_distance_mean": 3.4545454545454546
+    },
+    "h5_egress_2_baseline": {
+      "banned_cell_count": 0,
+      "banned_cells": [],
+      "factory_coordinate_set": [
+        [
+          3,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          3
+        ],
+        [
+          4,
+          4
+        ]
+      ],
+      "initial_free_neighbors_by_factory_coordinate": {
+        "3,3": 2,
+        "3,4": 2,
+        "4,3": 2,
+        "4,4": 2
+      },
+      "initial_free_neighbors_by_factory_symbol": {
+        "0": 2,
+        "1": 2,
+        "2": 2,
+        "3": 2
+      },
+      "logical_mapping": [
+        {
+          "coord": [
+            4,
+            6
+          ],
+          "logical_qubit": 0
+        },
+        {
+          "coord": [
+            6,
+            4
+          ],
+          "logical_qubit": 1
+        },
+        {
+          "coord": [
+            2,
+            6
+          ],
+          "logical_qubit": 2
+        },
+        {
+          "coord": [
+            0,
+            4
+          ],
+          "logical_qubit": 3
+        },
+        {
+          "coord": [
+            0,
+            6
+          ],
+          "logical_qubit": 4
+        },
+        {
+          "coord": [
+            6,
+            0
+          ],
+          "logical_qubit": 5
+        },
+        {
+          "coord": [
+            4,
+            0
+          ],
+          "logical_qubit": 6
+        },
+        {
+          "coord": [
+            6,
+            2
+          ],
+          "logical_qubit": 7
+        },
+        {
+          "coord": [
+            2,
+            0
+          ],
+          "logical_qubit": 8
+        },
+        {
+          "coord": [
+            0,
+            2
+          ],
+          "logical_qubit": 9
+        },
+        {
+          "coord": [
+            6,
+            6
+          ],
+          "logical_qubit": 10
+        }
+      ],
+      "magic_factories": [
+        {
+          "coord": [
+            3,
+            3
+          ],
+          "symbol": 0
+        },
+        {
+          "coord": [
+            3,
+            4
+          ],
+          "symbol": 1
+        },
+        {
+          "coord": [
+            4,
+            3
+          ],
+          "symbol": 2
+        },
+        {
+          "coord": [
+            4,
+            4
+          ],
+          "symbol": 3
+        }
+      ],
+      "molecule": "H5",
+      "topology_path": "configs/topologies/factory_egress_generalization_h5_h6_4th/h5_egress_2_baseline.yaml",
+      "topology_sha256": "ffb410ac792ce981e379ec957766c91d6c8c04ff12cafd8265fd94da7a69e26c",
+      "trapped_coordinate_free_neighbors": 2,
+      "usable_non_factory_cell_count": 60,
+      "weighted_cnot_distance": 223808,
+      "weighted_cnot_distance_delta_vs_baseline": 0,
+      "weighted_nearest_factory_distance": 38,
+      "weighted_nearest_factory_distance_delta_vs_baseline": 0,
+      "weighted_nearest_factory_distance_mean": 3.4545454545454546
+    },
+    "h6_control_remote_ban_1": {
+      "banned_cell_count": 1,
+      "banned_cells": [
+        [
+          7,
+          7
+        ]
+      ],
+      "factory_coordinate_set": [
+        [
+          3,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          3
+        ],
+        [
+          4,
+          4
+        ]
+      ],
+      "initial_free_neighbors_by_factory_coordinate": {
+        "3,3": 1,
+        "3,4": 2,
+        "4,3": 2,
+        "4,4": 2
+      },
+      "initial_free_neighbors_by_factory_symbol": {
+        "0": 1,
+        "1": 2,
+        "2": 2,
+        "3": 2
+      },
+      "logical_mapping": [
+        {
+          "coord": [
+            2,
+            3
+          ],
+          "logical_qubit": 0
+        },
+        {
+          "coord": [
+            0,
+            2
+          ],
+          "logical_qubit": 1
+        },
+        {
+          "coord": [
+            0,
+            4
+          ],
+          "logical_qubit": 2
+        },
+        {
+          "coord": [
+            2,
+            6
+          ],
+          "logical_qubit": 3
+        },
+        {
+          "coord": [
+            0,
+            6
+          ],
+          "logical_qubit": 4
+        },
+        {
+          "coord": [
+            4,
+            6
+          ],
+          "logical_qubit": 5
+        },
+        {
+          "coord": [
+            6,
+            0
+          ],
+          "logical_qubit": 6
+        },
+        {
+          "coord": [
+            4,
+            0
+          ],
+          "logical_qubit": 7
+        },
+        {
+          "coord": [
+            6,
+            2
+          ],
+          "logical_qubit": 8
+        },
+        {
+          "coord": [
+            0,
+            0
+          ],
+          "logical_qubit": 9
+        },
+        {
+          "coord": [
+            6,
+            4
+          ],
+          "logical_qubit": 10
+        },
+        {
+          "coord": [
+            6,
+            6
+          ],
+          "logical_qubit": 11
+        },
+        {
+          "coord": [
+            2,
+            0
+          ],
+          "logical_qubit": 12
+        }
+      ],
+      "magic_factories": [
+        {
+          "coord": [
+            3,
+            3
+          ],
+          "symbol": 0
+        },
+        {
+          "coord": [
+            3,
+            4
+          ],
+          "symbol": 1
+        },
+        {
+          "coord": [
+            4,
+            3
+          ],
+          "symbol": 2
+        },
+        {
+          "coord": [
+            4,
+            4
+          ],
+          "symbol": 3
+        }
+      ],
+      "molecule": "H6",
+      "topology_path": "configs/topologies/factory_egress_generalization_h5_h6_4th/h6_control_remote_ban_1.yaml",
+      "topology_sha256": "11c84ceaa62bf23c3993e2420efa5fa4c0cd3e478cef8b60508eaecdc6e298ef",
+      "trapped_coordinate_free_neighbors": 1,
+      "usable_non_factory_cell_count": 59,
+      "weighted_cnot_distance": 526036,
+      "weighted_cnot_distance_delta_vs_baseline": 0,
+      "weighted_nearest_factory_distance": 45,
+      "weighted_nearest_factory_distance_delta_vs_baseline": 0,
+      "weighted_nearest_factory_distance_mean": 3.4615384615384617
+    },
+    "h6_egress_0_ban_down": {
+      "banned_cell_count": 1,
+      "banned_cells": [
+        [
+          3,
+          2
+        ]
+      ],
+      "factory_coordinate_set": [
+        [
+          3,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          3
+        ],
+        [
+          4,
+          4
+        ]
+      ],
+      "initial_free_neighbors_by_factory_coordinate": {
+        "3,3": 0,
+        "3,4": 2,
+        "4,3": 2,
+        "4,4": 2
+      },
+      "initial_free_neighbors_by_factory_symbol": {
+        "0": 0,
+        "1": 2,
+        "2": 2,
+        "3": 2
+      },
+      "logical_mapping": [
+        {
+          "coord": [
+            2,
+            3
+          ],
+          "logical_qubit": 0
+        },
+        {
+          "coord": [
+            0,
+            2
+          ],
+          "logical_qubit": 1
+        },
+        {
+          "coord": [
+            0,
+            4
+          ],
+          "logical_qubit": 2
+        },
+        {
+          "coord": [
+            2,
+            6
+          ],
+          "logical_qubit": 3
+        },
+        {
+          "coord": [
+            0,
+            6
+          ],
+          "logical_qubit": 4
+        },
+        {
+          "coord": [
+            4,
+            6
+          ],
+          "logical_qubit": 5
+        },
+        {
+          "coord": [
+            6,
+            0
+          ],
+          "logical_qubit": 6
+        },
+        {
+          "coord": [
+            4,
+            0
+          ],
+          "logical_qubit": 7
+        },
+        {
+          "coord": [
+            6,
+            2
+          ],
+          "logical_qubit": 8
+        },
+        {
+          "coord": [
+            0,
+            0
+          ],
+          "logical_qubit": 9
+        },
+        {
+          "coord": [
+            6,
+            4
+          ],
+          "logical_qubit": 10
+        },
+        {
+          "coord": [
+            6,
+            6
+          ],
+          "logical_qubit": 11
+        },
+        {
+          "coord": [
+            2,
+            0
+          ],
+          "logical_qubit": 12
+        }
+      ],
+      "magic_factories": [
+        {
+          "coord": [
+            3,
+            3
+          ],
+          "symbol": 0
+        },
+        {
+          "coord": [
+            3,
+            4
+          ],
+          "symbol": 1
+        },
+        {
+          "coord": [
+            4,
+            3
+          ],
+          "symbol": 2
+        },
+        {
+          "coord": [
+            4,
+            4
+          ],
+          "symbol": 3
+        }
+      ],
+      "molecule": "H6",
+      "topology_path": "configs/topologies/factory_egress_generalization_h5_h6_4th/h6_egress_0_ban_down.yaml",
+      "topology_sha256": "001d1ccf969c4fcb97d463c44f9b66115da8941f9807d8128cea1a7697a8ffa7",
+      "trapped_coordinate_free_neighbors": 0,
+      "usable_non_factory_cell_count": 59,
+      "weighted_cnot_distance": 526036,
+      "weighted_cnot_distance_delta_vs_baseline": 0,
+      "weighted_nearest_factory_distance": 45,
+      "weighted_nearest_factory_distance_delta_vs_baseline": 0,
+      "weighted_nearest_factory_distance_mean": 3.4615384615384617
+    },
+    "h6_egress_1_baseline": {
+      "banned_cell_count": 0,
+      "banned_cells": [],
+      "factory_coordinate_set": [
+        [
+          3,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          3
+        ],
+        [
+          4,
+          4
+        ]
+      ],
+      "initial_free_neighbors_by_factory_coordinate": {
+        "3,3": 1,
+        "3,4": 2,
+        "4,3": 2,
+        "4,4": 2
+      },
+      "initial_free_neighbors_by_factory_symbol": {
+        "0": 1,
+        "1": 2,
+        "2": 2,
+        "3": 2
+      },
+      "logical_mapping": [
+        {
+          "coord": [
+            2,
+            3
+          ],
+          "logical_qubit": 0
+        },
+        {
+          "coord": [
+            0,
+            2
+          ],
+          "logical_qubit": 1
+        },
+        {
+          "coord": [
+            0,
+            4
+          ],
+          "logical_qubit": 2
+        },
+        {
+          "coord": [
+            2,
+            6
+          ],
+          "logical_qubit": 3
+        },
+        {
+          "coord": [
+            0,
+            6
+          ],
+          "logical_qubit": 4
+        },
+        {
+          "coord": [
+            4,
+            6
+          ],
+          "logical_qubit": 5
+        },
+        {
+          "coord": [
+            6,
+            0
+          ],
+          "logical_qubit": 6
+        },
+        {
+          "coord": [
+            4,
+            0
+          ],
+          "logical_qubit": 7
+        },
+        {
+          "coord": [
+            6,
+            2
+          ],
+          "logical_qubit": 8
+        },
+        {
+          "coord": [
+            0,
+            0
+          ],
+          "logical_qubit": 9
+        },
+        {
+          "coord": [
+            6,
+            4
+          ],
+          "logical_qubit": 10
+        },
+        {
+          "coord": [
+            6,
+            6
+          ],
+          "logical_qubit": 11
+        },
+        {
+          "coord": [
+            2,
+            0
+          ],
+          "logical_qubit": 12
+        }
+      ],
+      "magic_factories": [
+        {
+          "coord": [
+            3,
+            3
+          ],
+          "symbol": 0
+        },
+        {
+          "coord": [
+            3,
+            4
+          ],
+          "symbol": 1
+        },
+        {
+          "coord": [
+            4,
+            3
+          ],
+          "symbol": 2
+        },
+        {
+          "coord": [
+            4,
+            4
+          ],
+          "symbol": 3
+        }
+      ],
+      "molecule": "H6",
+      "topology_path": "configs/topologies/factory_egress_generalization_h5_h6_4th/h6_egress_1_baseline.yaml",
+      "topology_sha256": "9af21d2e9cb14f604b1446cbf9ca75cae50905e1ba266db81fbbfeab2b07aa88",
+      "trapped_coordinate_free_neighbors": 1,
+      "usable_non_factory_cell_count": 60,
+      "weighted_cnot_distance": 526036,
+      "weighted_cnot_distance_delta_vs_baseline": 0,
+      "weighted_nearest_factory_distance": 45,
+      "weighted_nearest_factory_distance_delta_vs_baseline": 0,
+      "weighted_nearest_factory_distance_mean": 3.4615384615384617
+    },
+    "h6_egress_2_move_q0": {
+      "banned_cell_count": 0,
+      "banned_cells": [],
+      "factory_coordinate_set": [
+        [
+          3,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          3
+        ],
+        [
+          4,
+          4
+        ]
+      ],
+      "initial_free_neighbors_by_factory_coordinate": {
+        "3,3": 2,
+        "3,4": 2,
+        "4,3": 2,
+        "4,4": 2
+      },
+      "initial_free_neighbors_by_factory_symbol": {
+        "0": 2,
+        "1": 2,
+        "2": 2,
+        "3": 2
+      },
+      "logical_mapping": [
+        {
+          "coord": [
+            2,
+            2
+          ],
+          "logical_qubit": 0
+        },
+        {
+          "coord": [
+            0,
+            2
+          ],
+          "logical_qubit": 1
+        },
+        {
+          "coord": [
+            0,
+            4
+          ],
+          "logical_qubit": 2
+        },
+        {
+          "coord": [
+            2,
+            6
+          ],
+          "logical_qubit": 3
+        },
+        {
+          "coord": [
+            0,
+            6
+          ],
+          "logical_qubit": 4
+        },
+        {
+          "coord": [
+            4,
+            6
+          ],
+          "logical_qubit": 5
+        },
+        {
+          "coord": [
+            6,
+            0
+          ],
+          "logical_qubit": 6
+        },
+        {
+          "coord": [
+            4,
+            0
+          ],
+          "logical_qubit": 7
+        },
+        {
+          "coord": [
+            6,
+            2
+          ],
+          "logical_qubit": 8
+        },
+        {
+          "coord": [
+            0,
+            0
+          ],
+          "logical_qubit": 9
+        },
+        {
+          "coord": [
+            6,
+            4
+          ],
+          "logical_qubit": 10
+        },
+        {
+          "coord": [
+            6,
+            6
+          ],
+          "logical_qubit": 11
+        },
+        {
+          "coord": [
+            2,
+            0
+          ],
+          "logical_qubit": 12
+        }
+      ],
+      "magic_factories": [
+        {
+          "coord": [
+            3,
+            3
+          ],
+          "symbol": 0
+        },
+        {
+          "coord": [
+            3,
+            4
+          ],
+          "symbol": 1
+        },
+        {
+          "coord": [
+            4,
+            3
+          ],
+          "symbol": 2
+        },
+        {
+          "coord": [
+            4,
+            4
+          ],
+          "symbol": 3
+        }
+      ],
+      "molecule": "H6",
+      "topology_path": "configs/topologies/factory_egress_generalization_h5_h6_4th/h6_egress_2_move_q0.yaml",
+      "topology_sha256": "96ee3bad6b0e6b65d0de767a7174799eb5643085139db89d316c098ed82e747a",
+      "trapped_coordinate_free_neighbors": 2,
+      "usable_non_factory_cell_count": 60,
+      "weighted_cnot_distance": 522384,
+      "weighted_cnot_distance_delta_vs_baseline": -3652,
+      "weighted_nearest_factory_distance": 46,
+      "weighted_nearest_factory_distance_delta_vs_baseline": 1,
+      "weighted_nearest_factory_distance_mean": 3.5384615384615383
+    }
+  }
+}

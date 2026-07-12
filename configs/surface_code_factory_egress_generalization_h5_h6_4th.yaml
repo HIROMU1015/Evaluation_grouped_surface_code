@@ -1,0 +1,61 @@
+experiment: fixed_circuit_factory_egress_generalization
+schema_version: 1
+
+source:
+  results_csv: artifacts/surface_code_grid_capacity_sweep_h4_h7_4th/results.csv
+  topology_name: aware_8x8
+  pf_label: 4th(new_2)
+  rotation_precision: 1.0e-5
+
+topology_manifest: configs/topologies/factory_egress_generalization_h5_h6_4th/factory_egress_generalization_manifest.json
+
+cases:
+  - h5_egress_2_baseline
+  - h5_egress_1_ban_left
+  - h5_egress_0_ban_both
+  - h5_control_remote_ban_1
+  - h5_control_remote_ban_2
+  - h6_egress_1_baseline
+  - h6_egress_0_ban_down
+  - h6_control_remote_ban_1
+  - h6_egress_2_move_q0
+
+baseline_cases:
+  H5: h5_egress_2_baseline
+  H6: h6_egress_1_baseline
+
+fixed_conditions:
+  grid_size: [8, 8]
+  machine_type: Dim2
+  magic_factory_count: 4
+  magic_factory_coordinate_set:
+    - [3, 3]
+    - [3, 4]
+    - [4, 3]
+    - [4, 4]
+  magic_generation_period: 15
+  maximum_magic_state_stock: 10000
+  entanglement_generation_period: 100
+  maximum_entangled_state_stock: 10
+  reaction_time: 1
+  physical_error_rate: 0.001
+  drop_rate: 0.1
+  code_cycle_time_sec: 0.000001
+  allowed_failure_prob: 0.01
+
+controls:
+  H5:
+    adjacent_ban_1: h5_egress_1_ban_left
+    remote_ban_1: h5_control_remote_ban_1
+    adjacent_ban_2: h5_egress_0_ban_both
+    remote_ban_2: h5_control_remote_ban_2
+  H6:
+    adjacent_ban_1: h6_egress_0_ban_down
+    remote_ban_1: h6_control_remote_ban_1
+
+primary_metrics:
+  - runtime
+  - runtime_topology_overhead
+  - factory_egress_blocked
+
+output_directory: artifacts/surface_code_factory_egress_generalization_h5_h6_4th

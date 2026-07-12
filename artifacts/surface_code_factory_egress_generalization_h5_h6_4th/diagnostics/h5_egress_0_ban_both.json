@@ -1,0 +1,213 @@
+{
+  "attempts_by_type": {
+    "ALLOCATE": 11,
+    "ALLOCATE_MAGIC_FACTORY": 4,
+    "CNOT": 141229,
+    "DEALLOCATE": 21,
+    "HADAMARD": 2392806,
+    "LATTICE_SURGERY_MAGIC": 1465122,
+    "PROBABILITY_HINT": 952009,
+    "TWIST": 2577018
+  },
+  "beat_advances": 2379558,
+  "failed_attempts_by_type": {
+    "CNOT": 96909,
+    "DEALLOCATE": 10,
+    "HADAMARD": 1823701,
+    "LATTICE_SURGERY_MAGIC": 989216,
+    "PROBABILITY_HINT": 476103,
+    "TWIST": 1490092
+  },
+  "final_beat": 2379558,
+  "initial_beat": 0,
+  "lattice_surgery_magic_failed_attempts_by_reason": {
+    "factory_egress_blocked": 485190,
+    "no_magic_stock": 12,
+    "qubit_busy": 503618,
+    "route_disconnected": 117,
+    "target_access_blocked": 279
+  },
+  "loop_iterations": 5031747,
+  "magic_available_factory_count_mean": 2.01249708789563,
+  "magic_routing_distribution": {
+    "factory_use_count": {
+      "1": 158635,
+      "2": 158635,
+      "3": 158636
+    },
+    "path_length_histogram": {
+      "1": 92177,
+      "10": 133,
+      "11": 21,
+      "12": 8,
+      "13": 17,
+      "15": 1,
+      "2": 131627,
+      "3": 28143,
+      "4": 121795,
+      "5": 37212,
+      "6": 25300,
+      "7": 585,
+      "8": 38407,
+      "9": 480
+    },
+    "target_stats": {
+      "0": {
+        "instruction_count": 161304,
+        "max_path_coordinates": 6,
+        "mean_path_coordinates": 2.2714997768189256,
+        "path_coordinate_count": 366402
+      },
+      "1": {
+        "instruction_count": 109760,
+        "max_path_coordinates": 10,
+        "mean_path_coordinates": 2.332616618075802,
+        "path_coordinate_count": 256028
+      },
+      "10": {
+        "instruction_count": 50,
+        "max_path_coordinates": 4,
+        "mean_path_coordinates": 3.66,
+        "path_coordinate_count": 183
+      },
+      "2": {
+        "instruction_count": 70656,
+        "max_path_coordinates": 10,
+        "mean_path_coordinates": 3.6317934782608696,
+        "path_coordinate_count": 256608
+      },
+      "3": {
+        "instruction_count": 35972,
+        "max_path_coordinates": 11,
+        "mean_path_coordinates": 5.298871344378961,
+        "path_coordinate_count": 190611
+      },
+      "4": {
+        "instruction_count": 11420,
+        "max_path_coordinates": 10,
+        "mean_path_coordinates": 5.6595446584938705,
+        "path_coordinate_count": 64632
+      },
+      "5": {
+        "instruction_count": 50792,
+        "max_path_coordinates": 13,
+        "mean_path_coordinates": 5.511497873680895,
+        "path_coordinate_count": 279940
+      },
+      "6": {
+        "instruction_count": 24480,
+        "max_path_coordinates": 12,
+        "mean_path_coordinates": 5.186683006535947,
+        "path_coordinate_count": 126970
+      },
+      "7": {
+        "instruction_count": 9744,
+        "max_path_coordinates": 13,
+        "mean_path_coordinates": 3.3373357963875203,
+        "path_coordinate_count": 32519
+      },
+      "8": {
+        "instruction_count": 1152,
+        "max_path_coordinates": 15,
+        "mean_path_coordinates": 5.430555555555555,
+        "path_coordinate_count": 6256
+      },
+      "9": {
+        "instruction_count": 576,
+        "max_path_coordinates": 13,
+        "mean_path_coordinates": 4.019097222222222,
+        "path_coordinate_count": 2315
+      }
+    }
+  },
+  "magic_stock_sample_count": 961504,
+  "magic_total_stock_max": 10045,
+  "magic_total_stock_mean": 9459.113415024794,
+  "magic_total_stock_min": 0,
+  "max_consecutive_no_run_beats": 12,
+  "other_beat_advances": 0,
+  "path_stats_by_type": {
+    "ALLOCATE": {
+      "instruction_count": 11,
+      "max_path_coordinates": 0,
+      "mean_path_coordinates_per_instruction": 0.0,
+      "mean_path_coordinates_per_nonempty_path": 0.0,
+      "nonempty_path_count": 0,
+      "path_coordinate_count": 0
+    },
+    "ALLOCATE_MAGIC_FACTORY": {
+      "instruction_count": 4,
+      "max_path_coordinates": 0,
+      "mean_path_coordinates_per_instruction": 0.0,
+      "mean_path_coordinates_per_nonempty_path": 0.0,
+      "nonempty_path_count": 0,
+      "path_coordinate_count": 0
+    },
+    "CNOT": {
+      "instruction_count": 44320,
+      "max_path_coordinates": 21,
+      "mean_path_coordinates_per_instruction": 5.209160649819495,
+      "mean_path_coordinates_per_nonempty_path": 5.209160649819495,
+      "nonempty_path_count": 44320,
+      "path_coordinate_count": 230870
+    },
+    "DEALLOCATE": {
+      "instruction_count": 11,
+      "max_path_coordinates": 0,
+      "mean_path_coordinates_per_instruction": 0.0,
+      "mean_path_coordinates_per_nonempty_path": 0.0,
+      "nonempty_path_count": 0,
+      "path_coordinate_count": 0
+    },
+    "HADAMARD": {
+      "instruction_count": 569105,
+      "max_path_coordinates": 0,
+      "mean_path_coordinates_per_instruction": 0.0,
+      "mean_path_coordinates_per_nonempty_path": 0.0,
+      "nonempty_path_count": 0,
+      "path_coordinate_count": 0
+    },
+    "LATTICE_SURGERY_MAGIC": {
+      "instruction_count": 475906,
+      "max_path_coordinates": 15,
+      "mean_path_coordinates_per_instruction": 3.3251608510924426,
+      "mean_path_coordinates_per_nonempty_path": 3.3251608510924426,
+      "nonempty_path_count": 475906,
+      "path_coordinate_count": 1582464
+    },
+    "PROBABILITY_HINT": {
+      "instruction_count": 475906,
+      "max_path_coordinates": 0,
+      "mean_path_coordinates_per_instruction": 0.0,
+      "mean_path_coordinates_per_nonempty_path": 0.0,
+      "nonempty_path_count": 0,
+      "path_coordinate_count": 0
+    },
+    "TWIST": {
+      "instruction_count": 1086926,
+      "max_path_coordinates": 0,
+      "mean_path_coordinates_per_instruction": 0.0,
+      "mean_path_coordinates_per_nonempty_path": 0.0,
+      "nonempty_path_count": 0,
+      "path_coordinate_count": 0
+    }
+  },
+  "queue_release_events": 0,
+  "queue_released_instructions": 0,
+  "reserved_only_beat_advances": 0,
+  "runnable_blocked_beat_advances": 2379558,
+  "schema_version": "qret_routing_failure_diagnostic_v2",
+  "simulator_num_2beat_trans_move": 0,
+  "split_iterations": 0,
+  "successful_instruction_runs": 2652189,
+  "successful_runs_by_type": {
+    "ALLOCATE": 11,
+    "ALLOCATE_MAGIC_FACTORY": 4,
+    "CNOT": 44320,
+    "DEALLOCATE": 11,
+    "HADAMARD": 569105,
+    "LATTICE_SURGERY_MAGIC": 475906,
+    "PROBABILITY_HINT": 475906,
+    "TWIST": 1086926
+  }
+}

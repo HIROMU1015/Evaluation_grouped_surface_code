@@ -84,6 +84,12 @@ def _factories(plane: Mapping[str, Any]) -> dict[int, tuple[int, int]]:
     }
 
 
+def _bans(plane: Mapping[str, Any]) -> set[tuple[int, int]]:
+    return {
+        tuple(int(value) for value in coord[:2]) for coord in plane.get("ban", [])
+    }
+
+
 def _set_mapping(plane: dict[str, Any], mapping: Mapping[int, tuple[int, int]]) -> None:
     plane["qubit"] = [
         {"symbol": symbol, "coord": list(mapping[symbol])} for symbol in sorted(mapping)
@@ -108,7 +114,8 @@ def _validate_topology(payload: Mapping[str, Any]) -> None:
         raise ValueError("expected logical qubits 0 through 14")
     if len(factories) != 4 or set(factories) != set(range(4)):
         raise ValueError("expected magic factories 0 through 3")
-    all_coords = list(mapping.values()) + list(factories.values())
+    bans = _bans(plane)
+    all_coords = list(mapping.values()) + list(factories.values()) + list(bans)
     if len(all_coords) != len(set(all_coords)):
         raise ValueError("topology contains overlapping qubits or factories")
     if any(not (0 <= x < width and 0 <= y < height) for x, y in all_coords):
@@ -121,7 +128,7 @@ def _free_neighbors(
     width, height = (int(value) for value in plane["coord"][:2])
     mapping = _mapping(plane)
     factories = _factories(plane)
-    occupied = set(mapping.values()) | set(factories.values())
+    occupied = set(mapping.values()) | set(factories.values()) | _bans(plane)
     by_symbol: dict[int, int] = {}
     by_coord: dict[str, int] = {}
     for symbol, (x, y) in factories.items():

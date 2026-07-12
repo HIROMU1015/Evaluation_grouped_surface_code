@@ -1488,3 +1488,94 @@ mapperへfactory周囲のrouting reserveを入れる場合、最低1つのfree e
 - `artifacts/surface_code_factory_egress_micro_sweep_h7_4th/summary.md`
 - `artifacts/surface_code_factory_egress_micro_sweep_h7_4th/results.csv`
 - `artifacts/surface_code_factory_egress_micro_sweep_h7_4th/results.jsonl`
+
+## 2026-07-12: H5/H6 factory-egress threshold generalization
+
+### Question and design
+
+H7で観測したminimum-one-egress thresholdがH7固有か、H5/H6でも成立するかをfixed-circuit
+条件で検証した。H5ではlogical qubitを動かさず、`m0=(3,3)`に隣接するfree cellへ`ban`を
+追加して出口を2、1、0へ変えた。同数の`ban`をfactoryから離れたcellへ置くcapacity controlも
+実行したため、usable cell数の減少とfactory access geometryを分離できる。
+
+H6 baselineはq0が左出口を占有しており、初期出口は1だった。残る下出口への`ban`で出口0を作り、
+遠隔1-cell `ban`をcontrolとした。出口2条件はq0だけを`(2,3)`から`(2,2)`へ移したため、
+0/1比較より弱いdirectional checkとして扱う。
+
+全9 caseでQASM hash、optimized IR hash、topology-free runtime、gate count/depth、magic
+count/depthがmolecule内で一致した。code distanceは15で共通だった。
+
+### Observed results
+
+| molecule / case | egress | bans | runtime | vs molecule baseline | topology overhead | egress rejection |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| H5 baseline | 2 | 0 | 2,122,291 | reference | 26 | 1 |
+| H5 adjacent ban 1 | 1 | 1 | 2,122,291 | +0.0000% | 26 | 69 |
+| H5 adjacent ban 2 | 0 | 2 | 2,379,559 | +12.1222% | 257,294 | 485,190 |
+| H5 remote ban 1 | 2 | 1 | 2,122,293 | +0.0001% | 28 | 3 |
+| H5 remote ban 2 | 2 | 2 | 2,122,326 | +0.0016% | 61 | 2 |
+| H6 baseline | 1 | 0 | 4,576,291 | reference | 6 | 5 |
+| H6 adjacent ban 1 | 0 | 1 | 5,127,303 | +12.0406% | 551,018 | 1,010,479 |
+| H6 remote ban 1 | 1 | 1 | 4,576,299 | +0.0002% | 14 | 4 |
+| H6 q0 move | 2 | 0 | 4,576,286 | -0.0001% | 1 | 5 |
+
+H5では出口2から1への減少でruntimeは変わらなかったが、出口0で257,268 beat増加した。
+同じ2-cell capacityを失うremote controlは35 beat増に留まり、adjacent-minus-remote contrastは
+257,233 beatだった。H6でも出口1から0で551,012 beat増えた一方、同じ1-cell remote controlは
+8 beat増だけで、contrastは+551,004 beatだった。
+
+H6の出口2条件はbaseline比-5 beatで、2つ目の出口によるruntime改善は観測されなかった。ただし
+q0移動によりweighted CNOT distanceが3,652減り、nearest-factory distanceが1増えるため、厳密な
+one-variable interventionではない。この差は0.0001%であり、少なくとも大きな改善はない。
+
+### Cross-molecule interpretation
+
+H5、H6、H7のtested 8x8 placementsでは、factory `(3,3)`の初期free egressが0になると
+runtimeが約10-12%悪化し、1以上なら追加出口による有意なruntime改善はなかった。
+
+| molecule | zero-egress penalty / recovery | one-to-two egress effect |
+| --- | ---: | ---: |
+| H5 | +12.1222% | 0.0000% |
+| H6 | +12.0406% | -0.0001% |
+| H7 | zero-to-oneで約-10.007% recovery | additional improvementなし |
+
+H5/H6のremote-ban controlにより、zero-egress penaltyは単なるchip capacity低下では説明できない。
+またH5ではlogical mappingとstatic distanceを完全に固定したまま効果が生じたため、H7で残っていた
+logical-qubit移動のconfoundも除けた。したがってminimum-one-egressは、少なくとも今回の3 workload
+に共通するruntime-criticalな局所architecture constraintとして強く支持される。
+
+これは「出口数を多くするほどruntimeが単調に短縮する」という結果ではない。支持される設計規則は、
+各factoryにrouting networkへ接続可能な初期free egressを最低1つ確保することである。出口1から2の
+追加価値、異なるfactory数・配置・grid・magic負荷での一般性は未評価である。
+
+`ban`条件ではphysical qubitsが減るため、QV差にはruntime効果とspace効果が混在する。本節の主指標は
+fixed-circuit runtimeであり、QVをminimum-one-egress効果の主要根拠には使わない。
+
+### State classification
+
+| item | classification |
+| --- | --- |
+| H5/H6 fixed-circuit 9 caseの成功 | observed |
+| H5/H6でzero egress時にruntimeが約12%増加 | observed |
+| H5/H6 remote-ban controlのruntime差が0.002%未満 | observed |
+| H5/H6でcode distance=15が共通 | observed |
+| H5でlogical mapping/static distance固定下でもpenalty再現 | observed |
+| H5-H7に共通するminimum-one-egress threshold | strongly supported for tested conditions |
+| 出口2以上の一般的な価値 | unresolved |
+| 異なるfactory block/grid/magic負荷への外挿 | unresolved |
+| mapperのhard constraintとしての実装効果 | proposed / unimplemented |
+
+### Execution resources
+
+- 9 caseをtmux内で逐次実行
+- qret peak RSS: 1,747,092 KiB（約1.67 GiB）
+- GNU timeのswap count: 0
+- cgroup guard: `MemoryHigh=44G`, `MemoryMax=48G`
+
+### References
+
+- `configs/surface_code_factory_egress_generalization_h5_h6_4th.yaml`
+- `configs/topologies/factory_egress_generalization_h5_h6_4th/factory_egress_generalization_manifest.json`
+- `artifacts/surface_code_factory_egress_generalization_h5_h6_4th/summary.md`
+- `artifacts/surface_code_factory_egress_generalization_h5_h6_4th/results.csv`
+- `artifacts/surface_code_factory_egress_generalization_h5_h6_4th/results.jsonl`
