@@ -1262,3 +1262,109 @@ H7 8x8のruntime penaltyは、長いmagic-delivery pathと大幅に増えた
 - `artifacts/qret_runtime_routing_diagnostic_h5_h7_4th/summary.md`
 - `artifacts/qret_runtime_routing_diagnostic_h5_h7_4th/results.csv`
 - `artifacts/qret_runtime_routing_diagnostic_h5_h7_4th/results.jsonl`
+
+## 2026-07-12: H7 magic rejection reason diagnostic
+
+### Question
+
+前節でH7 8x8のruntime penaltyが長いmagic pathと多い
+`LATTICE_SURGERY_MAGIC` rejectionに対応することを確認したが、`Run=false`の内部理由は未分解
+だった。そこで同じfixed circuitを使い、H7 8x8、8x10、10x10について、magic rejectionを
+次のtop-level branchへ分類した。
+
+- logical qubit busy
+- magic-state stockなし
+- available factory周辺にfree ancilla出口なし
+- target qubit周辺に接続可能なfree ancillaなし
+- factory側とtarget側に入口はあるがBFS経路が分断
+- classical dependency / condition / other
+
+保存するのはaggregate count、stock集約、path-length histogram、factory symbol別利用回数のみで、
+per-attempt event logやcell occupancy traceは生成していない。
+
+### Observed results
+
+全3 caseで、診断有効時のruntime、topology-free runtime、gate count/depth、magic count/depth、
+QV、code distance、physical qubitsが既存compile_infoと一致した。また各caseで理由別countの
+合計がmagic failed-attempt総数と一致した。
+
+| case | magic failures | qubit busy | no stock | factory egress blocked | target blocked | route disconnected |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| H7 8x8 | 3,977,917 | 2,125,010 | 215 | 1,838,510 | 8,592 | 5,590 |
+| H7 8x10 | 2,178,179 | 2,138,084 | 39,037 | 0 | 551 | 507 |
+| H7 10x10 | 2,177,693 | 2,138,103 | 39,040 | 0 | 295 | 255 |
+
+H7 8x8ではmagic failureの46.218%が`factory_egress_blocked`だった。8x10と10x10では同じ
+理由は0回である。8x8と10x10の差では、この理由が1,838,510回増えており、reason category中
+最大の差だった。
+
+一方、`no_magic_stock`は8x8で215回、magic failureの0.005%にすぎない。10x10では39,040回
+発生しているがruntime penaltyはない。したがって、今回のH7 8x8 penaltyをfactory生成速度や
+stock不足で説明することはできない。
+
+### Factory access geometry
+
+初期topologyで各factoryの四近傍にあるfree cell数と、成功したmagic operationのfactory利用数は
+次のとおりだった。
+
+| case | initial free neighbors m0/m1/m2/m3 | successful uses m0/m1/m2/m3 |
+| --- | ---: | ---: |
+| H7 8x8 | 0 / 1 / 2 / 2 | 82 / 657,223 / 657,182 / 657,219 |
+| H7 8x10 | 2 / 2 / 2 / 2 | 526,933 / 380,541 / 474,892 / 589,340 |
+| H7 10x10 | 2 / 2 / 2 / 2 | 590,364 / 591,445 / 328,050 / 461,847 |
+
+8x8では`m0=(3,3)`の四近傍が、`m1=(3,4)`、`m2=(4,3)`、logical qubit 1 at
+`(2,3)`、logical qubit 2 at `(3,2)`で全て占有される。m0の成功利用は82回で、全
+1,971,706 magic operationの約0.004%だった。8x10と10x10では全factoryに初期free出口が2個
+ある。
+
+### Interpretation
+
+H7 8x8のruntime penaltyについて、genericなmagic-delivery congestionから一段具体化できる。
+主差分はmagic-state supply待ちではなく、available magic factoryからroutingを開始するfree
+ancilla cellを確保できない`factory egress`制約である。これは8x8でのみ約184万回観測され、
+8x10へ一辺を拡張すると0回になり、約11.12%のruntime penaltyも同時に消える。
+
+m0の初期出口が0で実効的にほぼ利用不能であることは、8x8 topologyの明確な構造的弱点である。
+ただし`factory_egress_blocked`は、そのbeatでstockを持つ全factoryからBFS queueを開始できない
+場合の分類であり、約184万回をすべてm0単独へ帰属することはできない。動的なpath occupancyが
+他factoryの出口も同時に塞ぐ寄与は残る。
+
+stock平均はroutingが成功して消費される頻度にも依存するため、8x8と10x10のstock平均差を
+独立な供給能力差として解釈しない。直接判断できるのは、8x8で`no_magic_stock`がほぼ発生せず、
+供給待ちがruntime penaltyの主因ではないことである。
+
+### State classification
+
+| item | classification |
+| --- | --- |
+| diagnostic有効時のresource semantics一致 | observed |
+| reason count合計とmagic failure総数の一致 | observed |
+| H7 8x8でfactory-egress rejection 1,838,510回 | observed |
+| H7 8x10 / 10x10でfactory-egress rejection 0回 | observed |
+| H7 8x8でno-stock rejectionが0.005% | observed |
+| H7 8x8のm0初期free出口が0、成功利用82回 | observed |
+| 8x8 runtime penaltyの主差分がfactory egress制約 | observed結果に基づくinference |
+| egress rejectionごとの具体的blocked cell | unresolved |
+| m0閉塞と他factoryの動的閉塞の寄与分離 | unresolved |
+
+### Next causal test
+
+同じH7 8x8 fixed circuit、同じ4 factory座標を保ち、m0に隣接するlogical qubitを最小限だけ
+外側へ移してm0の初期free出口を0、1、2と変えるmicro-sweepが次の候補である。これにより、
+factory egress countとruntimeが出口数に応じて減るかを直接確認できる。ただしlogical placement
+距離も同時に変わるため、移動量を最小化し、weighted CNOT distanceとmagic target distanceを
+併記する。
+
+### Execution resources
+
+- H7 3 caseをtmux内で逐次実行
+- qret peak RSS: 3,381,836 KiB（約3.23 GiB）
+- GNU timeのswap count: 0
+- cgroup guard: `MemoryHigh=44G`, `MemoryMax=48G`
+
+### References
+
+- `artifacts/surface_code_magic_failure_reason_diagnostic_h7_4th/summary.md`
+- `artifacts/surface_code_magic_failure_reason_diagnostic_h7_4th/results.csv`
+- `artifacts/surface_code_magic_failure_reason_diagnostic_h7_4th/results.jsonl`

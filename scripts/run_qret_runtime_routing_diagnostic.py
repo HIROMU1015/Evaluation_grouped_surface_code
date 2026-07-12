@@ -38,6 +38,10 @@ CASE_SELECTORS = (
     ("H7", "aware_8x10"),
     ("H7", "aware_10x10"),
 )
+CASE_SELECTOR_BY_NAME = {
+    f"{molecule.lower()}_{topology}": (molecule, topology)
+    for molecule, topology in CASE_SELECTORS
+}
 SEMANTIC_FIELDS = (
     "runtime",
     "runtime_without_topology",
@@ -57,6 +61,16 @@ INSTRUCTION_TYPES = (
     "LATTICE_SURGERY_MAGIC",
     "CNOT",
     "PROBABILITY_HINT",
+)
+MAGIC_FAILURE_REASONS = (
+    "classical_dependency_wait",
+    "condition_wait",
+    "qubit_busy",
+    "no_magic_stock",
+    "factory_egress_blocked",
+    "target_access_blocked",
+    "route_disconnected",
+    "other",
 )
 
 
@@ -112,11 +126,14 @@ def _find_source_compile_yaml(cache_key: str) -> Path:
     return matches[0]
 
 
-def _selected_rows(results_path: Path) -> list[dict[str, str]]:
+def _selected_rows(
+    results_path: Path,
+    selectors: Sequence[tuple[str, str]] = CASE_SELECTORS,
+) -> list[dict[str, str]]:
     with results_path.open(newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
     selected: list[dict[str, str]] = []
-    for molecule, topology in CASE_SELECTORS:
+    for molecule, topology in selectors:
         matches = [
             row
             for row in rows
@@ -140,6 +157,33 @@ def _prepare_pipeline(source: Path, destination: Path, compile_info: Path) -> No
         yaml.safe_dump(payload, sort_keys=False),
         encoding="utf-8",
     )
+
+
+def _initial_factory_free_neighbors(topology_path: Path) -> dict[int, int]:
+    payload = yaml.safe_load(topology_path.read_text(encoding="utf-8"))
+    grids = payload.get("grids", []) if isinstance(payload, Mapping) else []
+    if len(grids) != 1 or not isinstance(grids[0], Mapping):
+        raise ValueError(f"expected one topology grid: {topology_path}")
+    grid = grids[0]
+    width, height = (int(value) for value in grid["coord"][:2])
+    factories = {
+        int(item["symbol"]): tuple(int(value) for value in item["coord"][:2])
+        for item in grid.get("magic_factory", [])
+    }
+    occupied = set(factories.values())
+    occupied.update(
+        tuple(int(value) for value in item["coord"][:2])
+        for item in grid.get("qubit", [])
+    )
+    counts: dict[int, int] = {}
+    for symbol, (x, y) in factories.items():
+        neighbors = ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1))
+        counts[symbol] = sum(
+            1
+            for nx, ny in neighbors
+            if 0 <= nx < width and 0 <= ny < height and (nx, ny) not in occupied
+        )
+    return counts
 
 
 def _gnu_time_value(stderr: str, label: str) -> str | None:
@@ -246,6 +290,8 @@ def _run_case(
         if baseline.get(field) != observed.get(field)
     }
     beat_advances = int(diagnostic.get("beat_advances", 0))
+    topology_path = Path(source_row["topology_path"]).expanduser().resolve()
+    initial_factory_free_neighbors = _initial_factory_free_neighbors(topology_path)
     result: dict[str, Any] = {
         "status": "ok",
         "case_name": case_name,
@@ -317,6 +363,50 @@ def _run_case(
         result[f"{key}_max_path_coordinates"] = _path_value(
             diagnostic, inst_type, "max_path_coordinates"
         )
+    reason_payload = diagnostic.get(
+        "lattice_surgery_magic_failed_attempts_by_reason", {}
+    )
+    if not isinstance(reason_payload, Mapping):
+        reason_payload = {}
+    magic_failed_attempts = int(result["lattice_surgery_magic_failed_attempts"])
+    reason_sum = 0
+    for reason in MAGIC_FAILURE_REASONS:
+        count = int(reason_payload.get(reason, 0))
+        reason_sum += count
+        result[f"magic_failure_{reason}"] = count
+        result[f"magic_failure_{reason}_fraction"] = (
+            count / magic_failed_attempts if magic_failed_attempts else 0.0
+        )
+    result["magic_failure_reason_sum"] = reason_sum
+    result["magic_failure_reason_sum_matches"] = (
+        reason_sum == magic_failed_attempts
+        if diagnostic.get("schema_version") == "qret_routing_failure_diagnostic_v2"
+        else None
+    )
+    if result["magic_failure_reason_sum_matches"] is False:
+        raise RuntimeError(
+            f"magic failure reason sum mismatch for {case_name}: "
+            f"{reason_sum} != {magic_failed_attempts}"
+        )
+    for field in (
+        "magic_stock_sample_count",
+        "magic_available_factory_count_mean",
+        "magic_total_stock_min",
+        "magic_total_stock_mean",
+        "magic_total_stock_max",
+    ):
+        result[field] = diagnostic.get(field)
+    distribution = diagnostic.get("magic_routing_distribution", {})
+    factory_use = distribution.get("factory_use_count", {}) if isinstance(distribution, Mapping) else {}
+    if not isinstance(factory_use, Mapping):
+        factory_use = {}
+    for factory_id in range(4):
+        result[f"magic_factory_{factory_id}_use_count"] = int(
+            factory_use.get(str(factory_id), 0)
+        )
+        result[f"magic_factory_{factory_id}_initial_free_neighbors"] = int(
+            initial_factory_free_neighbors.get(factory_id, 0)
+        )
     published_diagnostic = output_root / "diagnostics" / f"{case_name}.json"
     _write_json(published_diagnostic, diagnostic)
     result["routing_diagnostic_path"] = str(published_diagnostic.relative_to(REPO_ROOT))
@@ -377,6 +467,70 @@ def _write_outputs(output_root: Path, rows: Sequence[Mapping[str, Any]]) -> None
                 match="yes" if row["semantic_match"] else "no",
             )
         )
+    detailed_failure_reasons = all(
+        row.get("diagnostic_schema") == "qret_routing_failure_diagnostic_v2"
+        for row in rows
+    )
+    if detailed_failure_reasons:
+        lines.extend(
+            [
+                "",
+                "## Magic failure reasons",
+                "",
+                "Percentages use failed `LATTICE_SURGERY_MAGIC` attempts as the denominator.",
+                "",
+                "| case | qubit busy | no stock | factory egress | target access | disconnected | other/dependency | reason sum | stock min / mean | available factories mean |",
+                "|---|---:|---:|---:|---:|---:|---:|---|---:|---:|",
+            ]
+        )
+        for row in rows:
+            dependency_fraction = sum(
+                float(row[f"magic_failure_{reason}_fraction"])
+                for reason in (
+                    "classical_dependency_wait",
+                    "condition_wait",
+                    "other",
+                )
+            )
+            lines.append(
+                "| {case} | {qubit:.3f}% | {stock:.3f}% | {egress:.3f}% | {target:.3f}% | {disconnected:.3f}% | {other:.3f}% | {match} | {stock_min:,} / {stock_mean:,.1f} | {available:.3f} |".format(
+                    case=row["case_name"],
+                    qubit=100.0 * float(row["magic_failure_qubit_busy_fraction"]),
+                    stock=100.0 * float(row["magic_failure_no_magic_stock_fraction"]),
+                    egress=100.0
+                    * float(row["magic_failure_factory_egress_blocked_fraction"]),
+                    target=100.0
+                    * float(row["magic_failure_target_access_blocked_fraction"]),
+                    disconnected=100.0
+                    * float(row["magic_failure_route_disconnected_fraction"]),
+                    other=100.0 * dependency_fraction,
+                    match="yes" if row["magic_failure_reason_sum_matches"] else "no",
+                    stock_min=int(row["magic_total_stock_min"]),
+                    stock_mean=float(row["magic_total_stock_mean"]),
+                    available=float(row["magic_available_factory_count_mean"]),
+                )
+            )
+        lines.extend(
+            [
+                "",
+                "## Factory access geometry",
+                "",
+                "Free-neighbor counts use the initial topology occupancy and four-neighbor connectivity.",
+                "",
+                "| case | initial free neighbors m0/m1/m2/m3 | successful use m0/m1/m2/m3 |",
+                "|---|---:|---:|",
+            ]
+        )
+        for row in rows:
+            neighbor_text = "/".join(
+                str(int(row[f"magic_factory_{factory_id}_initial_free_neighbors"]))
+                for factory_id in range(4)
+            )
+            use_text = "/".join(
+                f"{int(row[f'magic_factory_{factory_id}_use_count']):,}"
+                for factory_id in range(4)
+            )
+            lines.append(f"| {row['case_name']} | {neighbor_text} | {use_text} |")
     h7_8x8 = next(
         row
         for row in rows
@@ -417,10 +571,34 @@ def _write_outputs(output_root: Path, rows: Sequence[Mapping[str, Any]]) -> None
     }
     qret_core_hash_capture = ", ".join(sorted(qret_core_hash_captures))
     diagnostic_patch_hash = h7_baseline.get("routing_diagnostic_patch_sha256")
+    reason_findings: list[str] = []
+    if detailed_failure_reasons:
+        reason_deltas = {
+            reason: int(h7_8x8[f"magic_failure_{reason}"])
+            - int(h7_baseline[f"magic_failure_{reason}"])
+            for reason in MAGIC_FAILURE_REASONS
+        }
+        largest_reason, largest_delta = max(reason_deltas.items(), key=lambda item: item[1])
+        reason_findings = [
+            f"- The largest 8x8-versus-10x10 increase is `{largest_reason}`: {largest_delta:+,} rejected attempts.",
+            f"- Magic stock is not exhausted continuously: 8x8 stock min/mean is {int(h7_8x8['magic_total_stock_min']):,}/{float(h7_8x8['magic_total_stock_mean']):,.1f}, versus {int(h7_baseline['magic_total_stock_min']):,}/{float(h7_baseline['magic_total_stock_mean']):,.1f} on 10x10.",
+            f"- H7 8x8 factory m0 has {int(h7_8x8['magic_factory_0_initial_free_neighbors'])} initially free neighbors and is used only {int(h7_8x8['magic_factory_0_use_count']):,} times; on 10x10 it has {int(h7_baseline['magic_factory_0_initial_free_neighbors'])} free neighbors and {int(h7_baseline['magic_factory_0_use_count']):,} uses.",
+            "- The reason counts sum exactly to total failed magic attempts in every case.",
+        ]
+    failure_note = (
+        "`failed_attempts` means `ScLsSimulator::Run` rejected an otherwise runnable queue candidate. Version 2 classifies the top-level rejection branch but does not retain per-attempt event logs or a cell-occupancy trace."
+        if detailed_failure_reasons
+        else "`failed_attempts` means `ScLsSimulator::Run` rejected an otherwise runnable queue candidate at that beat. It is an aggregate contention/scheduling signal, not a simulator-internal failure-reason classification."
+    )
+    conclusion = (
+        "The reason breakdown identifies which top-level magic scheduling or routing branch accounts for the 8x8 penalty. Simultaneous cell occupancy and the exact blocked cells remain unresolved."
+        if detailed_failure_reasons
+        else "These observations upgrade the generic routing-congestion explanation: the H7 8x8 penalty is specifically associated with longer magic-delivery paths and many more rejected `LATTICE_SURGERY_MAGIC` attempts. Exact simulator failure reasons and simultaneous cell occupancy remain unresolved because this diagnostic records aggregate `Run` outcomes only."
+    )
     lines.extend(
         [
             "",
-            "`failed_attempts` means `ScLsSimulator::Run` rejected an otherwise runnable queue candidate at that beat. It is an aggregate contention/scheduling signal, not a simulator-internal failure-reason classification.",
+            failure_note,
             "",
             "## Findings",
             "",
@@ -429,8 +607,9 @@ def _write_outputs(output_root: Path, rows: Sequence[Mapping[str, Any]]) -> None
             f"- H7 CNOT rejection does not increase: its rejected-attempt fraction is {100.0 * float(h7_8x8['cnot_failure_fraction']):.2f}% on 8x8 and {100.0 * float(h7_baseline['cnot_failure_fraction']):.2f}% on 10x10. Its mean path increases only {cnot_path_delta:+.1f}%.",
             f"- H7 8x10 returns to the baseline runtime while its mean magic path is {float(h7_8x10['lattice_surgery_magic_mean_path_coordinates']):.3f}. This places the observed transition between 8x8 and the first tested grid with one expanded dimension.",
             f"- The maximum consecutive no-run streak remains {int(h7_8x8['max_consecutive_no_run_beats'])} beats in every case. The penalty is therefore associated with repeated aggregate routing/scheduling rejection, not a longer single stall episode.",
+            *reason_findings,
             "",
-            "These observations upgrade the generic routing-congestion explanation: the H7 8x8 penalty is specifically associated with longer magic-delivery paths and many more rejected `LATTICE_SURGERY_MAGIC` attempts. Exact simulator failure reasons and simultaneous cell occupancy remain unresolved because this diagnostic records aggregate `Run` outcomes only.",
+            conclusion,
             "",
             "## Execution resources",
             "",
@@ -457,6 +636,13 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--qret", type=Path, default=DEFAULT_QRET)
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--case",
+        action="append",
+        choices=tuple(CASE_SELECTOR_BY_NAME),
+        dest="cases",
+        help="Run only the selected case; repeat for multiple cases.",
+    )
     return parser.parse_args()
 
 
@@ -467,7 +653,11 @@ def main() -> int:
     qret = args.qret.expanduser().resolve()
     if not qret.is_file():
         raise FileNotFoundError(qret)
-    selected = _selected_rows(results_path)
+    selector_names = args.cases or list(CASE_SELECTOR_BY_NAME)
+    selected = _selected_rows(
+        results_path,
+        [CASE_SELECTOR_BY_NAME[name] for name in selector_names],
+    )
     if args.dry_run:
         for row in selected:
             print(row["molecule"], row["topology_name"], row["cache_key"])
