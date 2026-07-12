@@ -1,0 +1,51 @@
+experiment: fixed_circuit_factory_egress_micro_sweep
+schema_version: 1
+
+source:
+  results_csv: artifacts/surface_code_runtime_grid_threshold_h5_h7_4th/results.csv
+  molecule: H7
+  topology_name: aware_8x8
+  pf_label: 4th(new_2)
+  rotation_precision: 1.0e-5
+
+topology_manifest: configs/topologies/factory_egress_micro_h7_4th/factory_egress_manifest.json
+
+cases:
+  - egress_0_baseline
+  - egress_1_left
+  - egress_1_down
+  - egress_2_both
+  - egress_0_symbol_rotate
+
+fixed_conditions:
+  grid_size: [8, 8]
+  machine_type: Dim2
+  magic_factory_count: 4
+  magic_factory_coordinate_set:
+    - [3, 3]
+    - [3, 4]
+    - [4, 3]
+    - [4, 4]
+  magic_generation_period: 15
+  maximum_magic_state_stock: 10000
+  entanglement_generation_period: 100
+  maximum_entangled_state_stock: 10
+  reaction_time: 1
+  physical_error_rate: 0.001
+  drop_rate: 0.1
+  code_cycle_time_sec: 0.000001
+  allowed_failure_prob: 0.01
+
+primary_metrics:
+  - runtime
+  - runtime_topology_overhead
+  - factory_egress_blocked
+
+diagnostic_metrics:
+  - magic_failure_reason_counts
+  - factory_use_count
+  - magic_path_length
+  - weighted_cnot_distance
+  - weighted_nearest_factory_distance
+
+output_directory: artifacts/surface_code_factory_egress_micro_sweep_h7_4th

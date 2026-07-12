@@ -1368,3 +1368,123 @@ factory egress countとruntimeが出口数に応じて減るかを直接確認�
 - `artifacts/surface_code_magic_failure_reason_diagnostic_h7_4th/summary.md`
 - `artifacts/surface_code_magic_failure_reason_diagnostic_h7_4th/results.csv`
 - `artifacts/surface_code_magic_failure_reason_diagnostic_h7_4th/results.jsonl`
+
+## 2026-07-12: H7 8x8 factory-egress causal micro-sweep
+
+### Question
+
+前節では、H7 8x8のruntime penaltyと`factory_egress_blocked`が対応し、物理座標`(3,3)`の
+factoryが初期free出口0でほぼ利用不能であることを確認した。ただし相関だけでは、出口閉塞を
+解消すればruntimeが戻るかは未確認だった。
+
+そこでlogical circuit、8x8 grid、4 factoryの座標集合、magic period/stock、QEC条件を固定し、
+`(3,3)`に隣接するlogical qubitだけを最小距離移動して初期free出口を0、1、2へ変えた。
+
+| case | intervention |
+| --- | --- |
+| `egress_0_baseline` | original H7 8x8、出口0 |
+| `egress_1_left` | q1を`(2,3)`から`(1,3)`へ移動、左出口を1つ開く |
+| `egress_1_down` | q2を`(3,2)`から`(3,1)`へ移動、下出口を1つ開く |
+| `egress_2_both` | q1とq2を両方移動、出口2 |
+| `egress_0_symbol_rotate` | 物理配置は変えずfactory symbolだけrotation |
+
+全caseでQASM hash、optimized IR hash、topology-free runtime、gate count/depth、magic
+count/depthが一致した。factory座標集合も同一である。
+
+### Static-distance control
+
+出口を開くqubit移動は、静的距離を改善していない。
+
+| case | weighted CNOT distance delta | weighted nearest-factory distance delta |
+| --- | ---: | ---: |
+| `egress_1_left` | +37,316 | +377,908 |
+| `egress_1_down` | +32,264 | +275,220 |
+| `egress_2_both` | +69,580 | +653,128 |
+
+したがってopen-egress caseでruntimeが短くなった場合、短い静的通信距離を原因にはできない。
+
+### Observed results
+
+| case | egress | runtime | vs baseline | topology overhead | egress rejection | magic mean path | trapped-coordinate uses |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `egress_0_baseline` | 0 | 9,858,370 | reference | 987,508 | 1,838,510 | 5.258 | 82 |
+| `egress_1_left` | 1 | 8,871,838 | -10.0070% | 976 | 25 | 3.081 | 417,199 |
+| `egress_1_down` | 1 | 8,871,822 | -10.0072% | 960 | 56 | 3.045 | 378,690 |
+| `egress_2_both` | 2 | 8,872,721 | -9.9981% | 1,859 | 13 | 3.018 | 518,585 |
+| `egress_0_symbol_rotate` | 0 | 9,858,370 | +0.0000% | 987,508 | 1,838,510 | 5.258 | 82 |
+
+出口1を左・下のどちらに開いても、egress rejectionは約184万回から25-56回へ減り、runtimeは
+約10.01%短縮した。10x10 baselineの8,871,700 beatに対して差は122-138 beat、約0.0014-
+0.0016%であり、8x8 penaltyはほぼ完全に解消した。
+
+出口2ではegress rejectionが13回まで減ったが、runtimeは出口1より899-883 beat長かった。
+追加出口によるruntime改善はなく、0から1の間にあるthreshold responseだった。2つ目のqubit
+移動によるdistance/routing変化が小さい残差へ混ざるため、出口数とruntimeの単調関係は主張しない。
+
+symbol-only controlはruntime、topology overhead、egress rejection、magic pathがbaselineと完全
+一致した。塞がれた物理座標の利用も82回のままで、factory label 0から3へ移っただけだった。
+したがって現象はfactory IDやtie-breakではなく、物理access geometryに追随する。
+
+QVはopen-egress 3 caseでbaseline比11.15-11.26%減少した。code distance=17、physical
+qubits=34,680は全caseで共通なので、QEC threshold crossingは混ざっていない。
+
+### Interpretation
+
+今回のtested interventionでは、H7 8x8の約11.12% runtime penaltyがfactory出口閉塞によって
+生じていたという因果解釈が強く支持された。根拠は次の組み合わせである。
+
+- 独立な左・下の1-cell移動がほぼ同じruntime回復を生んだ
+- egress rejectionが同時にほぼ0へ減った
+- static CNOT / nearest-factory distanceは改善せず、むしろ悪化した
+- factory symbolだけの変更では結果が完全一致した
+- circuit-level workloadとQEC条件は固定された
+
+したがって、この条件で重要なのはfactory countそのものではなく、各factoryがrouting networkへ
+接続できるfree egressを持つことである。出口0のfactoryは配置上存在していても、実効的な供給源
+としてほぼ機能しない。
+
+ただし、logical qubitを移動するinterventionなので、dynamic routing全体にも局所的変化は入る。
+今回のcontrol群により単純な距離改善とfactory ID効果は除外できたが、個々のblocked cell時系列を
+直接追跡したわけではない。
+
+### Updated architecture direction
+
+今後のmapping / topology評価では、factory数に加えて次を明示的に記録する。
+
+- factoryごとの初期free egress数
+- egress 1以上のaccessible factory数
+- factory egress rejection count
+- factory座標別の実利用数
+
+mapperへfactory周囲のrouting reserveを入れる場合、最低1つのfree egressをhard constraintまたは
+強いpenaltyとして扱う候補が得られた。出口2は今回追加runtime改善を生まなかったため、最初の
+設計仮説は「factoryごとに最低1出口を保証する」とする。
+
+### State classification
+
+| item | classification |
+| --- | --- |
+| H7 8x8 egress 0/1/2 micro-sweep | observed |
+| 出口1でegress rejectionが約184万回から25-56回へ減少 | observed |
+| 出口1でruntimeが約10.01%短縮 | observed |
+| 出口1で10x10 runtime水準へ回復 | observed |
+| 出口2に追加runtime改善がない | observed for tested placements |
+| symbol-only controlがbaselineと完全一致 | observed |
+| static distance悪化下でもruntimeが回復 | observed |
+| H7 8x8 penaltyの主因がfactory egress制約 | strongly supported causal inference |
+| mapperへのminimum-one-egress constraintの一般性 | proposed / unevaluated |
+
+### Execution resources
+
+- 5 caseをtmux内で逐次実行
+- qret peak RSS: 3,381,536 KiB（約3.22 GiB）
+- GNU timeのswap count: 0
+- cgroup guard: `MemoryHigh=44G`, `MemoryMax=48G`
+
+### References
+
+- `configs/surface_code_factory_egress_micro_sweep_h7_4th.yaml`
+- `configs/topologies/factory_egress_micro_h7_4th/factory_egress_manifest.json`
+- `artifacts/surface_code_factory_egress_micro_sweep_h7_4th/summary.md`
+- `artifacts/surface_code_factory_egress_micro_sweep_h7_4th/results.csv`
+- `artifacts/surface_code_factory_egress_micro_sweep_h7_4th/results.jsonl`

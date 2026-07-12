@@ -1,0 +1,907 @@
+{
+  "baseline_topology_path": "configs/topologies/runtime_grid_threshold_h5_h7/h7_8x8_compact_interaction_aware.yaml",
+  "baseline_topology_sha256": "7942ca952984c7e964931a120fd559a456a675c835c0295a7f85699ac5bd3958",
+  "grid_size": [
+    8,
+    8
+  ],
+  "interaction_source": "pre-synthesis efficient-controlled PF-step QASM CNOT counts",
+  "magic_target_count": 1971706,
+  "magic_target_source": "artifacts/surface_code_magic_failure_reason_diagnostic_h7_4th/diagnostics/h7_aware_8x8.json",
+  "molecule": "H7",
+  "pf_label": "4th(new_2)",
+  "qasm_path": "artifacts/surface_code_cache/gr/prepared_step/H7_sto-3g_triplet_1__distance_100_charge_1_grouping__4th_new_2_/94a3628e1683d4d0/step.qasm",
+  "qasm_sha256": "4406dbfd1fb59a7affb9165a4d61736887111abad5a640859ebc38f0585c6fac",
+  "schema_version": "factory_egress_micro_topology_v1",
+  "trapped_factory_coordinate": [
+    3,
+    3
+  ],
+  "variants": {
+    "egress_0_baseline": {
+      "factory_coordinate_set": [
+        [
+          3,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          3
+        ],
+        [
+          4,
+          4
+        ]
+      ],
+      "initial_free_neighbors_by_factory_coordinate": {
+        "3,3": 0,
+        "3,4": 1,
+        "4,3": 2,
+        "4,4": 2
+      },
+      "initial_free_neighbors_by_factory_symbol": {
+        "0": 0,
+        "1": 1,
+        "2": 2,
+        "3": 2
+      },
+      "logical_mapping": [
+        {
+          "coord": [
+            3,
+            5
+          ],
+          "logical_qubit": 0
+        },
+        {
+          "coord": [
+            2,
+            3
+          ],
+          "logical_qubit": 1
+        },
+        {
+          "coord": [
+            3,
+            2
+          ],
+          "logical_qubit": 2
+        },
+        {
+          "coord": [
+            4,
+            6
+          ],
+          "logical_qubit": 3
+        },
+        {
+          "coord": [
+            6,
+            4
+          ],
+          "logical_qubit": 4
+        },
+        {
+          "coord": [
+            6,
+            2
+          ],
+          "logical_qubit": 5
+        },
+        {
+          "coord": [
+            6,
+            6
+          ],
+          "logical_qubit": 6
+        },
+        {
+          "coord": [
+            0,
+            0
+          ],
+          "logical_qubit": 7
+        },
+        {
+          "coord": [
+            0,
+            2
+          ],
+          "logical_qubit": 8
+        },
+        {
+          "coord": [
+            2,
+            0
+          ],
+          "logical_qubit": 9
+        },
+        {
+          "coord": [
+            0,
+            4
+          ],
+          "logical_qubit": 10
+        },
+        {
+          "coord": [
+            4,
+            0
+          ],
+          "logical_qubit": 11
+        },
+        {
+          "coord": [
+            0,
+            6
+          ],
+          "logical_qubit": 12
+        },
+        {
+          "coord": [
+            6,
+            0
+          ],
+          "logical_qubit": 13
+        },
+        {
+          "coord": [
+            2,
+            6
+          ],
+          "logical_qubit": 14
+        }
+      ],
+      "magic_factories": [
+        {
+          "coord": [
+            3,
+            3
+          ],
+          "symbol": 0
+        },
+        {
+          "coord": [
+            3,
+            4
+          ],
+          "symbol": 1
+        },
+        {
+          "coord": [
+            4,
+            3
+          ],
+          "symbol": 2
+        },
+        {
+          "coord": [
+            4,
+            4
+          ],
+          "symbol": 3
+        }
+      ],
+      "topology_path": "configs/topologies/factory_egress_micro_h7_4th/h7_8x8_egress_0_baseline.yaml",
+      "topology_sha256": "7942ca952984c7e964931a120fd559a456a675c835c0295a7f85699ac5bd3958",
+      "trapped_coordinate_free_neighbors": 0,
+      "weighted_cnot_distance": 1032100,
+      "weighted_cnot_distance_delta_vs_baseline": 0,
+      "weighted_nearest_factory_distance": 4026034,
+      "weighted_nearest_factory_distance_delta_vs_baseline": 0,
+      "weighted_nearest_factory_distance_mean": 2.041903813245991
+    },
+    "egress_0_symbol_rotate": {
+      "factory_coordinate_set": [
+        [
+          3,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          3
+        ],
+        [
+          4,
+          4
+        ]
+      ],
+      "initial_free_neighbors_by_factory_coordinate": {
+        "3,3": 0,
+        "3,4": 1,
+        "4,3": 2,
+        "4,4": 2
+      },
+      "initial_free_neighbors_by_factory_symbol": {
+        "0": 1,
+        "1": 2,
+        "2": 2,
+        "3": 0
+      },
+      "logical_mapping": [
+        {
+          "coord": [
+            3,
+            5
+          ],
+          "logical_qubit": 0
+        },
+        {
+          "coord": [
+            2,
+            3
+          ],
+          "logical_qubit": 1
+        },
+        {
+          "coord": [
+            3,
+            2
+          ],
+          "logical_qubit": 2
+        },
+        {
+          "coord": [
+            4,
+            6
+          ],
+          "logical_qubit": 3
+        },
+        {
+          "coord": [
+            6,
+            4
+          ],
+          "logical_qubit": 4
+        },
+        {
+          "coord": [
+            6,
+            2
+          ],
+          "logical_qubit": 5
+        },
+        {
+          "coord": [
+            6,
+            6
+          ],
+          "logical_qubit": 6
+        },
+        {
+          "coord": [
+            0,
+            0
+          ],
+          "logical_qubit": 7
+        },
+        {
+          "coord": [
+            0,
+            2
+          ],
+          "logical_qubit": 8
+        },
+        {
+          "coord": [
+            2,
+            0
+          ],
+          "logical_qubit": 9
+        },
+        {
+          "coord": [
+            0,
+            4
+          ],
+          "logical_qubit": 10
+        },
+        {
+          "coord": [
+            4,
+            0
+          ],
+          "logical_qubit": 11
+        },
+        {
+          "coord": [
+            0,
+            6
+          ],
+          "logical_qubit": 12
+        },
+        {
+          "coord": [
+            6,
+            0
+          ],
+          "logical_qubit": 13
+        },
+        {
+          "coord": [
+            2,
+            6
+          ],
+          "logical_qubit": 14
+        }
+      ],
+      "magic_factories": [
+        {
+          "coord": [
+            3,
+            4
+          ],
+          "symbol": 0
+        },
+        {
+          "coord": [
+            4,
+            3
+          ],
+          "symbol": 1
+        },
+        {
+          "coord": [
+            4,
+            4
+          ],
+          "symbol": 2
+        },
+        {
+          "coord": [
+            3,
+            3
+          ],
+          "symbol": 3
+        }
+      ],
+      "topology_path": "configs/topologies/factory_egress_micro_h7_4th/h7_8x8_egress_0_symbol_rotate.yaml",
+      "topology_sha256": "cc7dbd4b0686c3ddb0cbee2ad0644194bd1fe9f9ce3b3cc669fd2826f96a562c",
+      "trapped_coordinate_free_neighbors": 0,
+      "weighted_cnot_distance": 1032100,
+      "weighted_cnot_distance_delta_vs_baseline": 0,
+      "weighted_nearest_factory_distance": 4026034,
+      "weighted_nearest_factory_distance_delta_vs_baseline": 0,
+      "weighted_nearest_factory_distance_mean": 2.041903813245991
+    },
+    "egress_1_down": {
+      "factory_coordinate_set": [
+        [
+          3,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          3
+        ],
+        [
+          4,
+          4
+        ]
+      ],
+      "initial_free_neighbors_by_factory_coordinate": {
+        "3,3": 1,
+        "3,4": 1,
+        "4,3": 2,
+        "4,4": 2
+      },
+      "initial_free_neighbors_by_factory_symbol": {
+        "0": 1,
+        "1": 1,
+        "2": 2,
+        "3": 2
+      },
+      "logical_mapping": [
+        {
+          "coord": [
+            3,
+            5
+          ],
+          "logical_qubit": 0
+        },
+        {
+          "coord": [
+            2,
+            3
+          ],
+          "logical_qubit": 1
+        },
+        {
+          "coord": [
+            3,
+            1
+          ],
+          "logical_qubit": 2
+        },
+        {
+          "coord": [
+            4,
+            6
+          ],
+          "logical_qubit": 3
+        },
+        {
+          "coord": [
+            6,
+            4
+          ],
+          "logical_qubit": 4
+        },
+        {
+          "coord": [
+            6,
+            2
+          ],
+          "logical_qubit": 5
+        },
+        {
+          "coord": [
+            6,
+            6
+          ],
+          "logical_qubit": 6
+        },
+        {
+          "coord": [
+            0,
+            0
+          ],
+          "logical_qubit": 7
+        },
+        {
+          "coord": [
+            0,
+            2
+          ],
+          "logical_qubit": 8
+        },
+        {
+          "coord": [
+            2,
+            0
+          ],
+          "logical_qubit": 9
+        },
+        {
+          "coord": [
+            0,
+            4
+          ],
+          "logical_qubit": 10
+        },
+        {
+          "coord": [
+            4,
+            0
+          ],
+          "logical_qubit": 11
+        },
+        {
+          "coord": [
+            0,
+            6
+          ],
+          "logical_qubit": 12
+        },
+        {
+          "coord": [
+            6,
+            0
+          ],
+          "logical_qubit": 13
+        },
+        {
+          "coord": [
+            2,
+            6
+          ],
+          "logical_qubit": 14
+        }
+      ],
+      "magic_factories": [
+        {
+          "coord": [
+            3,
+            3
+          ],
+          "symbol": 0
+        },
+        {
+          "coord": [
+            3,
+            4
+          ],
+          "symbol": 1
+        },
+        {
+          "coord": [
+            4,
+            3
+          ],
+          "symbol": 2
+        },
+        {
+          "coord": [
+            4,
+            4
+          ],
+          "symbol": 3
+        }
+      ],
+      "topology_path": "configs/topologies/factory_egress_micro_h7_4th/h7_8x8_egress_1_down.yaml",
+      "topology_sha256": "95d313174e0cec46ba26c1b55b64f5f49a21e26d99858a754ad88fe39af5fe0a",
+      "trapped_coordinate_free_neighbors": 1,
+      "weighted_cnot_distance": 1064364,
+      "weighted_cnot_distance_delta_vs_baseline": 32264,
+      "weighted_nearest_factory_distance": 4301254,
+      "weighted_nearest_factory_distance_delta_vs_baseline": 275220,
+      "weighted_nearest_factory_distance_mean": 2.1814885180650667
+    },
+    "egress_1_left": {
+      "factory_coordinate_set": [
+        [
+          3,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          3
+        ],
+        [
+          4,
+          4
+        ]
+      ],
+      "initial_free_neighbors_by_factory_coordinate": {
+        "3,3": 1,
+        "3,4": 1,
+        "4,3": 2,
+        "4,4": 2
+      },
+      "initial_free_neighbors_by_factory_symbol": {
+        "0": 1,
+        "1": 1,
+        "2": 2,
+        "3": 2
+      },
+      "logical_mapping": [
+        {
+          "coord": [
+            3,
+            5
+          ],
+          "logical_qubit": 0
+        },
+        {
+          "coord": [
+            1,
+            3
+          ],
+          "logical_qubit": 1
+        },
+        {
+          "coord": [
+            3,
+            2
+          ],
+          "logical_qubit": 2
+        },
+        {
+          "coord": [
+            4,
+            6
+          ],
+          "logical_qubit": 3
+        },
+        {
+          "coord": [
+            6,
+            4
+          ],
+          "logical_qubit": 4
+        },
+        {
+          "coord": [
+            6,
+            2
+          ],
+          "logical_qubit": 5
+        },
+        {
+          "coord": [
+            6,
+            6
+          ],
+          "logical_qubit": 6
+        },
+        {
+          "coord": [
+            0,
+            0
+          ],
+          "logical_qubit": 7
+        },
+        {
+          "coord": [
+            0,
+            2
+          ],
+          "logical_qubit": 8
+        },
+        {
+          "coord": [
+            2,
+            0
+          ],
+          "logical_qubit": 9
+        },
+        {
+          "coord": [
+            0,
+            4
+          ],
+          "logical_qubit": 10
+        },
+        {
+          "coord": [
+            4,
+            0
+          ],
+          "logical_qubit": 11
+        },
+        {
+          "coord": [
+            0,
+            6
+          ],
+          "logical_qubit": 12
+        },
+        {
+          "coord": [
+            6,
+            0
+          ],
+          "logical_qubit": 13
+        },
+        {
+          "coord": [
+            2,
+            6
+          ],
+          "logical_qubit": 14
+        }
+      ],
+      "magic_factories": [
+        {
+          "coord": [
+            3,
+            3
+          ],
+          "symbol": 0
+        },
+        {
+          "coord": [
+            3,
+            4
+          ],
+          "symbol": 1
+        },
+        {
+          "coord": [
+            4,
+            3
+          ],
+          "symbol": 2
+        },
+        {
+          "coord": [
+            4,
+            4
+          ],
+          "symbol": 3
+        }
+      ],
+      "topology_path": "configs/topologies/factory_egress_micro_h7_4th/h7_8x8_egress_1_left.yaml",
+      "topology_sha256": "9d050bed37cfb5ef263aab8ba27c8df3dcd5c880ca06952485324a9eebd7d701",
+      "trapped_coordinate_free_neighbors": 1,
+      "weighted_cnot_distance": 1069416,
+      "weighted_cnot_distance_delta_vs_baseline": 37316,
+      "weighted_nearest_factory_distance": 4403942,
+      "weighted_nearest_factory_distance_delta_vs_baseline": 377908,
+      "weighted_nearest_factory_distance_mean": 2.23356930495723
+    },
+    "egress_2_both": {
+      "factory_coordinate_set": [
+        [
+          3,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          3
+        ],
+        [
+          4,
+          4
+        ]
+      ],
+      "initial_free_neighbors_by_factory_coordinate": {
+        "3,3": 2,
+        "3,4": 1,
+        "4,3": 2,
+        "4,4": 2
+      },
+      "initial_free_neighbors_by_factory_symbol": {
+        "0": 2,
+        "1": 1,
+        "2": 2,
+        "3": 2
+      },
+      "logical_mapping": [
+        {
+          "coord": [
+            3,
+            5
+          ],
+          "logical_qubit": 0
+        },
+        {
+          "coord": [
+            1,
+            3
+          ],
+          "logical_qubit": 1
+        },
+        {
+          "coord": [
+            3,
+            1
+          ],
+          "logical_qubit": 2
+        },
+        {
+          "coord": [
+            4,
+            6
+          ],
+          "logical_qubit": 3
+        },
+        {
+          "coord": [
+            6,
+            4
+          ],
+          "logical_qubit": 4
+        },
+        {
+          "coord": [
+            6,
+            2
+          ],
+          "logical_qubit": 5
+        },
+        {
+          "coord": [
+            6,
+            6
+          ],
+          "logical_qubit": 6
+        },
+        {
+          "coord": [
+            0,
+            0
+          ],
+          "logical_qubit": 7
+        },
+        {
+          "coord": [
+            0,
+            2
+          ],
+          "logical_qubit": 8
+        },
+        {
+          "coord": [
+            2,
+            0
+          ],
+          "logical_qubit": 9
+        },
+        {
+          "coord": [
+            0,
+            4
+          ],
+          "logical_qubit": 10
+        },
+        {
+          "coord": [
+            4,
+            0
+          ],
+          "logical_qubit": 11
+        },
+        {
+          "coord": [
+            0,
+            6
+          ],
+          "logical_qubit": 12
+        },
+        {
+          "coord": [
+            6,
+            0
+          ],
+          "logical_qubit": 13
+        },
+        {
+          "coord": [
+            2,
+            6
+          ],
+          "logical_qubit": 14
+        }
+      ],
+      "magic_factories": [
+        {
+          "coord": [
+            3,
+            3
+          ],
+          "symbol": 0
+        },
+        {
+          "coord": [
+            3,
+            4
+          ],
+          "symbol": 1
+        },
+        {
+          "coord": [
+            4,
+            3
+          ],
+          "symbol": 2
+        },
+        {
+          "coord": [
+            4,
+            4
+          ],
+          "symbol": 3
+        }
+      ],
+      "topology_path": "configs/topologies/factory_egress_micro_h7_4th/h7_8x8_egress_2_both.yaml",
+      "topology_sha256": "9f4ea98ed5253bbd1f9ba980db6b1e8018b0ec43760018b219b7a440494cb90e",
+      "trapped_coordinate_free_neighbors": 2,
+      "weighted_cnot_distance": 1101680,
+      "weighted_cnot_distance_delta_vs_baseline": 69580,
+      "weighted_nearest_factory_distance": 4679162,
+      "weighted_nearest_factory_distance_delta_vs_baseline": 653128,
+      "weighted_nearest_factory_distance_mean": 2.3731540097763055
+    }
+  }
+}

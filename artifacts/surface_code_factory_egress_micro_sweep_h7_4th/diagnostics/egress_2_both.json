@@ -1,0 +1,243 @@
+{
+  "attempts_by_type": {
+    "ALLOCATE": 21,
+    "ALLOCATE_MAGIC_FACTORY": 4,
+    "CNOT": 765109,
+    "DEALLOCATE": 25,
+    "HADAMARD": 10170158,
+    "LATTICE_SURGERY_MAGIC": 4157395,
+    "PROBABILITY_HINT": 3965870,
+    "TWIST": 11398699
+  },
+  "beat_advances": 8872720,
+  "failed_attempts_by_type": {
+    "ALLOCATE": 6,
+    "CNOT": 536797,
+    "DEALLOCATE": 10,
+    "HADAMARD": 7781745,
+    "LATTICE_SURGERY_MAGIC": 2185689,
+    "PROBABILITY_HINT": 1994164,
+    "TWIST": 6750798
+  },
+  "final_beat": 8872720,
+  "initial_beat": 0,
+  "lattice_surgery_magic_failed_attempts_by_reason": {
+    "factory_egress_blocked": 13,
+    "no_magic_stock": 38234,
+    "qubit_busy": 2137835,
+    "route_disconnected": 7907,
+    "target_access_blocked": 1700
+  },
+  "loop_iterations": 20080792,
+  "magic_available_factory_count_mean": 3.7092520152904593,
+  "magic_routing_distribution": {
+    "factory_use_count": {
+      "0": 518585,
+      "1": 353055,
+      "2": 508593,
+      "3": 591473
+    },
+    "path_length_histogram": {
+      "1": 618802,
+      "10": 118,
+      "11": 88,
+      "12": 30,
+      "14": 40,
+      "15": 5,
+      "16": 15,
+      "17": 1,
+      "2": 568479,
+      "20": 2,
+      "24": 1,
+      "3": 126035,
+      "4": 136741,
+      "5": 169961,
+      "6": 99575,
+      "7": 195055,
+      "8": 56647,
+      "9": 111
+    },
+    "target_stats": {
+      "0": {
+        "instruction_count": 501032,
+        "max_path_coordinates": 16,
+        "mean_path_coordinates": 4.2249656708553545,
+        "path_coordinate_count": 2116843
+      },
+      "1": {
+        "instruction_count": 377908,
+        "max_path_coordinates": 16,
+        "mean_path_coordinates": 1.5526636112492989,
+        "path_coordinate_count": 586764
+      },
+      "10": {
+        "instruction_count": 28200,
+        "max_path_coordinates": 15,
+        "mean_path_coordinates": 3.029432624113475,
+        "path_coordinate_count": 85430
+      },
+      "11": {
+        "instruction_count": 11944,
+        "max_path_coordinates": 8,
+        "mean_path_coordinates": 3.0394340254521097,
+        "path_coordinate_count": 36303
+      },
+      "12": {
+        "instruction_count": 1160,
+        "max_path_coordinates": 10,
+        "mean_path_coordinates": 4.65,
+        "path_coordinate_count": 5394
+      },
+      "13": {
+        "instruction_count": 592,
+        "max_path_coordinates": 8,
+        "mean_path_coordinates": 4.160472972972973,
+        "path_coordinate_count": 2463
+      },
+      "14": {
+        "instruction_count": 50,
+        "max_path_coordinates": 2,
+        "mean_path_coordinates": 2.0,
+        "path_coordinate_count": 100
+      },
+      "2": {
+        "instruction_count": 275220,
+        "max_path_coordinates": 20,
+        "mean_path_coordinates": 1.5363091345105733,
+        "path_coordinate_count": 422823
+      },
+      "3": {
+        "instruction_count": 196072,
+        "max_path_coordinates": 15,
+        "mean_path_coordinates": 2.718934881064099,
+        "path_coordinate_count": 533107
+      },
+      "4": {
+        "instruction_count": 132396,
+        "max_path_coordinates": 14,
+        "mean_path_coordinates": 1.5551149581558354,
+        "path_coordinate_count": 205891
+      },
+      "5": {
+        "instruction_count": 71268,
+        "max_path_coordinates": 16,
+        "mean_path_coordinates": 2.0197564124151093,
+        "path_coordinate_count": 143944
+      },
+      "6": {
+        "instruction_count": 22912,
+        "max_path_coordinates": 15,
+        "mean_path_coordinates": 3.455132681564246,
+        "path_coordinate_count": 79164
+      },
+      "7": {
+        "instruction_count": 184168,
+        "max_path_coordinates": 17,
+        "mean_path_coordinates": 5.3390654185309065,
+        "path_coordinate_count": 983285
+      },
+      "8": {
+        "instruction_count": 111668,
+        "max_path_coordinates": 24,
+        "mean_path_coordinates": 4.467689938030591,
+        "path_coordinate_count": 498898
+      },
+      "9": {
+        "instruction_count": 57116,
+        "max_path_coordinates": 6,
+        "mean_path_coordinates": 4.389295468870369,
+        "path_coordinate_count": 250699
+      }
+    }
+  },
+  "magic_stock_sample_count": 2019560,
+  "magic_total_stock_max": 30389,
+  "magic_total_stock_mean": 23458.02144427499,
+  "magic_total_stock_min": 0,
+  "max_consecutive_no_run_beats": 12,
+  "other_beat_advances": 0,
+  "path_stats_by_type": {
+    "ALLOCATE": {
+      "instruction_count": 15,
+      "max_path_coordinates": 0,
+      "mean_path_coordinates_per_instruction": 0.0,
+      "mean_path_coordinates_per_nonempty_path": 0.0,
+      "nonempty_path_count": 0,
+      "path_coordinate_count": 0
+    },
+    "ALLOCATE_MAGIC_FACTORY": {
+      "instruction_count": 4,
+      "max_path_coordinates": 0,
+      "mean_path_coordinates_per_instruction": 0.0,
+      "mean_path_coordinates_per_nonempty_path": 0.0,
+      "nonempty_path_count": 0,
+      "path_coordinate_count": 0
+    },
+    "CNOT": {
+      "instruction_count": 228312,
+      "max_path_coordinates": 21,
+      "mean_path_coordinates_per_instruction": 5.9050597428080875,
+      "mean_path_coordinates_per_nonempty_path": 5.9050597428080875,
+      "nonempty_path_count": 228312,
+      "path_coordinate_count": 1348196
+    },
+    "DEALLOCATE": {
+      "instruction_count": 15,
+      "max_path_coordinates": 0,
+      "mean_path_coordinates_per_instruction": 0.0,
+      "mean_path_coordinates_per_nonempty_path": 0.0,
+      "nonempty_path_count": 0,
+      "path_coordinate_count": 0
+    },
+    "HADAMARD": {
+      "instruction_count": 2388413,
+      "max_path_coordinates": 0,
+      "mean_path_coordinates_per_instruction": 0.0,
+      "mean_path_coordinates_per_nonempty_path": 0.0,
+      "nonempty_path_count": 0,
+      "path_coordinate_count": 0
+    },
+    "LATTICE_SURGERY_MAGIC": {
+      "instruction_count": 1971706,
+      "max_path_coordinates": 24,
+      "mean_path_coordinates_per_instruction": 3.018253228422493,
+      "mean_path_coordinates_per_nonempty_path": 3.018253228422493,
+      "nonempty_path_count": 1971706,
+      "path_coordinate_count": 5951108
+    },
+    "PROBABILITY_HINT": {
+      "instruction_count": 1971706,
+      "max_path_coordinates": 0,
+      "mean_path_coordinates_per_instruction": 0.0,
+      "mean_path_coordinates_per_nonempty_path": 0.0,
+      "nonempty_path_count": 0,
+      "path_coordinate_count": 0
+    },
+    "TWIST": {
+      "instruction_count": 4647901,
+      "max_path_coordinates": 0,
+      "mean_path_coordinates_per_instruction": 0.0,
+      "mean_path_coordinates_per_nonempty_path": 0.0,
+      "nonempty_path_count": 0,
+      "path_coordinate_count": 0
+    }
+  },
+  "queue_release_events": 0,
+  "queue_released_instructions": 0,
+  "reserved_only_beat_advances": 0,
+  "runnable_blocked_beat_advances": 8872720,
+  "schema_version": "qret_routing_failure_diagnostic_v2",
+  "simulator_num_2beat_trans_move": 0,
+  "split_iterations": 0,
+  "successful_instruction_runs": 11208072,
+  "successful_runs_by_type": {
+    "ALLOCATE": 15,
+    "ALLOCATE_MAGIC_FACTORY": 4,
+    "CNOT": 228312,
+    "DEALLOCATE": 15,
+    "HADAMARD": 2388413,
+    "LATTICE_SURGERY_MAGIC": 1971706,
+    "PROBABILITY_HINT": 1971706,
+    "TWIST": 4647901
+  }
+}
