@@ -1,0 +1,60 @@
+experiment: fixed_circuit_reaction_time_sweep_paired_precision
+schema_version: 1
+
+source:
+  results_csv: artifacts/surface_code_grid_capacity_sweep_h4_h7_4th/results.csv
+  topology_name: aware_10x10
+  pf_label: 4th(new_2)
+
+topology_manifest: configs/topologies/accessible_factory_count_h4_h7_4th/accessible_factory_count_manifest.json
+
+molecules:
+  - H4
+  - H5
+  - H6
+  - H7
+
+rotation_precisions:
+  - 1.0e-5
+  - 1.0e-2
+
+reaction_times:
+  - 1
+  - 10
+  - 100
+
+fixed_conditions:
+  factory_count: 4
+  grid_size: [10, 10]
+  machine_type: Dim2
+  minimum_free_egress_per_factory: 2
+  usable_non_factory_cells: 96
+  magic_generation_period: 15
+  maximum_magic_state_stock: 10000
+  entanglement_generation_period: 100
+  maximum_entangled_state_stock: 10
+  physical_error_rate: 0.001
+  drop_rate: 0.1
+  code_cycle_time_sec: 0.000001
+  allowed_failure_prob: 0.01
+
+comparison_policy:
+  baseline_reaction_time: 1
+  compare_within_precision: true
+  compare_absolute_runtime_across_precision: false
+  interpretation: reaction time is a classical-control architecture parameter, but current feedback operations are coupled to magic injection
+
+primary_metrics:
+  - runtime
+  - runtime_change_vs_reaction_1
+  - runtime_topology_overhead
+
+diagnostic_metrics:
+  - measurement_feedback_count
+  - measurement_feedback_depth
+  - classical_dependency_wait
+  - condition_wait
+  - no_magic_stock
+  - factory_egress_blocked
+
+output_directory: artifacts/surface_code_reaction_time_sweep_h4_h7_4th_paired

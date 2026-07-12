@@ -1768,3 +1768,109 @@ H6 N=4だけ`runtime_with_topology - runtime_without_topology = -176` beatとな
 - `artifacts/surface_code_accessible_factory_count_sweep_h4_h7_4th_cheap_rz/summary.md`
 - `artifacts/surface_code_accessible_factory_count_sweep_h4_h7_4th_cheap_rz/results.csv`
 - `artifacts/surface_code_accessible_factory_count_sweep_h4_h7_4th_cheap_rz/results.jsonl`
+
+## 2026-07-13: paired-precision reaction-time sweep
+
+### Question and design
+
+magic供給を4 accessible factoryで十分に緩和した状態で、古典制御のreaction / feed-forward latencyが
+fixed-circuit runtimeへどの程度入るかを調べた。H4-H7、`4th(new_2)`、10x10 logical mapping、
+4 factory、初期egress=2、magic period=15、stock=10000を固定し、次の24 caseを実行した。
+
+```text
+rotation_precision: 1e-5, 1e-2
+reaction_time: 1, 10, 100 cycles
+```
+
+reaction timeはarchitecture parameterであり、各molecule/precision内でQASM/optimized IR、logical
+gate/depth、measurement-feedback count/depth、magic demand/depthは一致した。precision間では回路が
+異なるため絶対runtimeをarchitecture effectとして比較せず、各precision内のreaction=1比を見る。
+1/10/100はlog-scale diagnosticであり、特定hardwareのcontroller latencyを表す値とは主張しない。
+
+### Feedback workload
+
+現在の回路ではmeasurement-feedback count/depthがmagic-state consumption count/depthと一致する。
+したがって本実験は、一般的な古典制御だけでなく、主にmagic injection後のfeed-forward latencyを
+評価している。
+
+| molecule | feedback count at 1e-5 | feedback depth at 1e-5 | feedback count at 1e-2 | feedback depth at 1e-2 |
+| --- | ---: | ---: | ---: | ---: |
+| H4 | 184,600 | 173,748 | 11,716 | 10,176 |
+| H5 | 475,906 | 451,262 | 18,938 | 17,284 |
+| H6 | 1,025,480 | 966,388 | 17,330 | 15,290 |
+| H7 | 1,971,706 | 1,861,610 | 23,090 | 20,852 |
+
+### Observed runtime sensitivity
+
+| molecule | r=10 penalty at 1e-5 | r=100 penalty at 1e-5 | r=10 penalty at 1e-2 | r=100 penalty at 1e-2 |
+| --- | ---: | ---: | ---: | ---: |
+| H4 | +191.9565% | +2,112.7804% | +61.2083% | +685.5713% |
+| H5 | +191.3372% | +2,105.0993% | +42.6900% | +472.0327% |
+| H6 | +190.0332% | +2,090.6259% | +18.9305% | +211.2666% |
+| H7 | +188.8494% | +2,077.4546% | +13.4150% | +148.6673% |
+
+reaction=1からのruntime差は、全caseでほぼ
+
+```text
+delta_runtime = measurement_feedback_depth * (reaction_time - 1)
+```
+
+となった。実測deltaを右辺で割ったeffective serial feedback fractionは0.9785-1.00003である。
+feedback depthがほぼ完全に直列critical pathへ入っているため、reaction timeはtested rangeで明確に
+runtime-criticalなarchitecture parameterである。
+
+### Precision interpretation
+
+reaction sensitivityはcheap-RZで縮小したが消失しなかった。`1e-5`ではfeedback depthが大きいため
+r=10だけで約+189-192%、r=100で約+2,077-2,113%となった。`1e-2`ではH-chainが大きいほど
+baseline runtimeに対するfeedback depth比が小さくなり、H7のpenaltyはr=10で+13.4%、r=100で
++148.7%まで縮小した。
+
+したがって、当初候補だった「conventional条件ではmagic supplyに隠れてreaction timeが見えない」
+という解釈は支持されない。現在の回路ではreaction latency自体がmagic injection depthへ直接作用し、
+conventional条件の方が強い古典制御ボトルネックになる。一方、cheap-RZでもreaction latencyは無視
+できず、non-magic architecture探索でreaction=1を使う場合は理想的な高速制御仮定だと明記する。
+
+### Diagnostic-count caveat
+
+詳細diagnosticの`classical_dependency_wait`と`condition_wait`は全caseで0だった。これらはrouting
+instructionがそのbeatで実行失敗した理由のaggregateであり、正常なdependency edgeとしてschedule
+されたreaction latencyを数える指標ではない。したがって0 countはreaction待ち不在を意味しない。
+runtimeの線形増加と固定feedback depthがreaction latencyの直接的な証拠である。
+
+`no_magic_stock`はreaction time増加とともに減少し、r=100では多くのcaseで10-26回となった。
+これはfactory能力が改善したのではなく、feed-forwardで消費側が遅くなり、stock補充時間が増えた
+結果である。stock rejection減少をresource improvementとして解釈しない。
+
+### QEC caveat
+
+大幅なruntime増加によりcode-distance threshold crossingが混在した。例としてconventional H4は
+d=13/15/17、H6はd=15/17/19、cheap H4/H5はr=100でd=13から15へ変わった。QVとphysical-qubit
+増加にはreaction latencyとcode distanceの両方が寄与するため、主結論はbeat runtimeから導く。
+
+### State classification
+
+| item | classification |
+| --- | --- |
+| H4-H7 x 2 precision x 3 reaction timeの24 case成功 | observed |
+| fixed logical workloadとfeedback count/depthの一致 | observed |
+| delta runtimeがfeedback depth x delta reactionに約一致 | observed |
+| reaction timeがserial critical pathへ入る | strongly supported |
+| cheap-RZでreaction sensitivityが縮小する | observed |
+| conventionalでreaction effectがmagic supplyに隠れる仮説 | evaluated and rejected for tested conditions |
+| classical/condition wait count=0がreaction待ち不在を意味する | rejected metric interpretation |
+| reaction=10/100のspecific hardware realism | unresolved / not claimed |
+
+### Execution resources
+
+- 24 caseをtmux内で逐次実行
+- qret peak RSS: 11,482,852 KiB（約10.95 GiB）
+- GNU timeのswap count: 0
+- cgroup guard: `MemoryHigh=44G`, `MemoryMax=48G`
+
+### References
+
+- `configs/surface_code_reaction_time_sweep_h4_h7_4th_paired.yaml`
+- `artifacts/surface_code_reaction_time_sweep_h4_h7_4th_paired/summary.md`
+- `artifacts/surface_code_reaction_time_sweep_h4_h7_4th_paired/results.csv`
+- `artifacts/surface_code_reaction_time_sweep_h4_h7_4th_paired/results.jsonl`

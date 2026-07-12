@@ -91,6 +91,7 @@ def _run_case(
     qret_core: Path,
     qret_core_hash: str,
     diagnostic_patch_hash: str | None,
+    pipeline_overrides: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     work_dir = output_root / ".work" / case_name
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -107,6 +108,7 @@ def _run_case(
     pipeline["output"] = "/dev/null"
     pipeline["sc_ls_fixed_v0_topology"] = str(topology_path)
     pipeline["sc_ls_fixed_v0_dump_compile_info_to_json"] = str(compile_info_path.resolve())
+    pipeline.update(pipeline_overrides or {})
     pipeline_path.write_text(
         yaml.safe_dump(pipeline, sort_keys=False),
         encoding="utf-8",
@@ -178,6 +180,7 @@ def _run_case(
         "molecule": source_row["molecule"],
         "pf_label": source_row["pf_label"],
         "rotation_precision": source_row["rotation_precision"],
+        "reaction_time": int(observed["reaction_time"]),
         "qasm_hash": source_row["qasm_hash"],
         "optimized_ir_hash": source_row["optimized_ir_hash"],
         "source_cache_key": source_row["cache_key"],
@@ -203,6 +206,14 @@ def _run_case(
         "runtime": runtime,
         "runtime_without_topology": runtime_without_topology,
         "runtime_topology_overhead": runtime - runtime_without_topology,
+        "measurement_feedback_count": int(observed["measurement_feedback_count"]),
+        "measurement_feedback_depth": int(observed["measurement_feedback_depth"]),
+        "magic_state_consumption_count": int(
+            observed["magic_state_consumption_count"]
+        ),
+        "magic_state_consumption_depth": int(
+            observed["magic_state_consumption_depth"]
+        ),
         "qubit_volume": int(observed["qubit_volume"]),
         "code_distance": int(observed["code_distance"]),
         "physical_qubits": int(observed["num_physical_qubits"]),

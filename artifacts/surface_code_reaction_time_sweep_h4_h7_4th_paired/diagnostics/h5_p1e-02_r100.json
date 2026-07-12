@@ -1,0 +1,206 @@
+{
+  "attempts_by_type": {
+    "ALLOCATE": 11,
+    "ALLOCATE_MAGIC_FACTORY": 4,
+    "CNOT": 150364,
+    "DEALLOCATE": 25,
+    "HADAMARD": 491382,
+    "LATTICE_SURGERY_MAGIC": 38666,
+    "PROBABILITY_HINT": 1915563,
+    "TWIST": 3283931
+  },
+  "beat_advances": 2072542,
+  "failed_attempts_by_type": {
+    "CNOT": 106044,
+    "DEALLOCATE": 14,
+    "HADAMARD": 385787,
+    "LATTICE_SURGERY_MAGIC": 19728,
+    "PROBABILITY_HINT": 1896625,
+    "TWIST": 2894581
+  },
+  "final_beat": 2072542,
+  "initial_beat": 0,
+  "lattice_surgery_magic_failed_attempts_by_reason": {
+    "no_magic_stock": 12,
+    "qubit_busy": 19712,
+    "target_access_blocked": 4
+  },
+  "loop_iterations": 2649709,
+  "magic_available_factory_count_mean": 3.9974675530231085,
+  "magic_routing_distribution": {
+    "factory_use_count": {
+      "0": 3882,
+      "1": 5060,
+      "2": 7416,
+      "3": 2580
+    },
+    "path_length_histogram": {
+      "1": 5820,
+      "2": 9634,
+      "3": 260,
+      "4": 3217,
+      "5": 2,
+      "6": 1,
+      "7": 2,
+      "9": 2
+    },
+    "target_stats": {
+      "0": {
+        "instruction_count": 4072,
+        "max_path_coordinates": 3,
+        "mean_path_coordinates": 1.5054027504911591,
+        "path_coordinate_count": 6130
+      },
+      "1": {
+        "instruction_count": 3608,
+        "max_path_coordinates": 2,
+        "mean_path_coordinates": 1.5,
+        "path_coordinate_count": 5412
+      },
+      "10": {
+        "instruction_count": 18,
+        "max_path_coordinates": 3,
+        "mean_path_coordinates": 3.0,
+        "path_coordinate_count": 54
+      },
+      "2": {
+        "instruction_count": 3144,
+        "max_path_coordinates": 2,
+        "mean_path_coordinates": 2.0,
+        "path_coordinate_count": 6288
+      },
+      "3": {
+        "instruction_count": 1856,
+        "max_path_coordinates": 2,
+        "mean_path_coordinates": 1.5,
+        "path_coordinate_count": 2784
+      },
+      "4": {
+        "instruction_count": 1336,
+        "max_path_coordinates": 9,
+        "mean_path_coordinates": 4.014970059880239,
+        "path_coordinate_count": 5364
+      },
+      "5": {
+        "instruction_count": 1888,
+        "max_path_coordinates": 4,
+        "mean_path_coordinates": 4.0,
+        "path_coordinate_count": 7552
+      },
+      "6": {
+        "instruction_count": 2104,
+        "max_path_coordinates": 3,
+        "mean_path_coordinates": 1.5019011406844107,
+        "path_coordinate_count": 3160
+      },
+      "7": {
+        "instruction_count": 312,
+        "max_path_coordinates": 2,
+        "mean_path_coordinates": 2.0,
+        "path_coordinate_count": 624
+      },
+      "8": {
+        "instruction_count": 384,
+        "max_path_coordinates": 2,
+        "mean_path_coordinates": 2.0,
+        "path_coordinate_count": 768
+      },
+      "9": {
+        "instruction_count": 216,
+        "max_path_coordinates": 3,
+        "mean_path_coordinates": 3.0,
+        "path_coordinate_count": 648
+      }
+    }
+  },
+  "magic_stock_sample_count": 18954,
+  "magic_total_stock_max": 40000,
+  "magic_total_stock_mean": 38013.03677324048,
+  "magic_total_stock_min": 0,
+  "max_consecutive_no_run_beats": 100,
+  "other_beat_advances": 0,
+  "path_stats_by_type": {
+    "ALLOCATE": {
+      "instruction_count": 11,
+      "max_path_coordinates": 0,
+      "mean_path_coordinates_per_instruction": 0.0,
+      "mean_path_coordinates_per_nonempty_path": 0.0,
+      "nonempty_path_count": 0,
+      "path_coordinate_count": 0
+    },
+    "ALLOCATE_MAGIC_FACTORY": {
+      "instruction_count": 4,
+      "max_path_coordinates": 0,
+      "mean_path_coordinates_per_instruction": 0.0,
+      "mean_path_coordinates_per_nonempty_path": 0.0,
+      "nonempty_path_count": 0,
+      "path_coordinate_count": 0
+    },
+    "CNOT": {
+      "instruction_count": 44320,
+      "max_path_coordinates": 14,
+      "mean_path_coordinates_per_instruction": 4.71985559566787,
+      "mean_path_coordinates_per_nonempty_path": 4.71985559566787,
+      "nonempty_path_count": 44320,
+      "path_coordinate_count": 209184
+    },
+    "DEALLOCATE": {
+      "instruction_count": 11,
+      "max_path_coordinates": 0,
+      "mean_path_coordinates_per_instruction": 0.0,
+      "mean_path_coordinates_per_nonempty_path": 0.0,
+      "nonempty_path_count": 0,
+      "path_coordinate_count": 0
+    },
+    "HADAMARD": {
+      "instruction_count": 105595,
+      "max_path_coordinates": 0,
+      "mean_path_coordinates_per_instruction": 0.0,
+      "mean_path_coordinates_per_nonempty_path": 0.0,
+      "nonempty_path_count": 0,
+      "path_coordinate_count": 0
+    },
+    "LATTICE_SURGERY_MAGIC": {
+      "instruction_count": 18938,
+      "max_path_coordinates": 9,
+      "mean_path_coordinates_per_instruction": 2.047945928820361,
+      "mean_path_coordinates_per_nonempty_path": 2.047945928820361,
+      "nonempty_path_count": 18938,
+      "path_coordinate_count": 38784
+    },
+    "PROBABILITY_HINT": {
+      "instruction_count": 18938,
+      "max_path_coordinates": 0,
+      "mean_path_coordinates_per_instruction": 0.0,
+      "mean_path_coordinates_per_nonempty_path": 0.0,
+      "nonempty_path_count": 0,
+      "path_coordinate_count": 0
+    },
+    "TWIST": {
+      "instruction_count": 389350,
+      "max_path_coordinates": 0,
+      "mean_path_coordinates_per_instruction": 0.0,
+      "mean_path_coordinates_per_nonempty_path": 0.0,
+      "nonempty_path_count": 0,
+      "path_coordinate_count": 0
+    }
+  },
+  "queue_release_events": 0,
+  "queue_released_instructions": 0,
+  "reserved_only_beat_advances": 0,
+  "runnable_blocked_beat_advances": 2072542,
+  "schema_version": "qret_routing_failure_diagnostic_v2",
+  "simulator_num_2beat_trans_move": 0,
+  "split_iterations": 0,
+  "successful_instruction_runs": 577167,
+  "successful_runs_by_type": {
+    "ALLOCATE": 11,
+    "ALLOCATE_MAGIC_FACTORY": 4,
+    "CNOT": 44320,
+    "DEALLOCATE": 11,
+    "HADAMARD": 105595,
+    "LATTICE_SURGERY_MAGIC": 18938,
+    "PROBABILITY_HINT": 18938,
+    "TWIST": 389350
+  }
+}
