@@ -131,12 +131,16 @@ def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
 
 
 def _workload_differences(
-    source: Mapping[str, Any], observed: Mapping[str, Any], factory_count: int
+    source: Mapping[str, Any],
+    observed: Mapping[str, Any],
+    factory_count: int,
+    ignored_fields: Sequence[str] = (),
 ) -> dict[str, Any]:
+    ignored = set(ignored_fields)
     differences = {
         field: {"source": source.get(field), "observed": observed.get(field)}
         for field in WORKLOAD_INVARIANT_FIELDS
-        if source.get(field) != observed.get(field)
+        if field not in ignored and source.get(field) != observed.get(field)
     }
     source_detail = dict(source.get("gate_count_detail", {}))
     observed_detail = dict(observed.get("gate_count_detail", {}))
@@ -172,6 +176,7 @@ def _run_case(
     precision: float,
     factory_count: int,
     *,
+    case_name: str | None = None,
     source_row: Mapping[str, str],
     source_yaml: Path,
     source_compile_info: Mapping[str, Any],
@@ -183,8 +188,9 @@ def _run_case(
     qret_core: Path,
     qret_core_hash: str,
     force: bool,
+    workload_ignored_fields: Sequence[str] = (),
 ) -> dict[str, Any]:
-    name = _case_name(molecule, precision, factory_count)
+    name = case_name or _case_name(molecule, precision, factory_count)
     checkpoint_path = output_root / "checkpoints" / f"{name}.json"
     topology_path = _resolve(topology_record["topology_path"])
     topology_hash = routing._sha256(topology_path)
@@ -196,6 +202,13 @@ def _run_case(
             and checkpoint.get("topology_hash") == topology_hash
             and checkpoint.get("source_cache_key") == source_row["cache_key"]
             and int(checkpoint.get("factory_count", -1)) == factory_count
+            and int(checkpoint.get("magic_generation_period", -1))
+            == int(fixed["magic_generation_period"])
+            and int(checkpoint.get("maximum_magic_state_stock", -1))
+            == int(fixed["maximum_magic_state_stock"])
+            and int(checkpoint.get("reaction_time", -1)) == int(fixed["reaction_time"])
+            and checkpoint.get("workload_ignored_fields", [])
+            == list(workload_ignored_fields)
         ):
             return checkpoint
 
@@ -277,7 +290,10 @@ def _run_case(
 
     observed = routing._load_json(compile_info_path)
     workload_differences = _workload_differences(
-        source_compile_info, observed, factory_count
+        source_compile_info,
+        observed,
+        factory_count,
+        ignored_fields=workload_ignored_fields,
     )
     gate_detail = dict(observed.get("gate_count_detail", {}))
     runtime = int(observed["runtime"])
@@ -331,8 +347,15 @@ def _run_case(
         "measurement_feedback_depth": int(observed["measurement_feedback_depth"]),
         "magic_state_consumption_count": int(observed["magic_state_consumption_count"]),
         "magic_state_consumption_depth": int(observed["magic_state_consumption_depth"]),
+        "runtime_estimation_magic_state_consumption_count": int(
+            observed["runtime_estimation_magic_state_consumption_count"]
+        ),
+        "runtime_estimation_magic_state_consumption_depth": int(
+            observed["runtime_estimation_magic_state_consumption_depth"]
+        ),
         "fixed_logical_workload_match": not workload_differences,
         "workload_differences": workload_differences,
+        "workload_ignored_fields": list(workload_ignored_fields),
         "compile_info_path": _display(compile_info_path),
         "elapsed_seconds": elapsed,
         "gnu_time_max_rss_kb": int(

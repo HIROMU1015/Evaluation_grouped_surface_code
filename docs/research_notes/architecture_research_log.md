@@ -8,6 +8,9 @@
 
 各追記では、目的、条件、観測、解釈、未解決点、次の作業を分けて書く。
 
+各sweepをruntime/QVの基準比で横断比較した統合レポートは
+[`dim2_architecture_relative_effect_report.md`](dim2_architecture_relative_effect_report.md)を参照する。
+
 ## 2026-07-07: H2-H11 topology sweep の同一PF固定解析
 
 ### 目的

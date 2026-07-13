@@ -1,0 +1,71 @@
+experiment: fixed_circuit_magic_generation_period_sweep_cheap_rz
+schema_version: 1
+
+source:
+  results_csv: artifacts/surface_code_grid_capacity_sweep_h4_h7_4th/results.csv
+  topology_name: aware_10x10
+  pf_label: 4th(new_2)
+
+topology_manifest: configs/topologies/accessible_factory_count_h4_h7_4th/accessible_factory_count_manifest.json
+
+primary_molecules:
+  - H4
+  - H5
+  - H6
+
+conditional_molecules:
+  - H7
+
+rotation_precisions:
+  - 1.0e-2
+
+magic_generation_periods:
+  - 1
+  - 4
+  - 15
+  - 30
+  - 100
+
+fixed_conditions:
+  factory_count: 4
+  grid_size: [10, 10]
+  machine_type: Dim2
+  usable_non_factory_cells: 96
+  minimum_free_egress_per_factory: 2
+  magic_generation_period: 15
+  maximum_magic_state_stock: 10000
+  entanglement_generation_period: 100
+  maximum_entangled_state_stock: 10
+  reaction_time: 1
+  physical_error_rate: 0.001
+  drop_rate: 0.1
+  code_cycle_time_sec: 0.000001
+  allowed_failure_prob: 0.01
+
+comparison_policy:
+  ideal_reference_period: 1
+  standard_baseline_period: 15
+  compare_within_precision: true
+  material_runtime_threshold_pct: 1.0
+  h7_trigger_periods:
+    - 30
+    - 100
+  h7_policy: run_if_h6_has_at_least_one_material_runtime_change_vs_period_15
+
+execution:
+  case_parallelism: 6
+  aggregate_memory_high: 32G
+  aggregate_memory_max: 40G
+
+primary_metrics:
+  - runtime
+  - runtime_change_vs_period_1
+  - runtime_change_vs_period_15
+
+secondary_metrics:
+  - runtime_without_topology
+  - qubit_volume
+  - code_distance
+  - physical_qubits
+
+output_directory: artifacts/surface_code_magic_period_sweep_h4_h7_4th_cheap_rz

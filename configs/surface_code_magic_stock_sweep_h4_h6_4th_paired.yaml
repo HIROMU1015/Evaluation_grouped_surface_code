@@ -1,0 +1,69 @@
+experiment: fixed_circuit_magic_stock_sweep_paired_precision
+schema_version: 1
+
+source:
+  results_csv: artifacts/surface_code_grid_capacity_sweep_h4_h7_4th/results.csv
+  topology_name: aware_10x10
+  pf_label: 4th(new_2)
+
+topology_manifest: configs/topologies/accessible_factory_count_h4_h7_4th/accessible_factory_count_manifest.json
+
+molecules:
+  - H4
+  - H5
+  - H6
+
+rotation_precisions:
+  - 1.0e-5
+  - 1.0e-2
+
+maximum_magic_state_stocks:
+  - 1
+  - 4
+  - 16
+  - 64
+  - 10000
+
+fixed_conditions:
+  factory_count: 4
+  grid_size: [10, 10]
+  machine_type: Dim2
+  usable_non_factory_cells: 96
+  minimum_free_egress_per_factory: 2
+  magic_generation_period: 15
+  maximum_magic_state_stock: 10000
+  entanglement_generation_period: 100
+  maximum_entangled_state_stock: 10
+  reaction_time: 1
+  physical_error_rate: 0.001
+  drop_rate: 0.1
+  code_cycle_time_sec: 0.000001
+  allowed_failure_prob: 0.01
+
+comparison_policy:
+  baseline_stock: 10000
+  compare_within_precision: true
+  compare_absolute_runtime_across_precision: false
+  saturation_runtime_threshold_pct: 1.0
+  add_intermediate_stocks_if_stock_64_is_unsaturated:
+    - 256
+    - 1024
+  h7_policy: run_only_if_h4_h6_do_not_resolve_stock_saturation_or_show_unresolved_size_trend
+
+execution:
+  case_parallelism: 6
+  aggregate_memory_high: 32G
+  aggregate_memory_max: 40G
+
+primary_metrics:
+  - runtime
+  - runtime_change_vs_stock_10000
+  - saturation_stock
+
+secondary_metrics:
+  - runtime_without_topology
+  - qubit_volume
+  - code_distance
+  - physical_qubits
+
+output_directory: artifacts/surface_code_magic_stock_sweep_h4_h6_4th_paired
