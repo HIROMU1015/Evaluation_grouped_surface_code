@@ -1,0 +1,585 @@
+{
+  "entanglement_factory_endpoint_count": 2,
+  "entanglement_link_count": 1,
+  "machine_type": "DistributedDim2",
+  "magic_factory_count": 4,
+  "molecules": {
+    "H4": {
+      "num_logical_qubits": 9,
+      "partitions": {
+        "high_cut": "h4_high_cut",
+        "low_cut": "h4_low_cut"
+      },
+      "qasm_path": "artifacts/surface_code_cache/gr/prepared_step/H4_sto-3g_singlet_distance_100_charge_0_grouping__4th_new_2_/e864207184fb9d8d/step.qasm",
+      "qasm_sha256": "8690906cc9b138208b404e19cbe63537f4939ef24d3a0bfd4144174f03d90e82",
+      "weighted_cnot_count": 15128,
+      "weighted_cnot_edge_count": 36
+    },
+    "H7": {
+      "num_logical_qubits": 15,
+      "partitions": {
+        "high_cut": "h7_high_cut",
+        "low_cut": "h7_low_cut"
+      },
+      "qasm_path": "artifacts/surface_code_cache/gr/prepared_step/H7_sto-3g_triplet_1__distance_100_charge_1_grouping__4th_new_2_/94a3628e1683d4d0/step.qasm",
+      "qasm_sha256": "4406dbfd1fb59a7affb9165a4d61736887111abad5a640859ebc38f0585c6fac",
+      "weighted_cnot_count": 228312,
+      "weighted_cnot_edge_count": 105
+    }
+  },
+  "partition_conditions": [
+    "low_cut",
+    "high_cut"
+  ],
+  "pf_label": "4th(new_2)",
+  "plane_count": 2,
+  "plane_size": [
+    10,
+    10
+  ],
+  "plane_z_coordinates": [
+    0,
+    2
+  ],
+  "schema_version": "distributed_dim2_topology_v1",
+  "total_logical_cells": 200,
+  "usable_non_factory_cells": 194,
+  "variants": {
+    "h4_high_cut": {
+      "entanglement_factory_endpoint_count": 2,
+      "entanglement_link_count": 1,
+      "logical_mapping": [
+        {
+          "coord": [
+            4,
+            4
+          ],
+          "logical_qubit": 0,
+          "plane_z": 0
+        },
+        {
+          "coord": [
+            4,
+            6
+          ],
+          "logical_qubit": 1,
+          "plane_z": 0
+        },
+        {
+          "coord": [
+            6,
+            4
+          ],
+          "logical_qubit": 2,
+          "plane_z": 0
+        },
+        {
+          "coord": [
+            6,
+            6
+          ],
+          "logical_qubit": 4,
+          "plane_z": 0
+        },
+        {
+          "coord": [
+            6,
+            4
+          ],
+          "logical_qubit": 3,
+          "plane_z": 2
+        },
+        {
+          "coord": [
+            4,
+            6
+          ],
+          "logical_qubit": 5,
+          "plane_z": 2
+        },
+        {
+          "coord": [
+            4,
+            4
+          ],
+          "logical_qubit": 6,
+          "plane_z": 2
+        },
+        {
+          "coord": [
+            6,
+            6
+          ],
+          "logical_qubit": 7,
+          "plane_z": 2
+        },
+        {
+          "coord": [
+            3,
+            2
+          ],
+          "logical_qubit": 8,
+          "plane_z": 2
+        }
+      ],
+      "logical_qubit_count_by_plane": {
+        "0": 4,
+        "2": 5
+      },
+      "logical_qubits_by_plane": {
+        "0": [
+          0,
+          1,
+          2,
+          4
+        ],
+        "2": [
+          3,
+          5,
+          6,
+          7,
+          8
+        ]
+      },
+      "magic_factory_count": 4,
+      "molecule": "H4",
+      "partition": "high_cut",
+      "topology_path": "configs/topologies/distributed_dim2_h4_h7_4th/h4_high_cut.yaml",
+      "topology_sha256": "8ddfa19307fa8c434f91c84a22bcc9846935563062e6adc9fd4c12a2fa8629fe",
+      "total_logical_cells": 200,
+      "usable_non_factory_cells": 194,
+      "weighted_interplane_cnot_count": 10252,
+      "weighted_interplane_cnot_fraction": 0.677683765203596,
+      "weighted_local_and_endpoint_distance": 194784
+    },
+    "h4_low_cut": {
+      "entanglement_factory_endpoint_count": 2,
+      "entanglement_link_count": 1,
+      "logical_mapping": [
+        {
+          "coord": [
+            4,
+            4
+          ],
+          "logical_qubit": 0,
+          "plane_z": 0
+        },
+        {
+          "coord": [
+            4,
+            6
+          ],
+          "logical_qubit": 1,
+          "plane_z": 0
+        },
+        {
+          "coord": [
+            6,
+            4
+          ],
+          "logical_qubit": 2,
+          "plane_z": 0
+        },
+        {
+          "coord": [
+            6,
+            6
+          ],
+          "logical_qubit": 8,
+          "plane_z": 0
+        },
+        {
+          "coord": [
+            4,
+            6
+          ],
+          "logical_qubit": 3,
+          "plane_z": 2
+        },
+        {
+          "coord": [
+            6,
+            4
+          ],
+          "logical_qubit": 4,
+          "plane_z": 2
+        },
+        {
+          "coord": [
+            3,
+            2
+          ],
+          "logical_qubit": 5,
+          "plane_z": 2
+        },
+        {
+          "coord": [
+            4,
+            4
+          ],
+          "logical_qubit": 6,
+          "plane_z": 2
+        },
+        {
+          "coord": [
+            6,
+            6
+          ],
+          "logical_qubit": 7,
+          "plane_z": 2
+        }
+      ],
+      "logical_qubit_count_by_plane": {
+        "0": 4,
+        "2": 5
+      },
+      "logical_qubits_by_plane": {
+        "0": [
+          0,
+          1,
+          2,
+          8
+        ],
+        "2": [
+          3,
+          4,
+          5,
+          6,
+          7
+        ]
+      },
+      "magic_factory_count": 4,
+      "molecule": "H4",
+      "partition": "low_cut",
+      "topology_path": "configs/topologies/distributed_dim2_h4_h7_4th/h4_low_cut.yaml",
+      "topology_sha256": "022de325b6e2de18f66f577352a5329985b4ab13db4b30ff5de82d415b44e2fe",
+      "total_logical_cells": 200,
+      "usable_non_factory_cells": 194,
+      "weighted_interplane_cnot_count": 7480,
+      "weighted_interplane_cnot_fraction": 0.4944473823373876,
+      "weighted_local_and_endpoint_distance": 156760
+    },
+    "h7_high_cut": {
+      "entanglement_factory_endpoint_count": 2,
+      "entanglement_link_count": 1,
+      "logical_mapping": [
+        {
+          "coord": [
+            3,
+            2
+          ],
+          "logical_qubit": 0,
+          "plane_z": 0
+        },
+        {
+          "coord": [
+            4,
+            4
+          ],
+          "logical_qubit": 1,
+          "plane_z": 0
+        },
+        {
+          "coord": [
+            6,
+            4
+          ],
+          "logical_qubit": 2,
+          "plane_z": 0
+        },
+        {
+          "coord": [
+            7,
+            2
+          ],
+          "logical_qubit": 3,
+          "plane_z": 0
+        },
+        {
+          "coord": [
+            6,
+            6
+          ],
+          "logical_qubit": 6,
+          "plane_z": 0
+        },
+        {
+          "coord": [
+            3,
+            8
+          ],
+          "logical_qubit": 7,
+          "plane_z": 0
+        },
+        {
+          "coord": [
+            4,
+            6
+          ],
+          "logical_qubit": 8,
+          "plane_z": 0
+        },
+        {
+          "coord": [
+            4,
+            4
+          ],
+          "logical_qubit": 4,
+          "plane_z": 2
+        },
+        {
+          "coord": [
+            4,
+            6
+          ],
+          "logical_qubit": 5,
+          "plane_z": 2
+        },
+        {
+          "coord": [
+            6,
+            4
+          ],
+          "logical_qubit": 9,
+          "plane_z": 2
+        },
+        {
+          "coord": [
+            7,
+            2
+          ],
+          "logical_qubit": 10,
+          "plane_z": 2
+        },
+        {
+          "coord": [
+            3,
+            8
+          ],
+          "logical_qubit": 11,
+          "plane_z": 2
+        },
+        {
+          "coord": [
+            6,
+            6
+          ],
+          "logical_qubit": 12,
+          "plane_z": 2
+        },
+        {
+          "coord": [
+            7,
+            8
+          ],
+          "logical_qubit": 13,
+          "plane_z": 2
+        },
+        {
+          "coord": [
+            3,
+            2
+          ],
+          "logical_qubit": 14,
+          "plane_z": 2
+        }
+      ],
+      "logical_qubit_count_by_plane": {
+        "0": 7,
+        "2": 8
+      },
+      "logical_qubits_by_plane": {
+        "0": [
+          0,
+          1,
+          2,
+          3,
+          6,
+          7,
+          8
+        ],
+        "2": [
+          4,
+          5,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14
+        ]
+      },
+      "magic_factory_count": 4,
+      "molecule": "H7",
+      "partition": "high_cut",
+      "topology_path": "configs/topologies/distributed_dim2_h4_h7_4th/h7_high_cut.yaml",
+      "topology_sha256": "c8629e6b271b904418974b5cab4b430ebcc74d4109fabc295d12b9690388dc19",
+      "total_logical_cells": 200,
+      "usable_non_factory_cells": 194,
+      "weighted_interplane_cnot_count": 139280,
+      "weighted_interplane_cnot_fraction": 0.6100423981218683,
+      "weighted_local_and_endpoint_distance": 2772612
+    },
+    "h7_low_cut": {
+      "entanglement_factory_endpoint_count": 2,
+      "entanglement_link_count": 1,
+      "logical_mapping": [
+        {
+          "coord": [
+            3,
+            2
+          ],
+          "logical_qubit": 0,
+          "plane_z": 0
+        },
+        {
+          "coord": [
+            4,
+            4
+          ],
+          "logical_qubit": 1,
+          "plane_z": 0
+        },
+        {
+          "coord": [
+            6,
+            4
+          ],
+          "logical_qubit": 2,
+          "plane_z": 0
+        },
+        {
+          "coord": [
+            4,
+            6
+          ],
+          "logical_qubit": 3,
+          "plane_z": 0
+        },
+        {
+          "coord": [
+            6,
+            6
+          ],
+          "logical_qubit": 4,
+          "plane_z": 0
+        },
+        {
+          "coord": [
+            3,
+            8
+          ],
+          "logical_qubit": 5,
+          "plane_z": 0
+        },
+        {
+          "coord": [
+            7,
+            2
+          ],
+          "logical_qubit": 14,
+          "plane_z": 0
+        },
+        {
+          "coord": [
+            3,
+            8
+          ],
+          "logical_qubit": 6,
+          "plane_z": 2
+        },
+        {
+          "coord": [
+            6,
+            6
+          ],
+          "logical_qubit": 7,
+          "plane_z": 2
+        },
+        {
+          "coord": [
+            6,
+            4
+          ],
+          "logical_qubit": 8,
+          "plane_z": 2
+        },
+        {
+          "coord": [
+            4,
+            4
+          ],
+          "logical_qubit": 9,
+          "plane_z": 2
+        },
+        {
+          "coord": [
+            3,
+            2
+          ],
+          "logical_qubit": 10,
+          "plane_z": 2
+        },
+        {
+          "coord": [
+            7,
+            2
+          ],
+          "logical_qubit": 11,
+          "plane_z": 2
+        },
+        {
+          "coord": [
+            4,
+            6
+          ],
+          "logical_qubit": 12,
+          "plane_z": 2
+        },
+        {
+          "coord": [
+            7,
+            8
+          ],
+          "logical_qubit": 13,
+          "plane_z": 2
+        }
+      ],
+      "logical_qubit_count_by_plane": {
+        "0": 7,
+        "2": 8
+      },
+      "logical_qubits_by_plane": {
+        "0": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          14
+        ],
+        "2": [
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13
+        ]
+      },
+      "magic_factory_count": 4,
+      "molecule": "H7",
+      "partition": "low_cut",
+      "topology_path": "configs/topologies/distributed_dim2_h4_h7_4th/h7_low_cut.yaml",
+      "topology_sha256": "f5a5d199c18142152da7071265e090f9974e7b7f363f6c695df83f3a8e097276",
+      "total_logical_cells": 200,
+      "usable_non_factory_cells": 194,
+      "weighted_interplane_cnot_count": 94848,
+      "weighted_interplane_cnot_fraction": 0.4154315147692631,
+      "weighted_local_and_endpoint_distance": 2258936
+    }
+  }
+}

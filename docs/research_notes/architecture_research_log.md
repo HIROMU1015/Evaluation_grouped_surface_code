@@ -1982,3 +1982,174 @@ usable capacityをさらに減らしたhard-threshold近傍ではroutingがcriti
 - `artifacts/surface_code_routing_capacity_sweep_h4_h7_4th_paired/summary.md`
 - `artifacts/surface_code_routing_capacity_sweep_h4_h7_4th_paired/results.csv`
 - `artifacts/surface_code_routing_capacity_sweep_h4_h7_4th_paired/results.jsonl`
+
+## 2026-07-13: paired-precision DistributedDim2 communication sweep
+
+### Question and design
+
+single-plane Dim2で明示的なrouting距離を増やしてもruntime penaltyは最大+0.1080%だったため、
+通信そのものに供給周期を持つDistributedDim2で、plane間通信がfixed-circuit runtimeのcritical
+pathへ入るかを調べた。
+
+H4とH7、`4th(new_2)`、`rotation_precision=1e-5, 1e-2`について、各10x10の2 plane、
+各plane 2個のmagic factory、1本のentanglement link、reaction time=1を固定した。logical qubit数を
+plane間で均衡させたまま、weighted inter-plane CNOT countが小さい`low_cut`と大きい`high_cut`を
+作り、entanglement generation periodを1、15、100へ変えた。合計24 caseである。
+
+各molecule/precision内ではQASM hashとoptimized-IR hashが共通である。periodだけを変える比較では、
+gate、magic、measurement feedback、entanglementのcount/depthがすべて一致した。precision間では
+回路が異なるため、絶対runtime差をarchitecture effectとして扱わない。
+
+### Conventional-precision observations
+
+`rotation_precision=1e-5`では、H4のruntimeは両partitionともperiod 1/15/100で不変だった。
+H7 `low_cut`も不変で、H7 `high_cut`だけがperiod 100でperiod 1比+11.3845%となった。
+
+| molecule | partition | period 15 vs 1 | period 100 vs 1 |
+| --- | --- | ---: | ---: |
+| H4 | low_cut | +0.0000% | +0.0000% |
+| H4 | high_cut | +0.0000% | +0.0000% |
+| H7 | low_cut | +0.0000% | +0.0000% |
+| H7 | high_cut | +0.0000% | +11.3845% |
+
+このregimeではRZ synthesis、magic、local scheduleが長く、entanglement生成を多くの場合その背後で
+進められる。したがって、通信periodを遅くしただけでは直ちにruntimeへ現れず、H7 high-cutの
+period 100で初めて通信供給が既存critical pathを超えたと解釈できる。
+
+### Cheap-RZ observations
+
+`rotation_precision=1e-2`では通信period感度が明確になった。
+
+| molecule | partition | period 15 vs 1 | period 100 vs 1 |
+| --- | --- | ---: | ---: |
+| H4 | low_cut | +0.0000% | +438.0120% |
+| H4 | high_cut | +13.7035% | +643.5159% |
+| H7 | low_cut | +11.6379% | +637.6499% |
+| H7 | high_cut | +67.5359% | +1010.9017% |
+
+H7 high-cut・period 100はperiod 1の約11.11倍になった。period 100ではhigh-cutがlow-cutよりH4で
+37.0313%、H7で46.8222%遅かった。さらにperiod 100のruntimeは概ね
+`entanglement consumption count * period`へ近づき、H7 high-cutではこのcount estimateとの差が
+97 beatだけだった。これはslow-link条件でentanglement生成数がruntimeをほぼ直接決めたことを示す。
+
+一方、period 1ではhigh-cutがlow-cutよりH4で0.8434%、H7で2.5086%短かった。したがって、cut数を
+増やせば常に遅くなるわけではない。高速linkではpartitionに伴うlocal placement / routing差が
+通信需要差より大きくなり、小さい順位変化を生む可能性がある。
+
+### Interpretation and caveats
+
+single-planeのtested routing chokeとは異なり、DistributedDim2のentanglement generation periodと
+logical partitionは、cheap-RZでruntimeを数倍から11倍へ変えるarchitecture条件だった。cheap-RZは
+architecture差を常に拡大するのではなく、削減されたworkloadの背後に隠れていた通信待ちをcritical
+pathへ露出させたと整理する。
+
+ただし、これは2 plane、1 link、deterministic generation、large stockというqretモデル上の診断で
+ある。link loss、fidelity、retry、purification、network contention、複数link routingを含む実機
+network評価ではない。H7 cheap-RZ period 100ではcode distanceが15から17へ変化したためQV差には
+QEC threshold crossingも含まれるが、beat runtimeの主結論には影響しない。
+
+### State classification
+
+| item | classification |
+| --- | --- |
+| H4/H7 x 2 precision x 2 partition x 3 periodの24 case成功 | observed |
+| period内のfixed lowered workload一致 | observed |
+| cheap-RZ H7 high-cut period 100がperiod 1比+1010.9017% | observed |
+| slow-linkでruntimeがentanglement count estimateへ接近 | observed |
+| communication periodとpartitionがlarge-runtime architecture condition | supported for tested DistributedDim2 model |
+| conventional workloadが通信待ちを多くの場合隠蔽する | inference from paired regimes |
+| 実機networkのloss / fidelity / contentionを含む評価 | unimplemented |
+
+### Execution resources
+
+- qret peak RSS: 4,501,536 KiB（約4.29 GiB）
+- GNU timeのswap count: 0
+- 前半18 caseは逐次、最後のH7 cheap-RZ 6 caseは最大6並列
+- aggregate parallel guard: `MemoryHigh=32G`, `MemoryMax=40G`
+
+### References
+
+- `configs/surface_code_distributed_dim2_sweep_h4_h7_4th_paired.yaml`
+- `configs/topologies/distributed_dim2_h4_h7_4th/distributed_dim2_manifest.json`
+- `scripts/generate_distributed_dim2_topologies.py`
+- `scripts/run_distributed_dim2_sweep.py`
+- `artifacts/surface_code_distributed_dim2_sweep_h4_h7_4th_paired/summary.md`
+- `artifacts/surface_code_distributed_dim2_sweep_h4_h7_4th_paired/results.csv`
+- `artifacts/surface_code_distributed_dim2_sweep_h4_h7_4th_paired/results.jsonl`
+
+## 2026-07-13: paired-precision Dim2 factory-saturation sweep above four factories
+
+### Question and design
+
+以前のfactory-count sweepでは、1-3 factoryがmagic supply律速で、4 factoryで単純な逆数則から
+外れることを確認した。ただし4 factoryから先がruntime上完全に飽和しているかは未解決だった。
+
+そこでH4-H6、`4th(new_2)`、`rotation_precision=1e-5, 1e-2`について、active factoryを4、6、8へ
+増やした。10x10 plane内の中央8 cellを全caseでfactoryまたはbanとして予約し、inactive factory
+座標をbanへ置換した。このためfactory + banは8、usable non-factory cellは92で固定される。
+logical mapping、magic period=15、stock=10000、reaction time=1、QEC入力も固定した。
+
+factory集合はnestedで、symbol 0-3の座標を全countで維持した。全active factoryに初期free egressを
+最低1つ確保した。H4-H6 x 2 precision x 3 countの18 caseを最大6並列で実行した。H7はruntime差が
+1%を超えた場合だけ追加する事前方針とした。
+
+### Observed runtime saturation
+
+4 factoryから8 factoryへのruntime reductionは次のとおりだった。
+
+| molecule | reduction at 1e-5 | reduction at 1e-2 | 6-to-8 residual at 1e-5 | 6-to-8 residual at 1e-2 |
+| --- | ---: | ---: | ---: | ---: |
+| H4 | 0.0970% | 0.4501% | 0.0306% | 0.0000% |
+| H5 | 0.0409% | 0.1697% | 0.0130% | 0.0000% |
+| H6 | 0.0752% | 0.4344% | 0.0061% | 0.0000% |
+
+最大効果はH4 cheap-RZの0.4501%で、全groupが事前の1%閾値を下回った。cheap-RZでは6と8の
+runtimeが全分子で完全に一致した。conventionalでも6から8の残差は最大0.0306%だった。
+
+以前の1-4 sweepと合わせると、tested H4-H6条件ではfactory throughputの主要なkneeは3から4の間に
+あり、4を超える追加factoryはruntimeを実質的に改善しない。したがって、今後のsingle-plane
+non-magic architecture探索で4 factoryを共通baselineとする判断が強化された。H7追加条件は満たさず、
+計算量を抑える事前方針どおり実行しなかった。
+
+### Space-resource response and caveats
+
+runtimeがほぼ不変でも、4から8でconventional QVはH4/H5/H6について5.6195%、3.4865%、
+4.3135%減少した。cheap-RZのQV減少は最大1.0699%だった。各molecule/precision内でcode distanceは
+共通なので、このQV差にQEC threshold crossingは混在しない。追加factoryによるnearest-source距離
+短縮やmagic delivery occupancyの減少がspace-time volumeへ効いた可能性があるが、直接のfactory
+利用分布は今回取得していないためinferenceとする。
+
+このsweepは全caseで8 cellを予約しているため、通常の4-cell factory budget baselineとの絶対比較には
+使わない。また、active factory追加により供給throughputとnearest-source geometryが同時に変わる。
+したがって純粋な生成throughputだけの介入ではない。ただし、同一の8-cell routing障害、logical
+mapping、回路を保ったまま、4を超えるaccessible sourceの追加価値が1%未満であることは直接観測した。
+
+### State classification
+
+| item | classification |
+| --- | --- |
+| H4-H6 x 2 precision x factory 4/6/8の18 case成功 | observed |
+| QASM / optimized IR / non-factory workload一致 | observed |
+| factory + ban=8、usable non-factory cell=92 | observed |
+| 4-to-8 runtime reductionが全groupで0.4501%以下 | observed |
+| 6-to-8 cheap-RZ runtimeが全groupで同一 | observed |
+| 4 factoryがruntime baselineとして十分 | supported for tested H4-H6 fixed-budget conditions |
+| H7追加検証 | not triggered by predeclared 1% threshold; intentionally not run |
+| QV低下がdelivery occupancy短縮に由来する | inference |
+
+### Execution resources
+
+- 18 caseを最大6並列で実行
+- qret peak RSS: 1,741,516 KiB（約1.66 GiB）
+- GNU timeのswap count: 0
+- aggregate guard: `MemoryHigh=32G`, `MemoryMax=40G`
+
+### References
+
+- `configs/surface_code_factory_saturation_sweep_h4_h6_4th_paired.yaml`
+- `configs/topologies/factory_saturation_h4_h6_4th/factory_saturation_manifest.json`
+- `scripts/generate_factory_saturation_topologies.py`
+- `scripts/run_factory_saturation_sweep.py`
+- `artifacts/surface_code_factory_saturation_sweep_h4_h6_4th_paired/summary.md`
+- `artifacts/surface_code_factory_saturation_sweep_h4_h6_4th_paired/results.csv`
+- `artifacts/surface_code_factory_saturation_sweep_h4_h6_4th_paired/results.jsonl`

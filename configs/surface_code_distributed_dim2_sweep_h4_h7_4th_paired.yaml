@@ -1,0 +1,83 @@
+experiment: fixed_circuit_distributed_dim2_entanglement_sweep
+schema_version: 1
+
+source:
+  results_csv: artifacts/surface_code_grid_capacity_sweep_h4_h7_4th/results.csv
+  topology_name: aware_10x10
+  pf_label: 4th(new_2)
+
+topology_manifest: configs/topologies/distributed_dim2_h4_h7_4th/distributed_dim2_manifest.json
+
+molecules:
+  - H4
+  - H7
+
+rotation_precisions:
+  - 1.0e-5
+  - 1.0e-2
+
+partitions:
+  - low_cut
+  - high_cut
+
+entanglement_generation_periods:
+  - 1
+  - 15
+  - 100
+
+fixed_conditions:
+  machine_type: DistributedDim2
+  plane_count: 2
+  plane_size: [10, 10]
+  total_logical_cells: 200
+  usable_non_factory_cells: 194
+  magic_factory_count: 4
+  entanglement_factory_endpoint_count: 2
+  entanglement_link_count: 1
+  magic_generation_period: 15
+  maximum_magic_state_stock: 10000
+  maximum_entangled_state_stock: 10000
+  reaction_time: 1
+  physical_error_rate: 0.001
+  drop_rate: 0.1
+  code_cycle_time_sec: 0.000001
+  allowed_failure_prob: 0.01
+
+comparison_policy:
+  baseline_entanglement_generation_period: 1
+  compare_within_molecule_precision_partition: true
+  compare_partition_at_fixed_precision_and_period: true
+  compare_absolute_runtime_across_precision: false
+  interpretation: generation period and logical partition are architecture conditions; rotation precision defines separate fixed-circuit workload regimes
+
+execution_policy:
+  completed_prefix:
+    case_count: 18
+    case_parallelism: 1
+    memory_high: 44G
+    memory_max: 48G
+  remaining_h7_cheap_rz:
+    case_count: 6
+    case_parallelism: 6
+    aggregate_memory_high: 32G
+    aggregate_memory_max: 40G
+  swap_guard: disabled
+
+primary_metrics:
+  - runtime
+  - runtime_change_vs_period_1
+  - runtime_high_cut_vs_low_cut
+  - runtime_topology_overhead
+
+diagnostic_metrics:
+  - entanglement_consumption_count
+  - entanglement_consumption_depth
+  - entanglement_consumption_rate_ave
+  - entanglement_consumption_rate_peak
+  - weighted_interplane_cnot_count
+  - runtime_estimation_entanglement_consumption_count
+  - runtime_estimation_entanglement_consumption_depth
+  - qubit_volume
+  - code_distance
+
+output_directory: artifacts/surface_code_distributed_dim2_sweep_h4_h7_4th_paired

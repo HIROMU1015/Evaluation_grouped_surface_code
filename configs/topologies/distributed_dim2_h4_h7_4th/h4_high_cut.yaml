@@ -1,0 +1,79 @@
+grids:
+- type: plane
+  coord:
+  - 10
+  - 10
+  - 0
+  magic_factory:
+  - symbol: 0
+    coord:
+    - 0
+    - 4
+  - symbol: 1
+    coord:
+    - 0
+    - 6
+  entanglement_factory:
+  - symbol: 0
+    pair: 1
+    coord:
+    - 0
+    - 0
+  qubit:
+  - symbol: 0
+    coord:
+    - 4
+    - 4
+  - symbol: 1
+    coord:
+    - 4
+    - 6
+  - symbol: 2
+    coord:
+    - 6
+    - 4
+  - symbol: 4
+    coord:
+    - 6
+    - 6
+- type: plane
+  coord:
+  - 10
+  - 10
+  - 2
+  magic_factory:
+  - symbol: 2
+    coord:
+    - 0
+    - 4
+  - symbol: 3
+    coord:
+    - 0
+    - 6
+  entanglement_factory:
+  - symbol: 1
+    pair: 0
+    coord:
+    - 0
+    - 0
+  qubit:
+  - symbol: 3
+    coord:
+    - 6
+    - 4
+  - symbol: 5
+    coord:
+    - 4
+    - 6
+  - symbol: 6
+    coord:
+    - 4
+    - 4
+  - symbol: 7
+    coord:
+    - 6
+    - 6
+  - symbol: 8
+    coord:
+    - 3
+    - 2

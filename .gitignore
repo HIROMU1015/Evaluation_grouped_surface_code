@@ -37,6 +37,8 @@ artifacts/surface_code_parent_memory/
 artifacts/surface_code_process_isolation/
 artifacts/implementation_visual_overview/
 artifacts/**/logs/
+artifacts/**/checkpoints/
+artifacts/**/compile_info/
 artifacts/surface_code_share/quration_topology_free_memory_note_logs_*/
 artifacts/surface_code_share/quration_topology_free_memory_note_logs_*.tar.gz
 docs/quration_memory_measurement_plan.md
