@@ -189,6 +189,8 @@ def _run_case(
     qret_core_hash: str,
     force: bool,
     workload_ignored_fields: Sequence[str] = (),
+    execution_environment: Mapping[str, str] | None = None,
+    case_metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     name = case_name or _case_name(molecule, precision, factory_count)
     checkpoint_path = output_root / "checkpoints" / f"{name}.json"
@@ -209,6 +211,9 @@ def _run_case(
             and int(checkpoint.get("reaction_time", -1)) == int(fixed["reaction_time"])
             and checkpoint.get("workload_ignored_fields", [])
             == list(workload_ignored_fields)
+            and checkpoint.get("execution_environment", {})
+            == dict(execution_environment or {})
+            and checkpoint.get("case_metadata", {}) == dict(case_metadata or {})
         ):
             return checkpoint
 
@@ -260,6 +265,7 @@ def _run_case(
     env = os.environ.copy()
     env["LC_ALL"] = "C"
     env["LANG"] = "C"
+    env.update(execution_environment or {})
     command = [
         "/usr/bin/time",
         "-v",
@@ -356,6 +362,8 @@ def _run_case(
         "fixed_logical_workload_match": not workload_differences,
         "workload_differences": workload_differences,
         "workload_ignored_fields": list(workload_ignored_fields),
+        "execution_environment": dict(execution_environment or {}),
+        "case_metadata": dict(case_metadata or {}),
         "compile_info_path": _display(compile_info_path),
         "elapsed_seconds": elapsed,
         "gnu_time_max_rss_kb": int(
@@ -371,6 +379,7 @@ def _run_case(
         "maximum_magic_state_stock": int(fixed["maximum_magic_state_stock"]),
         "reaction_time": int(fixed["reaction_time"]),
     }
+    result.update(case_metadata or {})
     _write_json(checkpoint_path, result)
     return result
 

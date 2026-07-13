@@ -6,9 +6,9 @@ PROJECT_ROOT="$(
   pwd
 )"
 
-QURATION_ROOT="${PROJECT_ROOT}/third_party/quration"
-BUILD_ROOT="${PROJECT_ROOT}/build/quration/cmake-build"
-OUTPUT_DIR="${PROJECT_ROOT}/build/quration"
+QURATION_ROOT="${QRET_QURATION_ROOT:-${PROJECT_ROOT}/third_party/quration}"
+BUILD_ROOT="${QRET_BUILD_ROOT:-${PROJECT_ROOT}/build/quration/cmake-build}"
+OUTPUT_DIR="${QRET_OUTPUT_DIR:-${PROJECT_ROOT}/build/quration}"
 
 find_cmake() {
   if [[ -n "${CMAKE:-}" ]]; then

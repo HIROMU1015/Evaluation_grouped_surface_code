@@ -2156,3 +2156,212 @@ mapping、回路を保ったまま、4を超えるaccessible sourceの追加価�
 - `artifacts/surface_code_factory_saturation_sweep_h4_h6_4th_paired/summary.md`
 - `artifacts/surface_code_factory_saturation_sweep_h4_h6_4th_paired/results.csv`
 - `artifacts/surface_code_factory_saturation_sweep_h4_h6_4th_paired/results.jsonl`
+
+## 2026-07-13: Dim2 runtime validation 1-4
+
+### Scope
+
+runtime-primary方針を物理時間とarchitecture interactionの両面から補強するため、次の4項目を検証した。
+
+1. 既存のfixed-circuit Dim2 sweepについて、beat runtimeではなく
+   `runtime * code_distance * code_cycle_time`でphysical runtime相対比を再計算する。
+2. reaction timeとmagic generation periodを、現行QEC設定内の物理時間へ対応付ける。
+3. H4-H7、両precisionでfactory count 3/4とmagic period 15/30の交互作用を調べる。
+4. 現行の経路命令latencyが距離非依存である影響を、distance-sensitive critical-path proxyで調べる。
+
+precision間ではoptimized IRが異なるため、絶対runtime差をarchitecture効果として比較していない。
+
+### 1. Physical-runtime reanalysis
+
+現行モデルのphysical runtimeは
+
+`runtime_beats * code_distance * code_cycle_time_sec`
+
+である。同じmolecule/precision内でcode distanceが不変なら、physical runtimeの相対変化はbeat
+runtimeと完全に一致した。logical placement、routing capacity、grid capacityの大部分がこれに該当する。
+
+一方、architecture変更によってcode-distance thresholdを越えた比較では差が増幅された。主な例は
+次のとおりである。
+
+| comparison | beat runtime change | physical runtime change | correction |
+| --- | ---: | ---: | ---: |
+| H4, reaction 100 vs 1, 1e-5 | +2112.7804% | +2793.6359% | +680.8555 pp |
+| H6, reaction 100 vs 1, 1e-5 | +2090.6259% | +2674.7928% | +584.1669 pp |
+| H4, factory 1 vs 4, 1e-5 | +240.1390% | +292.4681% | +52.3291 pp |
+| H4, factory left vs center, 1e-5 | -0.0001% | +15.3845% | +15.3846 pp |
+
+最後の例ではbeat runtimeは不変でも`d=13 -> 15`となるため、物理時間の順位が変わる。したがって、
+primary metricとしてbeat runtimeを維持しつつ、最終resource解釈では`runtime*d`比を必ず併記する。
+
+### 2. Model-internal beat calibration
+
+全対象sweepは`code_cycle_time_sec=1 us`であり、qretの1 beatは`d` code cycle、すなわち`d us`へ
+換算される。代表的なcode distance 13、15、17、19では1 beatは13、15、17、19 usである。
+
+このためreaction 1/10/100は、`d=15`なら15 us、150 us、1.5 msに相当する。magic period
+1/4/15/30/100は、同じ`d=15`なら1 factoryあたり15、60、225、450、1500 us/state、すなわち
+約66,667、16,667、4,444、2,222、667 state/sとなる。
+
+これは現行モデル内部の換算であり、実factory protocolがこのthroughputを達成する根拠ではない。
+hardware realismにはcode-cycle timeとfactory protocol latencyの独立した根拠が必要である。
+
+### 3. Factory-count x generation-period interaction
+
+H4-H7、`4th(new_2)`、`rotation_precision=1e-5, 1e-2`について、logical mapping、10x10
+cell budget、stock=10000、reaction=1を固定し、factory count 3/4とperiod 15/30の32 caseを実行した。
+QASM hash、optimized-IR hash、non-factory workloadは全比較で一致した。
+
+| precision | molecule range | 3-factory penalty at p15 | 3-factory penalty at p30 | interaction |
+| --- | --- | ---: | ---: | ---: |
+| 1e-5 | H4-H7 | +11.1237% to +13.3823% | +33.3330% to +33.3333% | +19.9510 to +22.2096 pp |
+| 1e-2 | H4-H7 | +0.3176% to +1.1249% | +0.7154% to +2.1931% | +0.3977 to +1.0682 pp |
+
+1e-5では供給periodを遅くすると3-factory不足が明確に増幅される。最悪のf3/p30はf4/p15比でbeat
+runtimeが+122.2471%から+126.7625%だった。H4/H6ではcode distanceも上がり、physical runtime
+悪化は最大+161.6490%となった。
+
+1e-2では同じ交互作用が1.1 pp以下へ縮小し、最悪beat runtime差も+1.7626%から+5.6635%だった。
+cheap-RZではmagic demandが減ったため、factory数と供給periodの組合せがsingle-plane runtimeを決める
+度合いも小さくなった。この結果は、cheap-RZ後のruntime探索をdata-side architectureへ移す判断を支持する。
+
+### 4. Distance-sensitive latency diagnostic
+
+現行qretのDim2経路命令は、path座標数にかかわらずlattice surgery / moveが1 beat、CNOTが2 beat
+である。命令latencyそのものをpath長依存へ変更するとrouting simulatorの不変条件を満たせず、
+H4の最小probeでも未解決命令列となった。この直接変更はvalid runtime modelとして採用しなかった。
+
+代わりにroutingを現行latencyで完了させた後、routed instruction DAGの各node weightを
+
+`default_latency + factor * max(path_coordinates - 1, 0)`
+
+へ置き換え、heaviest dependency depthを再計算した。factor 0と1について、H4/H7、両precision、
+compact/perimeter placementおよびremote/choke routingを比較した32 caseである。
+
+| precision | molecule | perimeter vs compact | choke vs remote |
+| --- | --- | ---: | ---: |
+| 1e-5 | H4 | +82.8581% | +16.8753% |
+| 1e-5 | H7 | +56.6752% | +16.4404% |
+| 1e-2 | H4 | +44.7803% | +27.6570% |
+| 1e-2 | H7 | +33.9994% | +38.0453% |
+
+factor 0では全比較のdependency-depth penaltyが0%だったが、factor 1では極端なplacementとchokeが
+明確に分離した。したがって、現在のDim2実runtime差が小さい理由の一部は、経路長がoperation latencyへ
+入らないモデル仮定にある可能性が高い。
+
+ただし、この値は空間競合を新latencyで再scheduleしたruntimeではなく、既存routed DAGに対する
+critical-path proxyである。絶対runtime予測や実機主張には使わない。次に実runtime化する場合は、
+routing simulatorのstate transitionとinstruction occupancyを長latencyへ対応させた上で再検証する。
+
+### State classification
+
+| item | classification |
+| --- | --- |
+| 既存Dim2 sweepのphysical-runtime相対比再計算 | observed |
+| code distance不変時にphysical比とbeat比が一致 | observed |
+| threshold crossingがphysical runtime差を増幅 | observed |
+| beat、reaction、magic periodのus換算 | model-internal calibration |
+| factory 3/4 x period 15/30の32 case成功 | observed |
+| 1e-5で正のfactory-period interaction | observed |
+| 1e-2でinteractionが1.1 pp以下 | observed |
+| distance-sensitive DAG proxyの32 case成功 | observed |
+| 現行Dim2 latency仮定がruntime architecture差を隠す | supported by diagnostic proxy, not yet full runtime |
+| distance-sensitive rerouting runtime | unimplemented |
+
+### Execution resources and references
+
+- factory-period sweep peak RSS: 3.47 GiB、swap 0、最大4並列
+- distance-sensitive proxy peak RSS: 3.44 GiB、swap 0、最大4並列
+- qretの診断変更は`/tmp`別ビルドで使用し、vendored sourceは検証後に復元した
+- `artifacts/surface_code_dim2_physical_runtime_reanalysis/summary.md`
+- `artifacts/surface_code_factory_period_interaction_sweep_h4_h7_4th_paired/summary.md`
+- `artifacts/surface_code_distance_sensitive_latency_sweep_h4_h7_4th_paired/summary.md`
+- `docs/benchmarks/qret_dim2_path_latency_diagnostic.patch`
+
+## 2026-07-13: Dim2 distance-sensitive rerouting runtime
+
+### Question and implementation
+
+前節のcritical-path proxyは、経路長をlatencyへ入れるとarchitectureによるruntime差が現れる可能性を
+示したが、長いlatencyで空間競合を再scheduleした結果ではなかった。そこでqretの一時的な診断buildに
+対して、pathを持つlattice surgery、magic、multinode、move、CNOT系命令のlatencyを
+
+`base_latency + factor * max(path_coordinates - 1, 0)`
+
+とする経路を実装した。`factor=0`を現行モデルとの互換control、`factor=1`を距離依存診断とした。
+factor 1では追加期間についてpath ancillaと対象logical qubitを占有し、lattice-surgery measurementの
+classical correction完了も命令終端まで遅延させた。compile-infoのmagic / entanglement消費とfeedback生成は
+命令開始時に一度だけ数え、長latencyによる二重計数を防いだ。先読みstate bufferは256 beatとした。
+
+magic factoryの生成、stock、source選択、factory endpointのbusy semanticsは現行モデルのままである。
+またfactor 1は物理装置から校正した値ではないため、結果はdistance-sensitive architecture diagnosticで
+あってhardware runtime予測ではない。
+
+対象はproxyと同じH4/H7、`4th(new_2)`、`rotation_precision=1e-5, 1e-2`、placementの
+compact/perimeter、routingのremote/chokeである。各条件をfactor 0/1で対にした32 caseを実行した。
+factory count=4、magic period=15、stock=10000、reaction time=1、logical circuit、QEC入力は比較内で固定した。
+
+### Observed full-runtime penalties
+
+factor 1におけるstress条件のreference条件比は次のとおりだった。QVも同じfactor 1内の相対差である。
+
+| precision | molecule | perimeter runtime | perimeter QV | proxy | choke runtime | choke QV | proxy |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1e-5 | H4 | +80.7483% | +131.6307% | +82.8581% | +7.4604% | +17.6717% | +16.8753% |
+| 1e-5 | H7 | +51.8940% | +71.5820% | +56.6752% | +14.5733% | +25.9887% | +16.4404% |
+| 1e-2 | H4 | +45.1850% | +79.8423% | +44.7803% | +27.0365% | +61.4000% | +27.6570% |
+| 1e-2 | H7 | +33.8576% | +54.4422% | +33.9994% | +38.3090% | +70.1817% | +38.0453% |
+
+32 caseはすべて成功し、QASM、optimized IR、gate / magic / feedback workloadの固定チェックも通過した。
+factor 0は旧runと16 case中13 caseでruntimeとQVが完全一致した。残るH7 3 caseもruntime差は最大7 beat
+（0.000079%）、QV差は最大0.001112%であり、全caseが事前集計の0.002%互換範囲内だった。
+
+full runtimeとproxyのstress penalty差は8比較中7比較で4.782 percentage point以内だった。最大差は
+H4 conventionalのchokeで9.415 pointであり、再scheduleによる競合と並列性を含めるとproxyが
+runtime penaltyを過大評価した。proxyは傾向のscreeningには有効だったが、実runtimeの代替ではない。
+
+### Interpretation
+
+現行のfactor 0ではstress/reference runtime差が-0.051%から+0.042%に留まっていた。一方、同じ回路を
+factor 1でscheduleすると、極端なperimeter placementは+33.858%から+80.748%、central chokeは
++7.460%から+38.309%となった。したがって、Dim2で経路長がoperation latencyへ入らない仮定は、
+logical placementとrouting bottleneckによるruntime感度を強く隠していたと判断できる。
+
+cheap-RZでarchitecture感度が一律に増えるわけではない。placement penaltyはconventionalからcheap-RZで
+H4/H7とも縮小した一方、choke penaltyは両分子で増加した。回路をprecision間で比較してruntime改善を
+architecture効果とは扱わず、各precision内のfixed-circuit stress/reference比だけを主結果とする。
+
+factor 1そのものを導入した同一topologyでのruntime増加は、1e-5で+19.043%から+115.165%、1e-2で
++38.816%から+126.238%だった。これは距離係数1という強い診断介入の大きさであり、architecture間差とは
+分けて扱う。実機へ外挿するには、lattice-surgery path lengthとcode cycle数の関係を別途校正する必要がある。
+
+### Code distance and physical runtime
+
+factor 1内では各molecule / precision / familyのreferenceとstressでcode distanceが共通だったため、表の
+beat-runtime penaltyと`runtime * code_distance`によるphysical-runtime penaltyは一致した。ただしH4
+conventionalではfactor 0から1への変更時に全topologyで`d=13 -> 15`となった。このためfactor 0/1間の
+physical runtimeおよびQV差にはpath latencyだけでなくQEC threshold crossingも含まれる。
+
+### State classification
+
+| item | classification |
+| --- | --- |
+| H4/H7 x 2 precision x 2 family x 2 condition x 2 factorの32 case成功 | observed |
+| fixed logical workload一致 | observed |
+| factor 0が旧runと0.002%以内で互換 | observed |
+| factor 1でperimeter runtimeが+33.858%から+80.748% | observed under diagnostic model |
+| factor 1でchoke runtimeが+7.460%から+38.309% | observed under diagnostic model |
+| 距離非依存latencyがtested Dim2 architecture差を隠す | supported by full rerouting diagnostic |
+| factor 1が実hardware latencyを表す | uncalibrated assumption |
+| factory endpointを含む完全な長latency supply model | unimplemented |
+
+### Execution resources and references
+
+- 最大4並列、aggregate guardは`MemoryHigh=32G`, `MemoryMax=40G`
+- qret peak RSS: 3,894,140 KiB（約3.71 GiB）、GNU time swap count: 0
+- 診断qretは`/tmp`へ別buildし、vendored sourceへ適用した変更は検証後に復元した
+- `configs/surface_code_distance_sensitive_runtime_sweep_h4_h7_4th_paired.yaml`
+- `scripts/run_distance_sensitive_runtime_sweep.py`
+- `artifacts/surface_code_distance_sensitive_runtime_sweep_h4_h7_4th_paired/summary.md`
+- `artifacts/surface_code_distance_sensitive_runtime_sweep_h4_h7_4th_paired/results.csv`
+- `artifacts/surface_code_distance_sensitive_runtime_sweep_h4_h7_4th_paired/results.jsonl`
+- `docs/benchmarks/qret_dim2_distance_sensitive_runtime.patch`

@@ -1,0 +1,97 @@
+diff --git a/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/calc_compile_info.cpp b/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/calc_compile_info.cpp
+index 6c6ff80..8366f5e 100644
+--- a/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/calc_compile_info.cpp
++++ b/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/calc_compile_info.cpp
+@@ -414,6 +414,41 @@ Beat EffectiveTimeSeriesLatency(const ScLsInstructionBase& inst) {
+     return inst.Latency() == 0 ? 1 : inst.Latency();
+ }
+ 
++Beat DiagnosticPathLatencyFactor() {
++    const char* text =
++            std::getenv("QRET_SC_LS_PATH_LATENCY_PER_ADDITIONAL_COORDINATE");
++    if (text == nullptr || *text == '\0') {
++        return 0;
++    }
++    char* end = nullptr;
++    const auto value = std::strtoull(text, &end, 10);
++    return end != text && *end == '\0' ? static_cast<Beat>(value) : Beat{0};
++}
++
++void CalculateDiagnosticPathLatencyDepth(
++        const MachineFunction& mf,
++        ScLsFixedV0CompileInfo& compile_info
++) {
++    const auto factor = DiagnosticPathLatencyFactor();
++    auto graph = DepGraph(mf);
++    auto id = DepGraph::IdType{0};
++    auto added_weight = std::uint64_t{0};
++    for (const auto& bb : mf) {
++        for (const auto& minst : bb) {
++            const auto& inst = *static_cast<const ScLsInstructionBase*>(minst.get());
++            const auto path_size = inst.Ancilla().size();
++            const auto additional_coordinates = path_size > 1 ? path_size - 1 : 0;
++            const auto additional_weight = factor * additional_coordinates;
++            graph.SetNodeWeight(id, inst.Latency() + additional_weight);
++            added_weight += additional_weight;
++            ++id;
++        }
++    }
++    compile_info.diagnostic_path_latency_factor = factor;
++    compile_info.diagnostic_path_latency_dependency_depth = graph.CalcHeaviest();
++    compile_info.diagnostic_path_latency_added_weight = added_weight;
++}
++
+ std::uint64_t CalculateTimeSeriesRuntime(const MachineFunction& mf) {
+     auto raw_runtime = std::uint64_t{0};
+     for (const auto& bb : mf) {
+@@ -2563,6 +2598,7 @@ bool CompileInfoWithTopology::RunOnMachineFunction(MachineFunction& mf) {
+     );
+ 
+     ResetTopologyTimeSeriesFields(compile_info);
++    CalculateDiagnosticPathLatencyDepth(mf, compile_info);
+ 
+     MarkCompileInfoStage(
+             "calc_info_with_topology_before_time_series_construct",
+diff --git a/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/compile_info.cpp b/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/compile_info.cpp
+index ce7fdd0..3d153a8 100644
+--- a/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/compile_info.cpp
++++ b/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/compile_info.cpp
+@@ -268,6 +268,10 @@ double ScLsFixedV0CompileInfo::ChipCellActiveQubitAreaRatioPeak() const {
+     // about runtime
+     j["runtime"] = runtime;
+     j["runtime_without_topology"] = runtime_without_topology;
++    j["diagnostic_path_latency_factor"] = diagnostic_path_latency_factor;
++    j["diagnostic_path_latency_dependency_depth"] =
++            diagnostic_path_latency_dependency_depth;
++    j["diagnostic_path_latency_added_weight"] = diagnostic_path_latency_added_weight;
+ 
+     // about gate
+     j["gate_count"] = gate_count;
+@@ -484,6 +488,13 @@ void from_json(const Json& j, ScLsFixedV0CompileInfo& info) {
+     // about runtime
+     j["runtime"].get_to(info.runtime);
+     j["runtime_without_topology"].get_to(info.runtime_without_topology);
++    if (j.contains("diagnostic_path_latency_factor")) {
++        j["diagnostic_path_latency_factor"].get_to(info.diagnostic_path_latency_factor);
++        j["diagnostic_path_latency_dependency_depth"]
++                .get_to(info.diagnostic_path_latency_dependency_depth);
++        j["diagnostic_path_latency_added_weight"]
++                .get_to(info.diagnostic_path_latency_added_weight);
++    }
+ 
+     // about gate
+     j["gate_count"].get_to(info.gate_count);
+diff --git a/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/compile_info.h b/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/compile_info.h
+index 76d661c..3fc2d55 100644
+--- a/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/compile_info.h
++++ b/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/compile_info.h
+@@ -81,6 +81,9 @@ struct QRET_EXPORT ScLsFixedV0CompileInfo : CompileInfo {
+     // info about runtime
+     std::uint64_t runtime = 0;
+     std::uint64_t runtime_without_topology = 0;
++    std::uint64_t diagnostic_path_latency_factor = 0;
++    std::uint64_t diagnostic_path_latency_dependency_depth = 0;
++    std::uint64_t diagnostic_path_latency_added_weight = 0;
+ 
+     // info about gate
+     std::uint64_t gate_count = 0;

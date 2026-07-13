@@ -1,0 +1,33 @@
+experiment: fixed_circuit_factory_period_interaction_sweep_paired_precision
+schema_version: 1
+
+source:
+  results_csv: artifacts/surface_code_grid_capacity_sweep_h4_h7_4th/results.csv
+  topology_name: aware_10x10
+  pf_label: 4th(new_2)
+
+topology_manifest: configs/topologies/accessible_factory_count_h4_h7_4th/accessible_factory_count_manifest.json
+
+molecules: [H4, H5, H6, H7]
+rotation_precisions: [1.0e-5, 1.0e-2]
+factory_counts: [3, 4]
+magic_generation_periods: [15, 30]
+
+fixed_conditions:
+  baseline_factory_count: 4
+  baseline_magic_generation_period: 15
+  maximum_magic_state_stock: 10000
+  entanglement_generation_period: 100
+  maximum_entangled_state_stock: 10
+  reaction_time: 1
+  physical_error_rate: 0.001
+  drop_rate: 0.1
+  code_cycle_time_sec: 0.000001
+  allowed_failure_prob: 0.01
+
+execution:
+  case_parallelism: 4
+  aggregate_memory_high: 32G
+  aggregate_memory_max: 40G
+
+output_directory: artifacts/surface_code_factory_period_interaction_sweep_h4_h7_4th_paired

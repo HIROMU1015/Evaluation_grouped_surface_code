@@ -1,0 +1,39 @@
+experiment: fixed_circuit_dim2_distance_sensitive_runtime
+schema_version: 1
+
+source:
+  results_csv: artifacts/surface_code_grid_capacity_sweep_h4_h7_4th/results.csv
+  topology_name: aware_10x10
+  pf_label: 4th(new_2)
+
+placement_manifest: configs/topologies/logical_placement_h4_h7/placement_manifest.json
+routing_manifest: configs/topologies/routing_capacity_h4_h7_4th/routing_capacity_manifest.json
+diagnostic_patch: docs/benchmarks/qret_dim2_distance_sensitive_runtime.patch
+proxy_results: artifacts/surface_code_distance_sensitive_latency_sweep_h4_h7_4th_paired/results.csv
+
+molecules: [H4, H7]
+rotation_precisions: [1.0e-5, 1.0e-2]
+path_latency_factors: [0, 1]
+
+families:
+  placement:
+    reference: compact
+    conditions: [compact, perimeter]
+  routing:
+    reference: remote
+    conditions: [remote, choke]
+
+fixed_conditions:
+  magic_generation_period: 15
+  maximum_magic_state_stock: 10000
+  entanglement_generation_period: 100
+  maximum_entangled_state_stock: 10
+  reaction_time: 1
+
+execution:
+  case_parallelism: 4
+  state_buffer_width: 256
+  aggregate_memory_high: 32G
+  aggregate_memory_max: 40G
+
+output_directory: artifacts/surface_code_distance_sensitive_runtime_sweep_h4_h7_4th_paired

@@ -39,6 +39,8 @@ artifacts/implementation_visual_overview/
 artifacts/**/logs/
 artifacts/**/checkpoints/
 artifacts/**/compile_info/
+artifacts/**/.work/
+artifacts/**/results.partial.jsonl
 artifacts/surface_code_share/quration_topology_free_memory_note_logs_*/
 artifacts/surface_code_share/quration_topology_free_memory_note_logs_*.tar.gz
 docs/quration_memory_measurement_plan.md
