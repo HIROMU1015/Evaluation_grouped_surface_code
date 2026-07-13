@@ -2365,3 +2365,125 @@ physical runtimeおよびQV差にはpath latencyだけでなくQEC threshold cro
 - `artifacts/surface_code_distance_sensitive_runtime_sweep_h4_h7_4th_paired/results.csv`
 - `artifacts/surface_code_distance_sensitive_runtime_sweep_h4_h7_4th_paired/results.jsonl`
 - `docs/benchmarks/qret_dim2_distance_sensitive_runtime.patch`
+
+## 2026-07-13: fractional path-latency sensitivity and intermediate topology
+
+### Motivation and diagnostic model
+
+前節ではpath 1 coordinateあたり1 beatを加えるunit係数で大きなruntime差が得られた。しかしunit係数は
+未校正であり、compact/perimeterおよびremote/chokeという両端条件だけでは、結果が任意の強い係数や
+極端topologyに限定される可能性が残った。このため、係数感度、中間topology、H5/H6再現を同時に検証した。
+
+qretの一時診断buildではlatencyを次式とした。
+
+`base + ceil(numerator * max(path_coordinates - 1, 0) / denominator)`
+
+モデルはfixed=0、quarter=1/4、half=1/2、unit=1である。beatが整数なのでquarter/halfはsub-beat
+latencyではなく、追加latencyを切り上げるquantized sensitivity modelである。したがって物理校正値とは
+扱わない。
+
+placementは`compact_interaction_aware < compact_numeric < perimeter_numeric`、routingは
+`remote_ban_control < moderate_choke < central_choke`の3段階とした。moderate chokeは8 banという
+cell budgetを固定したまま4つのbarrier cellと4つのremote cellを用い、H4-H6すべてでweighted CNOT
+distanceが両端の間に入るよう定義した。
+
+H4はfixed/quarter/half/unit、H5/H6はfixed/quarter/unitを両precision、両family、3 topologyで
+実行した。合計120 caseである。factory count=4、magic period=15、stock=10000、reaction=1、10x10
+plane、logical circuit、QEC入力は比較内で固定した。
+
+### Runtime sensitivity
+
+stress条件のreference条件比を示す。precision間の回路差はarchitecture効果として比較していない。
+
+| molecule | precision | perimeter quarter | perimeter unit | choke quarter | choke unit |
+| --- | --- | ---: | ---: | ---: | ---: |
+| H4 | 1e-5 | +19.6591% | +80.7483% | +1.3967% | +7.4604% |
+| H4 | 1e-2 | +11.3936% | +45.1850% | +6.7228% | +27.0365% |
+| H5 | 1e-5 | +18.3965% | +67.2856% | +3.0946% | +8.9826% |
+| H5 | 1e-2 | +11.6948% | +41.0845% | +7.5757% | +26.5775% |
+| H6 | 1e-5 | +15.2385% | +56.7419% | +5.7248% | +16.3186% |
+| H6 | 1e-2 | +12.1934% | +38.2741% | +7.9820% | +27.7958% |
+
+H4のhalf係数でもperimeterは1e-5/1e-2で+40.9114%/+24.6671%、chokeは
++3.7549%/+15.3323%だった。H4の各topologyについてfixed <= quarter <= half <= unitがすべて成立した。
+また、全28 nonfixed molecule/precision/family/model groupでreference <= intermediate <= stressの
+runtime単調性が成立した。weighted CNOT distanceの順序も40/40 groupで成立した。
+
+最弱quarterでもperimeter penaltyはH4-H6で+11.3936%から+19.6591%、choke penaltyは+1.3967%から
++7.9820%残った。したがって、距離依存latencyがgeometry感度を露出させる結論はunit係数だけの現象では
+なく、中間topologyでも段階的に現れる。H4 unitの両precision・両family・両端8 caseは前節のruntimeと
+8/8で完全一致した。
+
+QV stress penaltyはquarterでplacement +26.7951%から+44.1717%、routing +5.5913%から+22.9670%、
+unitでplacement +63.5091%から+131.6307%、routing +17.6717%から+61.4000%だった。ただし次節の
+code-distance discontinuityを含むため、beat runtimeとは分けて解釈する。
+
+### Code-distance discontinuities
+
+beat runtimeは28/28 groupで単調だったが、次の比較ではtopology間でcode distanceが変化した。
+
+| molecule / precision / family / model | compact or remote / intermediate / stress d | beat stress penalty | physical stress penalty |
+| --- | --- | ---: | ---: |
+| H5 / 1e-2 / placement / unit | 13 / 13 / 15 | +41.0845% | +62.7898% |
+| H5 / 1e-2 / routing / unit | 13 / 13 / 15 | +26.5775% | +46.0510% |
+| H6 / 1e-5 / placement / quarter | 15 / 15 / 17 | +15.2385% | +30.6037% |
+| H6 / 1e-5 / placement / unit | 15 / 17 / 17 | +56.7419% | +77.6408% |
+| H6 / 1e-5 / routing / unit | 15 / 17 / 17 | +16.3186% | +31.8278% |
+
+physical runtimeを`runtime * d`で評価しても28/28 groupで単調だった。ただし上表のphysical-runtimeと
+QV増加にはQEC threshold crossingが含まれ、純粋なrouting penaltyではない。primary resultはfixed-circuit
+beat runtime、physical runtimeはQEC離散変化を含むsecondary resultとする。
+
+### Magic-factory endpoint busy probe
+
+長latency中に同じmagic factoryを再選択できることがconventional結果を歪めていないか確認するため、
+選択済みfactoryの`avail.m`が前の配送完了beatへ達するまで次の配送を待機させた。H4、両precision、
+placement 3段階、fixed/quarter/unitの18 caseを実行し、無制約runと比較した。
+
+factory busy制約による同一topology runtime増加は最大+0.0508%、QV変化は最大0.0349%だった。
+perimeter-vs-compact runtime penaltyの変化も-0.0076から+0.0581 percentage pointに留まり、全4 nonfixed
+groupでplacement順位と単調性は維持された。tested H4・4 factory・large stock条件では、factory endpoint
+再利用は今回のplacement感度の主要因ではない。
+
+ただし、このprobeはroute searchが選んだfactoryをbusyなら待つ保守的実装であり、別のfree factoryへ
+動的に再割当てするmulti-port schedulerではない。factory countやstockが小さい条件へ一般化しない。
+
+### Updated interpretation
+
+距離非依存latencyの下でほぼ見えなかったDim2のruntime差は、弱いquarter係数、中間topology、H5/H6でも
+再現した。したがって、logical placementとrouting capacityがruntimeを大きく変え得るという定性的結論は
+強化された。一方、何%の差が実機で生じるかはpath-length-to-code-cycle変換の物理校正なしには決められない。
+
+cheap-RZで全architecture感度が増えるわけでもない。placement penaltyはconventionalの方が大きい一方、
+choke penaltyは多くの分子でcheap-RZの方が大きかった。non-Clifford需要の減少後にdata-side congestionが
+相対的に重要になる場合と、回路短縮により総geometry penaltyが減る場合を分けて扱う必要がある。
+
+### State classification
+
+| item | classification |
+| --- | --- |
+| fractional latency / intermediate topologyの120 case成功 | observed |
+| fixed logical workload一致 | observed |
+| H4でfactor増加に対するruntime単調性 | observed |
+| reference/intermediate/stressのruntime単調性28/28 | observed |
+| quarterでもperimeter +11.39%から+19.66% | observed under diagnostic model |
+| quarterでもchoke +1.40%から+7.98% | observed under diagnostic model |
+| H5/H6への再現 | observed |
+| factory busy probeの影響が最大0.0508% | observed for tested H4 conditions |
+| 距離依存latencyでgeometry感度が現れる | supported across tested coefficients and molecules |
+| quarter/half/unitの物理的妥当性 | uncalibrated assumption |
+
+### Execution resources and references
+
+- H4 screeningは最大6並列、H5/H6 replicationは最大4並列
+- fractional sweep qret peak RSS: 2,029,052 KiB（約1.94 GiB）、swap 0
+- factory busy probe peak RSS: 368,268 KiB（約0.35 GiB）、swap 0
+- aggregate guards: H4 12/16 GiB、H5/H6 24/32 GiB
+- 診断buildは`/tmp`へ分離し、vendored quration sourceは検証後に復元した
+- `configs/surface_code_fractional_path_latency_sweep_h4_h6_4th_paired.yaml`
+- `configs/surface_code_magic_factory_busy_probe_h4_4th_paired.yaml`
+- `scripts/run_fractional_path_latency_sweep.py`
+- `artifacts/surface_code_fractional_path_latency_sweep_h4_h6_4th_paired/summary.md`
+- `artifacts/surface_code_magic_factory_busy_probe_h4_4th_paired/summary.md`
+- `docs/benchmarks/qret_dim2_fractional_path_latency.patch`
+- `docs/benchmarks/qret_dim2_magic_factory_busy_delivery.patch`

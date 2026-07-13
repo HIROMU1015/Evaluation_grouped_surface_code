@@ -1,0 +1,43 @@
+--- a/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/simulator.cpp
++++ b/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/simulator.cpp
+@@ -1630,6 +1630,9 @@
+     const auto& route = tmp_route.value();
+     // Update LATTICE_SURGERY_MAGIC.
+     inst->SetMagicFactory(route.magic_factory);
++    if (!MagicFactoryIsAvailable(beat, route.magic_factory)) {
++        return false;
++    }
+     auto path = route.logical_path;
+     path.pop_front();  // Delete coord of magic factory.
+     path.pop_back();  // Delete coord of 'q_dst'.
+@@ -1670,6 +1673,9 @@
+         throw std::logic_error("Ancilla does not have magic factory.");
+     }
+     inst->SetMagicFactory(ancilla.m.value());
++    if (!MagicFactoryIsAvailable(beat, *ancilla.m)) {
++        return false;
++    }
+     inst->SetPath(ancilla.ancilla);
+     if (!ExtendedPathDurationIsAvailable(GetStateBuffer(), beat, 1, *inst)) {
+         return false;
+@@ -1868,6 +1874,9 @@
+             throw std::logic_error("Magic factory is not set in search function.");
+         }
+         inst->SetMagicFactory(*ancilla.m);
++        if (!MagicFactoryIsAvailable(beat, *ancilla.m)) {
++            return false;
++        }
+     }
+     inst->SetPath(ancilla.ancilla);
+     if (!ExtendedPathDurationIsAvailable(GetStateBuffer(), beat, 1, *inst)) {
+@@ -2224,6 +2233,9 @@
+     const auto& route = tmp_route.value();
+     // Update MOVE_MAGIC.
+     inst->SetMagicFactory(route.magic_factory);
++    if (!MagicFactoryIsAvailable(beat, route.magic_factory)) {
++        return false;
++    }
+     auto path = route.logical_path;
+     path.pop_front();  // Delete coord of magic factory.
+     path.pop_back();  // Delete coord of 'q_dst'.
+

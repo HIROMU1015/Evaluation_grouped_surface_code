@@ -1,0 +1,506 @@
+diff --git a/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/calc_compile_info.cpp b/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/calc_compile_info.cpp
+index 6c6ff80..b7de4bd 100644
+--- a/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/calc_compile_info.cpp
++++ b/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/calc_compile_info.cpp
+@@ -425,6 +425,51 @@ std::uint64_t CalculateTimeSeriesRuntime(const MachineFunction& mf) {
+     return raw_runtime + 1;
+ }
+ 
++void CalculateDistanceSensitivePathLatencyStats(
++        const MachineFunction& mf,
++        ScLsFixedV0CompileInfo& compile_info
++) {
++    compile_info.distance_sensitive_path_latency_numerator =
++            DistanceSensitivePathLatencyNumerator();
++    compile_info.distance_sensitive_path_latency_denominator =
++            DistanceSensitivePathLatencyDenominator();
++    compile_info.distance_sensitive_path_latency_added = 0;
++    compile_info.distance_sensitive_path_latency_max = 0;
++    compile_info.distance_sensitive_path_instruction_count = 0;
++    for (const auto& bb : mf) {
++        for (const auto& minst : bb) {
++            const auto& inst = *static_cast<const ScLsInstructionBase*>(minst.get());
++            if (inst.Ancilla().empty()) {
++                continue;
++            }
++            auto base_latency = std::optional<Beat>{};
++            switch (inst.Type()) {
++                case ScLsInstructionType::LATTICE_SURGERY:
++                case ScLsInstructionType::LATTICE_SURGERY_MAGIC:
++                case ScLsInstructionType::LATTICE_SURGERY_MULTINODE:
++                case ScLsInstructionType::MOVE:
++                case ScLsInstructionType::MOVE_MAGIC:
++                case ScLsInstructionType::MOVE_ENTANGLEMENT:
++                    base_latency = 1;
++                    break;
++                case ScLsInstructionType::CNOT:
++                    base_latency = 2;
++                    break;
++                default:
++                    continue;
++            }
++            const auto effective_latency = inst.Latency();
++            compile_info.distance_sensitive_path_latency_added +=
++                    effective_latency - *base_latency;
++            compile_info.distance_sensitive_path_latency_max = std::max(
++                    compile_info.distance_sensitive_path_latency_max,
++                    effective_latency
++            );
++            ++compile_info.distance_sensitive_path_instruction_count;
++        }
++    }
++}
++
+ void InitializeChipInfoSpace(
+         TimeSeries::ChipInfo& chip_info,
+         const ScLsFixedV0TargetMachine& target
+@@ -1665,9 +1710,12 @@ template <typename InstructionRange>
+ void ProcessFeedbackCreates(
+         Beat beat,
+         const InstructionRange& insts,
+-        std::map<CSymbol, FeedbackInfo>& feedback_info
++    std::map<CSymbol, FeedbackInfo>& feedback_info
+ ) {
+     for (const auto* inst : insts) {
++        if (inst->Metadata().beat != beat) {
++            continue;
++        }
+         for (const auto& c : inst->CCreate()) {
+             if (feedback_info.contains(c)) {
+                 throw std::runtime_error(fmt::format(
+@@ -1842,10 +1890,10 @@ void FillFullVectorsFromSeries(
+         });
+ 
+         for (const auto* inst : insts) {
+-            if (inst->UseMagicState()) {
++            if (inst->Metadata().beat == beat && inst->UseMagicState()) {
+                 compile_info.magic_state_consumption_rate[beat]++;
+             }
+-            if (inst->UseEntanglement()) {
++            if (inst->Metadata().beat == beat && inst->UseEntanglement()) {
+                 compile_info.entanglement_consumption_rate[beat] += inst->CountEntanglement();
+             }
+         }
+@@ -1936,10 +1984,10 @@ void FillSummaryStatsFromSeries(
+         auto magic_rate = std::uint64_t{0};
+         auto entanglement_rate = std::uint64_t{0};
+         for (const auto* inst : insts) {
+-            if (inst->UseMagicState()) {
++            if (inst->Metadata().beat == beat && inst->UseMagicState()) {
+                 ++magic_rate;
+             }
+-            if (inst->UseEntanglement()) {
++            if (inst->Metadata().beat == beat && inst->UseEntanglement()) {
+                 entanglement_rate += inst->CountEntanglement();
+             }
+         }
+@@ -2164,10 +2212,10 @@ void RunEventSweepSummary(
+         auto magic_rate = std::uint64_t{0};
+         auto entanglement_rate = std::uint64_t{0};
+         for (const auto* inst : insts) {
+-            if (inst->UseMagicState()) {
++            if (inst->Metadata().beat == beat && inst->UseMagicState()) {
+                 ++magic_rate;
+             }
+-            if (inst->UseEntanglement()) {
++            if (inst->Metadata().beat == beat && inst->UseEntanglement()) {
+                 entanglement_rate += inst->CountEntanglement();
+             }
+         }
+@@ -2260,10 +2308,10 @@ std::vector<SummaryBeatMetrics> CollectSeriesBeatMetrics(const MachineFunction&
+             }
+         });
+         for (const auto* inst : row.instructions) {
+-            if (inst->UseMagicState()) {
++            if (inst->Metadata().beat == beat && inst->UseMagicState()) {
+                 ++row.magic_state_consumption_rate;
+             }
+-            if (inst->UseEntanglement()) {
++            if (inst->Metadata().beat == beat && inst->UseEntanglement()) {
+                 row.entanglement_consumption_rate += inst->CountEntanglement();
+             }
+         }
+@@ -2563,6 +2611,7 @@ bool CompileInfoWithTopology::RunOnMachineFunction(MachineFunction& mf) {
+     );
+ 
+     ResetTopologyTimeSeriesFields(compile_info);
++    CalculateDistanceSensitivePathLatencyStats(mf, compile_info);
+ 
+     MarkCompileInfoStage(
+             "calc_info_with_topology_before_time_series_construct",
+diff --git a/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/compile_info.cpp b/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/compile_info.cpp
+index ce7fdd0..3fb7604 100644
+--- a/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/compile_info.cpp
++++ b/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/compile_info.cpp
+@@ -268,6 +268,14 @@ double ScLsFixedV0CompileInfo::ChipCellActiveQubitAreaRatioPeak() const {
+     // about runtime
+     j["runtime"] = runtime;
+     j["runtime_without_topology"] = runtime_without_topology;
++    j["distance_sensitive_path_latency_numerator"] =
++            distance_sensitive_path_latency_numerator;
++    j["distance_sensitive_path_latency_denominator"] =
++            distance_sensitive_path_latency_denominator;
++    j["distance_sensitive_path_latency_added"] = distance_sensitive_path_latency_added;
++    j["distance_sensitive_path_latency_max"] = distance_sensitive_path_latency_max;
++    j["distance_sensitive_path_instruction_count"] =
++            distance_sensitive_path_instruction_count;
+ 
+     // about gate
+     j["gate_count"] = gate_count;
+@@ -484,6 +492,18 @@ void from_json(const Json& j, ScLsFixedV0CompileInfo& info) {
+     // about runtime
+     j["runtime"].get_to(info.runtime);
+     j["runtime_without_topology"].get_to(info.runtime_without_topology);
++    if (j.contains("distance_sensitive_path_latency_numerator")) {
++        j["distance_sensitive_path_latency_numerator"]
++                .get_to(info.distance_sensitive_path_latency_numerator);
++        j["distance_sensitive_path_latency_denominator"]
++                .get_to(info.distance_sensitive_path_latency_denominator);
++        j["distance_sensitive_path_latency_added"]
++                .get_to(info.distance_sensitive_path_latency_added);
++        j["distance_sensitive_path_latency_max"]
++                .get_to(info.distance_sensitive_path_latency_max);
++        j["distance_sensitive_path_instruction_count"]
++                .get_to(info.distance_sensitive_path_instruction_count);
++    }
+ 
+     // about gate
+     j["gate_count"].get_to(info.gate_count);
+diff --git a/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/compile_info.h b/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/compile_info.h
+index 76d661c..b701bb1 100644
+--- a/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/compile_info.h
++++ b/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/compile_info.h
+@@ -81,6 +81,11 @@ struct QRET_EXPORT ScLsFixedV0CompileInfo : CompileInfo {
+     // info about runtime
+     std::uint64_t runtime = 0;
+     std::uint64_t runtime_without_topology = 0;
++    std::uint64_t distance_sensitive_path_latency_numerator = 0;
++    std::uint64_t distance_sensitive_path_latency_denominator = 1;
++    std::uint64_t distance_sensitive_path_latency_added = 0;
++    std::uint64_t distance_sensitive_path_latency_max = 0;
++    std::uint64_t distance_sensitive_path_instruction_count = 0;
+ 
+     // info about gate
+     std::uint64_t gate_count = 0;
+diff --git a/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/instruction.cpp b/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/instruction.cpp
+index f8705d4..0eb500e 100644
+--- a/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/instruction.cpp
++++ b/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/instruction.cpp
+@@ -8,6 +8,9 @@
+ #include <fmt/format.h>
+ 
+ #include <array>
++#include <cerrno>
++#include <cstdlib>
++#include <limits>
+ #include <set>
+ #include <sstream>
+ #include <stdexcept>
+@@ -20,6 +23,77 @@
+ #include "qret/target/sc_ls_fixed_v0/topology.h"
+ 
+ namespace qret::sc_ls_fixed_v0 {
++namespace {
++Beat ParseDistanceSensitiveLatencyParameter(
++        const char* name,
++        Beat default_value,
++        bool allow_zero
++) {
++    const auto* text = std::getenv(name);
++    if (text == nullptr || *text == '\0') {
++        return default_value;
++    }
++
++    errno = 0;
++    auto* end = static_cast<char*>(nullptr);
++    const auto value = std::strtoull(text, &end, 10);
++    if (errno != 0 || end == text || *end != '\0'
++        || value > std::numeric_limits<Beat>::max() || (!allow_zero && value == 0)) {
++        throw std::invalid_argument(fmt::format(
++                "{} must be a {} integer",
++                name,
++                allow_zero ? "non-negative" : "positive"
++        ));
++    }
++    return static_cast<Beat>(value);
++}
++}  // namespace
++
++Beat DistanceSensitivePathLatencyNumerator() {
++    static const auto numerator = [] {
++        return ParseDistanceSensitiveLatencyParameter(
++                "QRET_SC_LS_PATH_LATENCY_NUMERATOR",
++                Beat{0},
++                true
++        );
++    }();
++    return numerator;
++}
++
++Beat DistanceSensitivePathLatencyDenominator() {
++    static const auto denominator = [] {
++        return ParseDistanceSensitiveLatencyParameter(
++                "QRET_SC_LS_PATH_LATENCY_DENOMINATOR",
++                Beat{1},
++                false
++        );
++    }();
++    return denominator;
++}
++
++Beat DistanceSensitivePathAdditionalLatency(std::size_t path_coordinates) {
++    const auto numerator = DistanceSensitivePathLatencyNumerator();
++    const auto denominator = DistanceSensitivePathLatencyDenominator();
++    const auto additional_coordinates = path_coordinates > 1 ? path_coordinates - 1 : 0;
++    if (numerator == 0 || additional_coordinates == 0) {
++        return 0;
++    }
++    if (additional_coordinates > std::numeric_limits<Beat>::max() / numerator) {
++        throw std::overflow_error("distance-sensitive path latency overflow");
++    }
++    const auto scaled = numerator * static_cast<Beat>(additional_coordinates);
++    return scaled / denominator + static_cast<Beat>(scaled % denominator != 0);
++}
++
++Beat DistanceSensitivePathLatency(Beat base_latency, std::size_t path_coordinates) {
++    const auto additional_latency =
++            DistanceSensitivePathAdditionalLatency(path_coordinates);
++    if (base_latency > std::numeric_limits<Beat>::max() - additional_latency) {
++        throw std::overflow_error("distance-sensitive path latency overflow");
++    }
++    return base_latency + additional_latency;
++}
++
+ namespace {
+ using InstructionTypeName = std::pair<ScLsInstructionType, std::string_view>;
+ constexpr auto kInstructionTypeNames = std::array<InstructionTypeName, 25>{
+diff --git a/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/instruction.h b/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/instruction.h
+index afae272..5fe882e 100644
+--- a/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/instruction.h
++++ b/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/instruction.h
+@@ -82,6 +82,11 @@ std::string ToString(ScLsInstructionType);
+ std::ostream& operator<<(std::ostream&, ScLsInstructionType);
+ ScLsInstructionType ScLsInstructionTypeFromString(const std::string&);
+ 
++QRET_EXPORT Beat DistanceSensitivePathLatencyNumerator();
++QRET_EXPORT Beat DistanceSensitivePathLatencyDenominator();
++QRET_EXPORT Beat DistanceSensitivePathAdditionalLatency(std::size_t path_coordinates);
++QRET_EXPORT Beat DistanceSensitivePathLatency(Beat base_latency, std::size_t path_coordinates);
++
+ static inline const std::
+         unordered_map<ScLsFixedV0MachineType, std::unordered_set<ScLsInstructionType>>
+                 SupportedInstructionType = {
+@@ -1105,10 +1110,10 @@ public:
+         return ScLsInstructionType::LATTICE_SURGERY;
+     }
+     [[nodiscard]] Beat Latency() const override {
+-        return 1;
++        return DistanceSensitivePathLatency(1, Ancilla().size());
+     }
+     [[nodiscard]] Beat StartCorrecting() const override {
+-        return 0;
++        return Latency() - 1;
+     }
+     [[nodiscard]] std::string ToString() const override;
+     [[nodiscard]] Json ToJson() const override;
+@@ -1229,10 +1234,10 @@ public:
+         return ScLsInstructionType::LATTICE_SURGERY_MAGIC;
+     }
+     [[nodiscard]] Beat Latency() const override {
+-        return 1;
++        return DistanceSensitivePathLatency(1, Ancilla().size());
+     }
+     [[nodiscard]] Beat StartCorrecting() const override {
+-        return 0;
++        return Latency() - 1;
+     }
+     [[nodiscard]] std::string ToString() const override;
+     [[nodiscard]] Json ToJson() const override;
+@@ -1379,10 +1384,10 @@ public:
+         return ScLsInstructionType::LATTICE_SURGERY_MULTINODE;
+     }
+     [[nodiscard]] Beat Latency() const override {
+-        return 1;
++        return DistanceSensitivePathLatency(1, Ancilla().size());
+     }
+     [[nodiscard]] Beat StartCorrecting() const override {
+-        return 0;
++        return Latency() - 1;
+     }
+     [[nodiscard]] std::string ToString() const override;
+     [[nodiscard]] Json ToJson() const override;
+@@ -1490,7 +1495,7 @@ public:
+         return ScLsInstructionType::MOVE;
+     }
+     [[nodiscard]] Beat Latency() const override {
+-        return 1;
++        return DistanceSensitivePathLatency(1, Ancilla().size());
+     }
+     [[nodiscard]] Beat StartCorrecting() const override {
+         return 0;
+@@ -1567,7 +1572,7 @@ public:
+         return ScLsInstructionType::MOVE_MAGIC;
+     }
+     [[nodiscard]] Beat Latency() const override {
+-        return 1;
++        return DistanceSensitivePathLatency(1, Ancilla().size());
+     }
+     [[nodiscard]] Beat StartCorrecting() const override {
+         return 0;
+@@ -1660,7 +1665,7 @@ public:
+         return ScLsInstructionType::MOVE_ENTANGLEMENT;
+     }
+     [[nodiscard]] Beat Latency() const override {
+-        return 1;
++        return DistanceSensitivePathLatency(1, Ancilla().size());
+     }
+     [[nodiscard]] Beat StartCorrecting() const override {
+         return 0;
+@@ -1753,7 +1758,7 @@ public:
+         return ScLsInstructionType::CNOT;
+     }
+     [[nodiscard]] Beat Latency() const override {
+-        return 2;
++        return DistanceSensitivePathLatency(2, Ancilla().size());
+     }
+     [[nodiscard]] Beat StartCorrecting() const override {
+         return 0;
+diff --git a/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/routing.cpp b/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/routing.cpp
+index 5b3725e..81f3035 100644
+--- a/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/routing.cpp
++++ b/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/routing.cpp
+@@ -49,7 +49,7 @@ static Opt<Beat> InstQueuePeekSize(
+ );
+ static Opt<Beat> StateBufferWidth(
+         "sc_ls_fixed_v0-state-buffer-width",
+-        20,
++        256,
+         "Buffer width of quantum states",
+         OptionHidden::Hidden
+ );
+@@ -338,7 +338,7 @@ bool Routing::RunOnMachineFunction(MachineFunction& mf) {
+                 }
+ 
+                 // Throw error if some instruction is not runnable for a long beats.
+-                if (idle_beats >= AllowedMaxIdleBeats(option)) {
++                if (idle_beats >= std::max(AllowedMaxIdleBeats(option), StateBufferWidth.Get())) {
+                     auto ss = std::stringstream();
+                     ss << "Do not process any instructions for " << idle_beats << " beats\n";
+                     ss << "Routing pass failed to satisfy the following instructions:\n";
+diff --git a/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/simulator.cpp b/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/simulator.cpp
+index ba417ae..44f62b6 100644
+--- a/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/simulator.cpp
++++ b/third_party/quration/quration-core/src/qret/target/sc_ls_fixed_v0/simulator.cpp
+@@ -115,6 +115,31 @@ bool IsValidCnotPath(
+ 
+     return has_turn;
+ }
++
++bool ExtendedPathDurationIsAvailable(
++        QuantumStateBuffer& buffer,
++        Beat beat,
++        Beat base_latency,
++        const ScLsInstructionBase& inst
++) {
++    for (auto b = beat + base_latency; b < beat + inst.Latency(); ++b) {
++        auto& state = buffer.GetQuantumState(b);
++        for (const auto& coord : inst.Ancilla()) {
++            auto& plane = state.GetGrid(coord.z).GetPlane(coord.z);
++            if (!plane.GetNode(coord.XY()).IsFreeAncilla()) {
++                return false;
++            }
++        }
++        for (const auto q : inst.QTarget()) {
++            const auto& place = state.GetPlace(q);
++            auto& plane = state.GetGrid(place.z).GetPlane(place.z);
++            if (!plane.GetNode(place.XY()).is_available) {
++                return false;
++            }
++        }
++    }
++    return true;
++}
+ }  // namespace
+ 
+ #pragma region simulator
+@@ -1370,6 +1395,9 @@ bool ScLsSimulator::SearchLatticeSurgeryPath2DBFSAndRun(
+     path.pop_front();  // Delete coord of 'q_src'.
+     path.pop_back();  // Delete coord of 'q_dst'.
+     inst->SetPath(std::move(path));
++    if (!ExtendedPathDurationIsAvailable(GetStateBuffer(), beat, 1, *inst)) {
++        return false;
++    }
+     // Run LATTICE_SURGERY.
+     RunLatticeSurgery(beat, inst);
+     RunInstructionInQueue(queue, inst);
+@@ -1400,6 +1428,9 @@ bool ScLsSimulator::SearchLatticeSurgeryPath2DSteinerAndRun(
+     const auto& ancilla = tmp_ancilla.value();
+     // Update LATTICE_SURGERY.
+     inst->SetPath(ancilla.ancilla);
++    if (!ExtendedPathDurationIsAvailable(GetStateBuffer(), beat, 1, *inst)) {
++        return false;
++    }
+     // Run LATTICE_SURGERY.
+     RunLatticeSurgery(beat, inst);
+     RunInstructionInQueue(queue, inst);
+@@ -1603,6 +1634,9 @@ bool ScLsSimulator::SearchLatticeSurgeryMagicPath2DBFSAndRun(
+     path.pop_front();  // Delete coord of magic factory.
+     path.pop_back();  // Delete coord of 'q_dst'.
+     inst->SetPath(std::move(path));
++    if (!ExtendedPathDurationIsAvailable(GetStateBuffer(), beat, 1, *inst)) {
++        return false;
++    }
+     // Run LATTICE_SURGERY_MAGIC.
+     RunLatticeSurgeryMagic(beat, inst);
+     RunInstructionInQueue(queue, inst);
+@@ -1637,6 +1671,9 @@ bool ScLsSimulator::SearchLatticeSurgeryMagicPath2DSteinerAndRun(
+     }
+     inst->SetMagicFactory(ancilla.m.value());
+     inst->SetPath(ancilla.ancilla);
++    if (!ExtendedPathDurationIsAvailable(GetStateBuffer(), beat, 1, *inst)) {
++        return false;
++    }
+     // Run LATTICE_SURGERY_MAGIC.
+     RunLatticeSurgeryMagic(beat, inst);
+     RunInstructionInQueue(queue, inst);
+@@ -1833,6 +1870,9 @@ bool ScLsSimulator::SearchLatticeSurgeryMultinodePathAndRun(
+         inst->SetMagicFactory(*ancilla.m);
+     }
+     inst->SetPath(ancilla.ancilla);
++    if (!ExtendedPathDurationIsAvailable(GetStateBuffer(), beat, 1, *inst)) {
++        return false;
++    }
+     // Run LATTICE_SURGERY_MULTINODE.
+     RunLatticeSurgeryMultinode(beat, inst);
+     RunInstructionInQueue(queue, inst);
+@@ -1959,6 +1999,9 @@ bool ScLsSimulator::SearchMovePath2DAndRun(
+     path.pop_front();  // Delete coord of 'q_src'.
+     path.pop_back();  // Delete coord of 'q_dst'.
+     inst->SetPath(std::move(path));
++    if (!ExtendedPathDurationIsAvailable(GetStateBuffer(), beat, 1, *inst)) {
++        return false;
++    }
+     // Run MOVE.
+     RunMove(beat, inst);
+     RunInstructionInQueue(queue, inst);
+@@ -2185,6 +2228,9 @@ bool ScLsSimulator::SearchMoveMagicPath2DAndRun(
+     path.pop_front();  // Delete coord of magic factory.
+     path.pop_back();  // Delete coord of 'q_dst'.
+     inst->SetPath(std::move(path));
++    if (!ExtendedPathDurationIsAvailable(GetStateBuffer(), beat, 1, *inst)) {
++        return false;
++    }
+     // Run MOVE_MAGIC.
+     RunMoveMagic(beat, inst);
+     RunInstructionInQueue(queue, inst);
+@@ -2371,6 +2417,9 @@ bool ScLsSimulator::SearchMoveEntanglementPath2DAndRun(
+     path.pop_front();  // Delete coord of 'e_factory'.
+     path.pop_back();  // Delete coord of 'q_dst'.
+     inst->SetPath(std::move(path));
++    if (!ExtendedPathDurationIsAvailable(GetStateBuffer(), beat, 1, *inst)) {
++        return false;
++    }
+     // Run MOVE_ENTANGLEMENT.
+     RunMoveEntanglement(beat, inst);
+     RunInstructionInQueue(queue, inst);
+

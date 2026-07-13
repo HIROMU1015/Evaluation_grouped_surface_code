@@ -16,6 +16,7 @@
       "variants": [
         "h4_remote_ban_control",
         "h4_distributed_obstacles",
+        "h4_moderate_choke",
         "h4_central_choke"
       ]
     },
@@ -28,6 +29,7 @@
       "variants": [
         "h5_remote_ban_control",
         "h5_distributed_obstacles",
+        "h5_moderate_choke",
         "h5_central_choke"
       ]
     },
@@ -40,6 +42,7 @@
       "variants": [
         "h6_remote_ban_control",
         "h6_distributed_obstacles",
+        "h6_moderate_choke",
         "h6_central_choke"
       ]
     },
@@ -52,6 +55,7 @@
       "variants": [
         "h7_remote_ban_control",
         "h7_distributed_obstacles",
+        "h7_moderate_choke",
         "h7_central_choke"
       ]
     }
@@ -60,6 +64,7 @@
   "routing_conditions": [
     "remote_ban_control",
     "distributed_obstacles",
+    "moderate_choke",
     "central_choke"
   ],
   "schema_version": "routing_capacity_topology_v1",
@@ -411,6 +416,181 @@
       "usable_non_factory_cell_count": 88,
       "weighted_cnot_distance": 71644,
       "weighted_cnot_distance_delta_vs_baseline": 0,
+      "weighted_nearest_factory_distance": 25,
+      "weighted_nearest_factory_distance_delta_vs_baseline": 0,
+      "weighted_nearest_factory_distance_mean": 2.7777777777777777
+    },
+    "h4_moderate_choke": {
+      "banned_cell_count": 8,
+      "banned_cells": [
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          3,
+          3
+        ],
+        [
+          3,
+          6
+        ],
+        [
+          3,
+          9
+        ],
+        [
+          8,
+          0
+        ],
+        [
+          9,
+          0
+        ]
+      ],
+      "factory_coordinate_set": [
+        [
+          4,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          4
+        ],
+        [
+          5,
+          5
+        ]
+      ],
+      "initial_free_neighbors_by_factory_coordinate": {
+        "4,4": 2,
+        "4,5": 2,
+        "5,4": 2,
+        "5,5": 2
+      },
+      "initial_free_neighbors_by_factory_symbol": {
+        "0": 2,
+        "1": 2,
+        "2": 2,
+        "3": 2
+      },
+      "logical_mapping": [
+        {
+          "coord": [
+            2,
+            4
+          ],
+          "logical_qubit": 0
+        },
+        {
+          "coord": [
+            4,
+            2
+          ],
+          "logical_qubit": 1
+        },
+        {
+          "coord": [
+            2,
+            6
+          ],
+          "logical_qubit": 2
+        },
+        {
+          "coord": [
+            4,
+            7
+          ],
+          "logical_qubit": 3
+        },
+        {
+          "coord": [
+            7,
+            4
+          ],
+          "logical_qubit": 4
+        },
+        {
+          "coord": [
+            6,
+            2
+          ],
+          "logical_qubit": 5
+        },
+        {
+          "coord": [
+            6,
+            7
+          ],
+          "logical_qubit": 6
+        },
+        {
+          "coord": [
+            8,
+            6
+          ],
+          "logical_qubit": 7
+        },
+        {
+          "coord": [
+            2,
+            2
+          ],
+          "logical_qubit": 8
+        }
+      ],
+      "magic_factories": [
+        {
+          "coord": [
+            4,
+            4
+          ],
+          "symbol": 0
+        },
+        {
+          "coord": [
+            4,
+            5
+          ],
+          "symbol": 1
+        },
+        {
+          "coord": [
+            5,
+            4
+          ],
+          "symbol": 2
+        },
+        {
+          "coord": [
+            5,
+            5
+          ],
+          "symbol": 3
+        }
+      ],
+      "minimum_initial_free_neighbors": 2,
+      "molecule": "H4",
+      "obstacle_aware_cnot_max_distance": 14,
+      "routing_condition": "moderate_choke",
+      "topology_path": "configs/topologies/routing_capacity_h4_h7_4th/h4_moderate_choke.yaml",
+      "topology_sha256": "ab9500e691637868254c4024a6c426753a550cea731d9b97e4fdfd40f7998d7f",
+      "trapped_coordinate_free_neighbors": 2,
+      "usable_non_factory_cell_count": 88,
+      "weighted_cnot_distance": 99044,
+      "weighted_cnot_distance_delta_vs_baseline": 27400,
       "weighted_nearest_factory_distance": 25,
       "weighted_nearest_factory_distance_delta_vs_baseline": 0,
       "weighted_nearest_factory_distance_mean": 2.7777777777777777
@@ -964,6 +1144,195 @@
       "usable_non_factory_cell_count": 88,
       "weighted_cnot_distance": 226820,
       "weighted_cnot_distance_delta_vs_baseline": 1648,
+      "weighted_nearest_factory_distance": 35,
+      "weighted_nearest_factory_distance_delta_vs_baseline": 0,
+      "weighted_nearest_factory_distance_mean": 3.1818181818181817
+    },
+    "h5_moderate_choke": {
+      "banned_cell_count": 8,
+      "banned_cells": [
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          3,
+          3
+        ],
+        [
+          3,
+          6
+        ],
+        [
+          3,
+          9
+        ],
+        [
+          8,
+          0
+        ],
+        [
+          9,
+          0
+        ]
+      ],
+      "factory_coordinate_set": [
+        [
+          4,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          4
+        ],
+        [
+          5,
+          5
+        ]
+      ],
+      "initial_free_neighbors_by_factory_coordinate": {
+        "4,4": 2,
+        "4,5": 2,
+        "5,4": 2,
+        "5,5": 2
+      },
+      "initial_free_neighbors_by_factory_symbol": {
+        "0": 2,
+        "1": 2,
+        "2": 2,
+        "3": 2
+      },
+      "logical_mapping": [
+        {
+          "coord": [
+            4,
+            2
+          ],
+          "logical_qubit": 0
+        },
+        {
+          "coord": [
+            2,
+            4
+          ],
+          "logical_qubit": 1
+        },
+        {
+          "coord": [
+            6,
+            2
+          ],
+          "logical_qubit": 2
+        },
+        {
+          "coord": [
+            7,
+            4
+          ],
+          "logical_qubit": 3
+        },
+        {
+          "coord": [
+            8,
+            2
+          ],
+          "logical_qubit": 4
+        },
+        {
+          "coord": [
+            2,
+            8
+          ],
+          "logical_qubit": 5
+        },
+        {
+          "coord": [
+            4,
+            7
+          ],
+          "logical_qubit": 6
+        },
+        {
+          "coord": [
+            2,
+            6
+          ],
+          "logical_qubit": 7
+        },
+        {
+          "coord": [
+            6,
+            7
+          ],
+          "logical_qubit": 8
+        },
+        {
+          "coord": [
+            8,
+            6
+          ],
+          "logical_qubit": 9
+        },
+        {
+          "coord": [
+            2,
+            2
+          ],
+          "logical_qubit": 10
+        }
+      ],
+      "magic_factories": [
+        {
+          "coord": [
+            4,
+            4
+          ],
+          "symbol": 0
+        },
+        {
+          "coord": [
+            4,
+            5
+          ],
+          "symbol": 1
+        },
+        {
+          "coord": [
+            5,
+            4
+          ],
+          "symbol": 2
+        },
+        {
+          "coord": [
+            5,
+            5
+          ],
+          "symbol": 3
+        }
+      ],
+      "minimum_initial_free_neighbors": 2,
+      "molecule": "H5",
+      "obstacle_aware_cnot_max_distance": 14,
+      "routing_condition": "moderate_choke",
+      "topology_path": "configs/topologies/routing_capacity_h4_h7_4th/h5_moderate_choke.yaml",
+      "topology_sha256": "12dd4607dc8901994d14ed714d21673c4c62e314b7fae30c66697053879049d0",
+      "trapped_coordinate_free_neighbors": 2,
+      "usable_non_factory_cell_count": 88,
+      "weighted_cnot_distance": 287724,
+      "weighted_cnot_distance_delta_vs_baseline": 62552,
       "weighted_nearest_factory_distance": 35,
       "weighted_nearest_factory_distance_delta_vs_baseline": 0,
       "weighted_nearest_factory_distance_mean": 3.1818181818181817
@@ -1559,6 +1928,209 @@
       "usable_non_factory_cell_count": 88,
       "weighted_cnot_distance": 587532,
       "weighted_cnot_distance_delta_vs_baseline": 19128,
+      "weighted_nearest_factory_distance": 43,
+      "weighted_nearest_factory_distance_delta_vs_baseline": 0,
+      "weighted_nearest_factory_distance_mean": 3.3076923076923075
+    },
+    "h6_moderate_choke": {
+      "banned_cell_count": 8,
+      "banned_cells": [
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          3,
+          3
+        ],
+        [
+          3,
+          6
+        ],
+        [
+          3,
+          9
+        ],
+        [
+          8,
+          0
+        ],
+        [
+          9,
+          0
+        ]
+      ],
+      "factory_coordinate_set": [
+        [
+          4,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          4
+        ],
+        [
+          5,
+          5
+        ]
+      ],
+      "initial_free_neighbors_by_factory_coordinate": {
+        "4,4": 2,
+        "4,5": 2,
+        "5,4": 2,
+        "5,5": 2
+      },
+      "initial_free_neighbors_by_factory_symbol": {
+        "0": 2,
+        "1": 2,
+        "2": 2,
+        "3": 2
+      },
+      "logical_mapping": [
+        {
+          "coord": [
+            2,
+            4
+          ],
+          "logical_qubit": 0
+        },
+        {
+          "coord": [
+            2,
+            2
+          ],
+          "logical_qubit": 1
+        },
+        {
+          "coord": [
+            4,
+            2
+          ],
+          "logical_qubit": 2
+        },
+        {
+          "coord": [
+            6,
+            2
+          ],
+          "logical_qubit": 3
+        },
+        {
+          "coord": [
+            7,
+            4
+          ],
+          "logical_qubit": 4
+        },
+        {
+          "coord": [
+            8,
+            2
+          ],
+          "logical_qubit": 5
+        },
+        {
+          "coord": [
+            4,
+            7
+          ],
+          "logical_qubit": 6
+        },
+        {
+          "coord": [
+            2,
+            8
+          ],
+          "logical_qubit": 7
+        },
+        {
+          "coord": [
+            0,
+            4
+          ],
+          "logical_qubit": 8
+        },
+        {
+          "coord": [
+            4,
+            0
+          ],
+          "logical_qubit": 9
+        },
+        {
+          "coord": [
+            6,
+            7
+          ],
+          "logical_qubit": 10
+        },
+        {
+          "coord": [
+            8,
+            6
+          ],
+          "logical_qubit": 11
+        },
+        {
+          "coord": [
+            2,
+            6
+          ],
+          "logical_qubit": 12
+        }
+      ],
+      "magic_factories": [
+        {
+          "coord": [
+            4,
+            4
+          ],
+          "symbol": 0
+        },
+        {
+          "coord": [
+            4,
+            5
+          ],
+          "symbol": 1
+        },
+        {
+          "coord": [
+            5,
+            4
+          ],
+          "symbol": 2
+        },
+        {
+          "coord": [
+            5,
+            5
+          ],
+          "symbol": 3
+        }
+      ],
+      "minimum_initial_free_neighbors": 2,
+      "molecule": "H6",
+      "obstacle_aware_cnot_max_distance": 14,
+      "routing_condition": "moderate_choke",
+      "topology_path": "configs/topologies/routing_capacity_h4_h7_4th/h6_moderate_choke.yaml",
+      "topology_sha256": "8f09b2b60a5b49779483e67263dd63e6dc53c1908c9c01b2c495ae93fe162a8e",
+      "trapped_coordinate_free_neighbors": 2,
+      "usable_non_factory_cell_count": 88,
+      "weighted_cnot_distance": 709836,
+      "weighted_cnot_distance_delta_vs_baseline": 141432,
       "weighted_nearest_factory_distance": 43,
       "weighted_nearest_factory_distance_delta_vs_baseline": 0,
       "weighted_nearest_factory_distance_mean": 3.3076923076923075
@@ -2196,6 +2768,223 @@
       "usable_non_factory_cell_count": 88,
       "weighted_cnot_distance": 1316264,
       "weighted_cnot_distance_delta_vs_baseline": 61680,
+      "weighted_nearest_factory_distance": 51,
+      "weighted_nearest_factory_distance_delta_vs_baseline": 0,
+      "weighted_nearest_factory_distance_mean": 3.4
+    },
+    "h7_moderate_choke": {
+      "banned_cell_count": 8,
+      "banned_cells": [
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          3,
+          3
+        ],
+        [
+          3,
+          6
+        ],
+        [
+          3,
+          9
+        ],
+        [
+          8,
+          0
+        ],
+        [
+          9,
+          0
+        ]
+      ],
+      "factory_coordinate_set": [
+        [
+          4,
+          4
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          4
+        ],
+        [
+          5,
+          5
+        ]
+      ],
+      "initial_free_neighbors_by_factory_coordinate": {
+        "4,4": 2,
+        "4,5": 2,
+        "5,4": 2,
+        "5,5": 2
+      },
+      "initial_free_neighbors_by_factory_symbol": {
+        "0": 2,
+        "1": 2,
+        "2": 2,
+        "3": 2
+      },
+      "logical_mapping": [
+        {
+          "coord": [
+            2,
+            4
+          ],
+          "logical_qubit": 0
+        },
+        {
+          "coord": [
+            4,
+            7
+          ],
+          "logical_qubit": 1
+        },
+        {
+          "coord": [
+            4,
+            2
+          ],
+          "logical_qubit": 2
+        },
+        {
+          "coord": [
+            2,
+            2
+          ],
+          "logical_qubit": 3
+        },
+        {
+          "coord": [
+            2,
+            8
+          ],
+          "logical_qubit": 4
+        },
+        {
+          "coord": [
+            0,
+            4
+          ],
+          "logical_qubit": 5
+        },
+        {
+          "coord": [
+            4,
+            0
+          ],
+          "logical_qubit": 6
+        },
+        {
+          "coord": [
+            8,
+            6
+          ],
+          "logical_qubit": 7
+        },
+        {
+          "coord": [
+            7,
+            4
+          ],
+          "logical_qubit": 8
+        },
+        {
+          "coord": [
+            6,
+            7
+          ],
+          "logical_qubit": 9
+        },
+        {
+          "coord": [
+            6,
+            2
+          ],
+          "logical_qubit": 10
+        },
+        {
+          "coord": [
+            4,
+            9
+          ],
+          "logical_qubit": 11
+        },
+        {
+          "coord": [
+            8,
+            2
+          ],
+          "logical_qubit": 12
+        },
+        {
+          "coord": [
+            9,
+            4
+          ],
+          "logical_qubit": 13
+        },
+        {
+          "coord": [
+            2,
+            6
+          ],
+          "logical_qubit": 14
+        }
+      ],
+      "magic_factories": [
+        {
+          "coord": [
+            4,
+            4
+          ],
+          "symbol": 0
+        },
+        {
+          "coord": [
+            4,
+            5
+          ],
+          "symbol": 1
+        },
+        {
+          "coord": [
+            5,
+            4
+          ],
+          "symbol": 2
+        },
+        {
+          "coord": [
+            5,
+            5
+          ],
+          "symbol": 3
+        }
+      ],
+      "minimum_initial_free_neighbors": 2,
+      "molecule": "H7",
+      "obstacle_aware_cnot_max_distance": 15,
+      "routing_condition": "moderate_choke",
+      "topology_path": "configs/topologies/routing_capacity_h4_h7_4th/h7_moderate_choke.yaml",
+      "topology_sha256": "579efe826b1a85502dfcdc91716f3aa771f65bb54c4edcac93795dd0450ffe78",
+      "trapped_coordinate_free_neighbors": 2,
+      "usable_non_factory_cell_count": 88,
+      "weighted_cnot_distance": 1531184,
+      "weighted_cnot_distance_delta_vs_baseline": 276600,
       "weighted_nearest_factory_distance": 51,
       "weighted_nearest_factory_distance_delta_vs_baseline": 0,
       "weighted_nearest_factory_distance_mean": 3.4

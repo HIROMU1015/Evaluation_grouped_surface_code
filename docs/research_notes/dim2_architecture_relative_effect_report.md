@@ -40,6 +40,11 @@ one-stepと線形外挿totalの相対比は同じである。
 混ぜない。結果は[paired-precision DistributedDim2 summary](../../artifacts/surface_code_distributed_dim2_sweep_h4_h7_4th_paired/summary.md)
 に分離してある。
 
+加えて、current qretのfixed path latencyを変更したdistance-sensitive diagnosticを別枠で扱う。この
+diagnosticは「経路長がoperation latencyへ入る場合にgeometry感度がどう変わるか」を調べる感度分析で
+あり、標準Dim2の実測結果やcalibrated hardware predictionとは混ぜない。変更は保存patchから一時build
+したqretだけへ適用し、vendored quration sourceは検証後に復元している。
+
 ## 3. 相対値の定義
 
 各metric `M`の相対変化を次で定義する。
@@ -94,6 +99,19 @@ feed-forward・accessibilityの閾値条件**だった。
 runtimeが大幅に変わる、という証拠は得られていない**。大きな差は、供給能力を下回る、feedback
 latencyを増やす、またはfactory出口を完全に失う場合に現れた。
 
+ただし、この結論はcurrent fixed-latency machine modelに限定される。route長をlatencyへ入れて再routing・
+reschedulingしたdiagnosticでは、H4-H6の同一固定回路に対して次のstress penaltyが得られた。
+
+| diagnostic介入 | quarter係数 | unit係数 |
+| --- | ---: | ---: |
+| compactからperimeter placement | +11.394%から+19.659% | +38.274%から+80.748% |
+| remote banからcentral choke | +1.397%から+7.982% | +7.460%から+27.796% |
+
+reference、intermediate、stressのruntime順序はnonfixed 28 groupすべてで単調だった。従って、通常
+geometryがruntimeに本質的に無関係なのではなく、**current fixed-latency仮定がdistance sensitivityを
+隠している**と解釈する。ただしquarter/unitはhardware校正値ではないため、この表は定性的な感度と
+相対的な強弱を示すdiagnostic resultである。
+
 ### 4.2 qubit volume
 
 QVはruntimeよりgeometryへ敏感だった。代表的な相対変化をまとめる。
@@ -114,6 +132,11 @@ QVはruntimeよりgeometryへ敏感だった。代表的な相対変化をまと
 特にlogical placementとrouting chokeでは、runtime変化が0.1%以下でもQVが数%変化した。これは
 architectureがcritical-path長よりも、routing path、ancilla利用、cell-time occupancy、平均active
 areaへ作用したことを示す。
+
+distance-sensitive diagnosticではQV差も拡大した。quarter係数のstress QV penaltyはplacementで
++26.795%から+44.172%、routingで+5.591%から+22.967%だった。unit係数ではplacementが+63.509%から
++131.631%、routingが+17.672%から+61.400%だった。code distanceが変わる一部caseでは、これらにQEC
+threshold crossingも含まれるため、主結論はfixed-circuit beat runtimeから導く。
 
 ## 5. Geometryとmapping
 
@@ -399,6 +422,21 @@ period=15から1への高速化は全分子で0.5%未満だが、15から30へ�
 period値はqret beat単位の生成周期であり、特定hardwareの物理時間を直接表すものではない。period=100
 はsensitivity境界を調べるdiagnosticであり、現実的factory速度の主張ではない。
 
+#### Factory countとgeneration periodの相互作用
+
+factory countを4から3へ減らす効果をperiod=15と30で比較した。各molecule/precision内ではoptimized IRを
+固定しており、countとperiodだけを変更している。
+
+| precision | 3-factory penalty at period 15 | at period 30 | interaction |
+| --- | ---: | ---: | ---: |
+| `1e-5` | +11.124%から+13.382% | 約+33.333% | +19.951から+22.210 pp |
+| `1e-2` | +0.318%から+1.125% | +0.715%から+2.193% | +0.398から+1.068 pp |
+
+conventional workloadでは、factory数不足と供給低速化が同時に入るとworst beat-runtime penaltyが
++122.247%から+126.763%まで増えた。cheap-RZでは同じ組合せでも+1.763%から+5.664%だった。従って
+factory countの感度は独立した定数ではなく、generation periodとmagic demandの組合せで決まる。
+cheap-RZの4-factory/period-15はdata-side architecture探索用baselineとして十分な供給側にある。
+
 ## 7. Classical reaction time
 
 reaction=1を基準に10、100へ増やした。回路、mapping、factory、magic supply、QEC入力は各
@@ -452,7 +490,9 @@ precision間のruntime/QV差は、このレポートのarchitectureランキン�
 architecture比較は、各precision内でQASM hash、optimized IR hash、gate/magic/feedback demandが一致
 することを確認して行う。
 
-## 9. なぜ通常のdistance変更でruntimeが変わりにくいか
+## 9. Distanceとruntime model
+
+### 9.1 Current fixed-latency Dim2
 
 qretのcurrent `sc_ls_fixed_v0`では、主なroute付き命令のbeat latencyがpath lengthに比例しない。
 
@@ -473,9 +513,51 @@ QVへ現れやすく、runtimeへは現れにくい。runtimeが大きく変わ�
 3. path length自体にlatencyを持つ別machine modelを使う。
 4. plane間entanglementのような明示的通信供給を導入する。
 
-また、このレポートの`runtime`はqretのbeat countである。物理時間は概念的に
-`runtime * code_distance * cycle_time`で換算されるため、code distanceが変わるcaseではbeat runtimeが
-同じでも物理時間比は同じにならない。physical-time比較を行う場合は別表で扱う必要がある。
+### 9.2 Distance-sensitive full-runtime diagnostic
+
+path lengthをrouting、resource occupancy、dependency release、runtime、QVへ一貫して反映する診断patchを
+一時buildへ適用した。追加latencyは次で定義した。
+
+```text
+base + ceil(numerator * max(path_coordinates - 1, 0) / denominator)
+```
+
+係数はfixed=`0/1`、quarter=`1/4`、half=`1/2`、unit=`1/1`である。まずH4/H7のunit係数でfull
+rerouting runtimeを確認し、その後H4-H6、両precision、placement/routing family、3段階geometryへ
+fractional係数を展開した。120 caseは全件成功し、QASM/optimized IR/gate/magic demandを各固定回路
+group内で一致させた。
+
+| family | quarter stress runtime | unit stress runtime | quarter stress QV | unit stress QV |
+| --- | ---: | ---: | ---: | ---: |
+| placement | +11.394%から+19.659% | +38.274%から+80.748% | +26.795%から+44.172% | +63.509%から+131.631% |
+| routing | +1.397%から+7.982% | +7.460%から+27.796% | +5.591%から+22.967% | +17.672%から+61.400% |
+
+nonfixed 28 groupすべてでreference、intermediate、stressのbeat runtimeとphysical runtimeが単調に
+増加し、geometry側の静的metricも40/40 groupで単調だった。H4ではfixed、quarter、half、unitの係数
+増加に対して全topologyのruntimeが単調に増えた。従って、distance感度はunit係数または単一分子だけの
+現象ではない。
+
+selected magic factory endpointがbusyなら待機する保守的制約もH4の18 caseで追加確認した。同一topology
+runtime増加は最大+0.0508%、placement stress penaltyの変化は-0.0076から+0.0581 ppだった。この制約は
+distance-sensitive placement差の主要因ではない。
+
+### 9.3 Physical runtimeと校正範囲
+
+このレポートのprimary runtimeはqretのbeat countである。current profile設定ではphysical runtimeを
+次で換算する。
+
+```text
+physical_runtime = runtime_beats * code_distance * code_cycle_time
+```
+
+既存設定の`code_cycle_time=1 us`を使うと、1 beatはcode distance `d` code cycle、すなわち`d us`に
+対応する。同一比較でcode distanceが固定ならphysical-runtime相対比はbeat-runtime相対比と一致する。
+一方、QEC threshold crossingがあるcaseでは差が増幅する。例えばH6 `1e-5` placement quarterはbeat
+runtimeが+15.239%だが、`d=15 -> 17`によりphysical runtimeは+30.604%となった。
+
+この換算はrepository内modelの内部整合性を示すもので、1セル移動の追加latencyやfactory protocol速度を
+実機から校正した結果ではない。quarter/half/unit係数からhardware上の絶対runtimeを主張してはならない。
+定量的な実機予測には、1 path coordinateが何code cycleに相当するかを独立に定義する必要がある。
 
 ## 10. QV解釈上の注意
 
@@ -504,6 +586,7 @@ QVを概念的に`runtime * spatial resource`とみなす場合も、比は乗�
 | factory placement | H4 `1e-5`のみ不一致 | H4 conventionalはQEC効果が混在 |
 | factory count 1-4 | 一部で変化 | supply効果とQEC効果を分離できないcaseあり |
 | reaction time | 一部で変化 | feedback waitとQEC効果が混在 |
+| fractional path latency | 一部で変化 | beat runtimeを主指標とし、physical runtime/QVではQEC変化を併記 |
 
 runtime-primaryな結論にはbeat runtimeを使い、QVを原因分解する際はcode distance固定比較を優先する。
 
@@ -511,49 +594,53 @@ runtime-primaryな結論にはbeat runtimeを使い、QVを原因分解する際
 
 ### 観測から直接支持されること
 
-1. single-plane Dim2の通常connected geometryでは、factory/logical placement、grid shape、routing
-   distanceを変えてもruntime差は概ね0.1%以下である。
-2. 同じgeometry変更でもQVは数%から約13%変わり得る。
-3. accessible factory数を供給kneeより減らすとruntimeは10%から240%超増える。
-4. 4 factoryを超える追加はH4-H6 runtimeを0.5%以上改善しない。
-5. factory egressは0本と1本の間に約10%から12%のruntime thresholdを持つ。
-6. stock=10000、period=15、4 factoryは、通常baselineとしてfast/sufficient側にある。
-7. reaction timeはtested single-plane条件で最も強いruntime感度を示す。
+1. current fixed-latency single-plane Dim2の通常connected geometryでは、factory/logical placement、
+   grid shape、routing distanceを変えてもruntime差は概ね0.1%以下である。
+2. 同じfixed-latency geometry変更でもQVは数%から約13%変わり得る。
+3. distance-sensitive diagnosticではquarter係数でもplacement stressが+11.394%から+19.659%、routing
+   stressが+1.397%から+7.982%となり、geometry段階に対する単調性が再現した。
+4. accessible factory数を供給kneeより減らすとruntimeは10%から240%超増える。
+5. 4 factoryを超える追加はH4-H6 runtimeを0.5%以上改善しない。
+6. factory egressは0本と1本の間に約10%から12%のruntime thresholdを持つ。
+7. stock=10000、period=15、4 factoryは、通常baselineとしてfast/sufficient側にある。
+8. reaction timeはtested standard single-plane条件で最も強いruntime感度を示す。
 
 ### 観測に基づく推定
 
-1. placement/path差はcritical pathよりoccupied cell-timeへ作用するため、runtimeよりQVへ強く現れる。
+1. fixed-latency modelではplacement/path差がcritical pathよりoccupied cell-timeへ作用するため、runtime
+   よりQVへ強く現れる。
 2. conventional workloadのfactory placement差はmagic delivery geometryの寄与が大きい。
-3. current Dim2のfixed instruction latencyが、distanceのruntime感度を弱くしている。
+3. fixed instruction latencyがdistanceのruntime感度を弱くしているという説明は、full-runtime
+   diagnosticの再現性によって支持される。
 4. 4 factory以降のQV改善はnearest-source distanceとdelivery occupancy短縮に由来する可能性が高い。
 
 ### 未解決または未実装
 
-1. path lengthに応じてoperation latencyが増えるsingle-plane model。
+1. 1 path coordinate当たりの追加latencyを物理的に校正したsingle-plane model。
 2. realistic reaction time、cycle time、factory periodのhardware calibration。
 3. individual routing waitをdependency critical pathへ帰属するtrace。
 4. QVをdata、ancilla、magic delivery、factory occupancyへ分解する集計。
 5. arbitrary-rotation resource stateを含むSTAR固有model。
 
-## 12. 次の検証方針
+## 12. 検証終了条件と残課題
 
-runtimeを主指標とするなら、single-plane Dim2で通常配置の組合せをさらに増やす優先度は低い。次の
-順序が妥当である。
+主目的である「同一の合成済み回路を固定し、architecture条件だけでruntimeが大きく変わる条件があるか」
+については、current qret modelとdistance-sensitive diagnosticの双方で必要な検証を完了した。通常配置、
+供給、reaction、factory accessibility、grid threshold、routing capacity、距離依存latencyを相互に区別でき、
+H4-H6と両precisionでfractional係数の再現性も確認した。この目的のために通常Dim2の配置組合せ、H7の
+fractional case、factory/magic条件をさらに総当たりする必要はない。
 
-1. **reaction timeの現実的範囲を定義する。** 1/10/100のdiagnostic結果を、想定controller latencyと
-   code cycleへ対応付ける。
-2. **factory supplyの現実的範囲を定義する。** period=15近傍とfactory count=3/4のkneeを重点化し、
-   極端なslow conditionを主結果と混同しない。
-3. **topology preflightへegress invariantを入れる。** 各accessible factoryに最低1本のfree egressを
-   要求し、zero-egress pathologyを通常grid効果と誤認しない。
-4. **distance-sensitive latency modelを検討する。** current fixed-latency Dim2のままでは、距離を変える
-   sweepだけでlarge runtime effectを得る可能性は低い。
-5. **QV最適化を別目的として扱う。** runtimeが同じなら、interaction-aware placement、choke回避、
-   factory geometryをQV指標で評価する。
+今後の作業は次の3種類に分ける。
 
-magic生成の成功確率を恣意的に下げる検証は、失敗回数の増加によってruntimeが伸びることが構造上
-予想される。hardware由来の成功確率を評価する目的がない限り、新しいarchitecture mechanismを探す
-優先実験にはしない。
+1. **物理的な増加率を主張する場合のみ必須:** 1 path coordinate、reaction、factory periodをcode cycleへ
+   対応付ける根拠を定義し、その校正値で最小限の代表caseを再評価する。
+2. **因果説明を強める場合の任意補強:** instruction種類別path length、routing wait、congestion、critical
+   path contributionを代表caseでtraceする。これは主結論の成立条件ではない。
+3. **実装上の保護:** topology preflightでaccessible factoryに最低1本のfree egressを要求し、zero-egress
+   pathologyを通常grid効果と誤認しないようにする。
+
+QV最適化はruntime探索とは別目的として扱う。magic生成成功確率を恣意的に下げる検証や、未校正係数を
+さらに細分化するsweepは、hardware根拠がない限り追加architecture mechanismを示さないため実施しない。
 
 ## 13. 参照artifact
 
@@ -572,5 +659,11 @@ magic生成の成功確率を恣意的に下げる検証は、失敗回数の増
 - [Factory saturation above four](../../artifacts/surface_code_factory_saturation_sweep_h4_h6_4th_paired/summary.md)
 - [Magic stock](../../artifacts/surface_code_magic_stock_sweep_h4_h6_4th_paired/summary.md)
 - [Magic period, cheap-RZ](../../artifacts/surface_code_magic_period_sweep_h4_h7_4th_cheap_rz/summary.md)
+- [Factory count x magic period](../../artifacts/surface_code_factory_period_interaction_sweep_h4_h7_4th_paired/summary.md)
 - [Reaction time](../../artifacts/surface_code_reaction_time_sweep_h4_h7_4th_paired/summary.md)
+- [Physical-runtime reanalysis](../../artifacts/surface_code_dim2_physical_runtime_reanalysis/summary.md)
+- [Distance-sensitive critical-path proxy](../../artifacts/surface_code_distance_sensitive_latency_sweep_h4_h7_4th_paired/summary.md)
+- [Distance-sensitive full runtime](../../artifacts/surface_code_distance_sensitive_runtime_sweep_h4_h7_4th_paired/summary.md)
+- [Fractional path-latency sensitivity](../../artifacts/surface_code_fractional_path_latency_sweep_h4_h6_4th_paired/summary.md)
+- [Factory endpoint busy probe](../../artifacts/surface_code_magic_factory_busy_probe_h4_4th_paired/summary.md)
 - [Chronological architecture research log](architecture_research_log.md)

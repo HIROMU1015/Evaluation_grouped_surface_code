@@ -38,4 +38,8 @@ def test_routing_variants_preserve_budget_connectivity_and_factory_egress():
             assert len(egress._bans(plane)) == 8
             assert min(egress._free_neighbors(plane)[0].values()) == 2
 
-        assert objectives["central_choke"] > objectives["remote_ban_control"]
+        assert (
+            objectives["remote_ban_control"]
+            < objectives["moderate_choke"]
+            < objectives["central_choke"]
+        )

@@ -54,6 +54,18 @@ BAN_VARIANTS = {
         (6, 8),
         (8, 7),
     },
+    # Four barrier cells create multiple left-to-right corridors. The four
+    # remote cells keep the eight-cell obstacle budget fixed.
+    "moderate_choke": {
+        (0, 0),
+        (1, 0),
+        (8, 0),
+        (9, 0),
+        (3, 0),
+        (3, 3),
+        (3, 6),
+        (3, 9),
+    },
     # The openings at (3,4)/(3,5) preserve factory egress. The only
     # left-to-right routing corridor is (3,1), because the factory block
     # occupies the cells immediately to the right of the other openings.
